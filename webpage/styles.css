@@ -1,0 +1,185 @@
+/* Top Bar */
+.top-bar {
+    display: flex;
+    gap: 8px;
+    padding: 10px;
+    background-color: #2c3e50;
+}
+
+.top-btn {
+    padding: 6px 12px;
+    background-color: #3498db;
+    color: white;
+    border: none;
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+.top-btn:hover {
+    background-color: #2980b9;
+}
+
+/* Bottom Bar */
+.bottom-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    background-color: #ecf0f1;
+    border-top: 1px solid #bdc3c7;
+}
+
+/* Overview Panel */
+.overview-panel {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+}
+
+.overview-info {
+    font-weight: bold;
+}
+
+.page-btn {
+    padding: 4px 8px;
+    border: 1px solid #7f8c8d;
+    background-color: #bdc3c7;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.page-btn:disabled {
+    background-color: #ecf0f1;
+    cursor: not-allowed;
+}
+
+/* Offset Input Panel */
+.offset-input-panel {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+}
+
+.offset-label {
+    font-weight: bold;
+}
+
+.offset-input {
+    width: 60px;
+    padding: 2px 4px;
+}
+
+.offset-submit-btn {
+    padding: 4px 8px;
+    border: 1px solid #7f8c8d;
+    background-color: #2ecc71;
+    color: white;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+/* Rows Panel */
+.rows-panel {
+    margin: 10px 0;
+}
+
+.token-row {
+    padding: 6px 10px;
+    border-bottom: 1px solid #bdc3c7;
+    cursor: pointer;
+}
+
+.token-row:hover {
+    background-color: #f1f1f1;
+}
+
+/* Popups */
+.popup-overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background-color: rgba(0,0,0,0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.popup-window {
+    background-color: white;
+    border-radius: 6px;
+    padding: 10px;
+    min-width: 400px;
+    max-width: 600px;
+}
+
+.popup-topbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 10px;
+}
+
+.popup-close-btn {
+    background-color: #e74c3c;
+    color: white;
+    border: none;
+    padding: 4px 8px;
+    cursor: pointer;
+    border-radius: 3px;
+}
+
+.popup-content {
+    padding: 5px;
+}
+
+/* Panels and Inputs */
+.grouping-panel,
+.order-panel,
+.filter-panel,
+.attributes-panel {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    margin-top: 5px;
+    flex-wrap: wrap;
+}
+
+.grouping-input,
+.order-input,
+.filter-input,
+.attributes-input {
+    flex: 1;
+    padding: 4px 6px;
+    border: 1px solid #7f8c8d;
+    border-radius: 3px;
+}
+
+.grouping-apply-btn,
+.order-apply-btn,
+.filter-apply-btn,
+.attributes-apply-btn,
+.ascending-btn,
+.descending-btn {
+    padding: 4px 8px;
+    border: none;
+    border-radius: 3px;
+    background-color: #3498db;
+    color: white;
+    cursor: pointer;
+}
+
+.grouping-apply-btn:disabled,
+.order-apply-btn:disabled,
+.filter-apply-btn:disabled,
+.attributes-apply-btn:disabled {
+    background-color: #bdc3c7;
+    cursor: not-allowed;
+}
+
+.grouping-apply-btn:hover:not(:disabled),
+.order-apply-btn:hover:not(:disabled),
+.filter-apply-btn:hover:not(:disabled),
+.attributes-apply-btn:hover:not(:disabled),
+.ascending-btn:hover,
+.descending-btn:hover {
+    background-color: #2980b9;
+}
