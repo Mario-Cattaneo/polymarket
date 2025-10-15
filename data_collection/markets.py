@@ -2,13 +2,15 @@ import asyncio
 import aiohttp
 import asyncpg
 import json
+import inspect
 import time
 from log import log
+from typing import Callable
 
 class state:
     https_cli : aiohttp.ClientSession = None
     pg_conn_pool : asyncpg.Pool  = None
-    register_event_tokens : asyncio.Queue = None
+    register_events_tokens: Callable[[list[str]], None]
     rate_limit_ns : int = 100 * 1_000_000
     last_request : int = -100 * 1_000_000
     batch_buff : list = []
@@ -28,12 +30,12 @@ async def create_market_table(reset : bool = True):
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS markets (
                 row_index SERIAL PRIMARY KEY,
-                insert_time TIMESTAMP(3) WITH TIME ZONE DEFAULT now(),
-                asset_id TEXT,
-                market_id TEXT,
-                condition_id TEXT,
-                negrisk_id TEXT,
-                market jsonb
+                insert_time BIGINT DEFAULT (extract(epoch FROM now()) * 1000)::BIGINT  NOT NULL, -- ms since unix epoch
+                asset_id TEXT, --UTF-8, NULL if not found in server response
+                market_id TEXT, -- UTF-8, NULL if not found in server response
+                condition_id TEXT, -- UTF-8, NULL if not found in server response
+                negrisk_id TEXT, -- UTF-8, NULL if not found in server response (this is normal behavior)
+                market jsonb  NOT NULL -- json object
             );
         """)
         log("markets.create_market_table created table if not exists", "INFO")
@@ -49,7 +51,7 @@ async def create_market_table(reset : bool = True):
 async def init(
 https_cli: aiohttp.ClientSession = None, 
 pg_conn_pool: asyncpg.Pool = None, 
-register_tokens:asyncio.Queue = None,
+register_events_tokens : Callable[[list[str]], None] = None, # must also coro
 reset: bool = True):
     log(f"markets.init started", "INFO")
     if reset:
@@ -59,24 +61,27 @@ reset: bool = True):
         state.rate_limit_ns = 100 * 1_000_000
         state.last_request = -100 * 1_000_000
     if not isinstance(https_cli, aiohttp.ClientSession):
-        log(f"markets.init received non aiohttp.ClientSession https_cli '{https_cli}'")
+        log(f"markets.init received non aiohttp.ClientSession https_cli '{https_cli}'", "ERROR")
         raise ValueError(f"invalid https_cli argument for markets.init")
     state.https_cli = https_cli
     if not isinstance(pg_conn_pool, asyncpg.Pool):
-        log(f"markets.init received non asyncpg.Pool pg_conn_pool '{pg_conn_pool}'")
+        log(f"markets.init received non asyncpg.Pool pg_conn_pool '{pg_conn_pool}'", "ERROR")
         raise ValueError(f"invalid pg_conn_pool argument for markets.init")
     state.pg_conn_pool = pg_conn_pool
-    if not isinstance(register_tokens, asyncio.Queue):
-        log(f"markets.init received non asyncio.Queue register_tokens '{register_tokens}'")
-        raise ValueError("invalid register_tokens argument for markets.init")
-    state.register_event_tokens = register_tokens
-    log(f"markets.init waiting for event.create_analytics_table", "INFO")
+    if not inspect.iscoroutinefunction(register_events_tokens):
+        log(f"markets.init received non coroutine register_events_tokens '{register_events_tokens}'", "ERROR")
+        raise ValueError(f"invalid register_events_tokens argument for markets.init")
+    if len(inspect.signature(register_events_tokens).parameters) != 1:
+        log(f"markets.init received  register_events_tokens that does not take exactly one argument'{register_events_tokens}'", "ERROR")
+        raise ValueError("invalid register_events_tokens argument for markets.init")
+    state.register_events_tokens = register_events_tokens
+    log(f"markets.init waiting for create_market_table", "INFO")
     try:
         await create_market_table(reset=reset)
     except Exception as e:
         log(f"markets.init failed from create_market_table with exception '{e}'", "ERROR")
         raise
-        log(f"markets.init finished successfully", "INFO")
+    log(f"markets.init finished successfully", "INFO")
 
 
 async def collector():
@@ -156,12 +161,12 @@ async def collector():
         if new_markets_count < 500 and len(state.batch_buff) > 0:
             try:
                 await insert_batch(state.batch_buff)
-                log(f"markets.init inserted batch of {len(state.batch_buff)} rows into markets table", "INFO")
+                log(f"markets.init inserted batch of {len(state.batch_buff)} new market rows into markets table", "INFO")
                 state.batch_buff.clear()
             except Exception as e:
                 log(f"markets.collector failed to insert_batch with exception '{e}'", "ERROR")
                 raise
-            await state.register_event_tokens.put(state.new_tokens)
+            await state.register_events_tokens(state.new_tokens)
             state.new_tokens = []
 
         state.offset += new_markets_count

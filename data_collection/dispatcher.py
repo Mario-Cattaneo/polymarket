@@ -75,7 +75,7 @@ async def start_data_collection():
                 user=db_user,
                 password=db_user_pw,
                 database="polymarket",
-                host=socket_path,
+                host=socket_dir,
                 port=5432,
                 min_size=1,
                 max_size=10,
@@ -85,7 +85,7 @@ async def start_data_collection():
 
             # Replace these with your actual tasks
             tasks = [
-                dispatch_task("markets", 15, markets.collector, markets.init, https_session, db_conn_pool, events.state.new_event_tokens),
+                dispatch_task("markets", 15, markets.collector, markets.init, https_session, db_conn_pool, events.register_tokens),
                 dispatch_task("events", 5, events.subscriber, events.init, analytics.register_tokens, db_conn_pool),
                 dispatch_task("analytics", 15, analytics.pipeline, analytics.init, https_session, db_conn_pool),
             ]

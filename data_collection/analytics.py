@@ -4,6 +4,7 @@ import aiohttp
 import orjson
 import time
 import numpy as np
+from typing import List, Tuple, Dict, Any, Optional
 from log import log
 
 class analytics:
@@ -59,27 +60,33 @@ async def create_analytics_table(reset : bool = True):
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS analytics (
                 row_index SERIAL PRIMARY KEY,
-                insert_time TIMESTAMP(3) WITH TIME ZONE DEFAULT now(),
-                asset_id TEXT,                
-                server_time BIGINT,
-                resub_count BIGINT,
-                ws_books_count BIGINT,
-                ws_books jsonb,
-                ws_ambiguous_start_count BIGINT,
-                ws_ambiguous_end_count BIGINT,
-                ws_changes jsonb,
-                bid_depth_diff INTEGER,
-                ask_depth_diff INTEGER,
-                bids_distance REAL,
-                asks_distance REAL,
-                ws_tick_changes_count BIGINT,
-                ws_tick_changes jsonb,
-                tick_size_distance REAL,
-                local_bids jsonb,
-                local_asks jsonb,
-                server_bids jsonb,
-                server_asks jsonb,
-                server_response jsonb
+                insert_time BIGINT DEFAULT (extract(epoch FROM now()) * 1000)::BIGINT NOT NULL, -- ms since unix epoch
+                asset_id TEXT NOT NULL, -- UTF-8          
+                server_time BIGINT NOT NULL, -- ms since unix epoch,
+                ws_books_count BIGINT NOT NULL,
+                ws_books jsonb NOT NULL, -- json array of json objects
+                ws_book_resub_count BIGINT, -- only NULL if ws_books is empty
+                ws_book_time BIGINT, -- only NULL if not ws_books is empty
+                ws_ambiguous_start_count BIGINT, -- only NULL if ws_books is empty
+                ws_ambiguous_end_count BIGINT, -- only NULL if ws_books is empty
+                ws_changes_count BIGINT, -- only NULL if ws_books is empty,
+                ws_changes jsonb, -- only NULL if ws_books is empty otherwise json array of json objects
+                bid_depth_diff BIGINT, -- only NULL if local_bids is NULL or server_bids is NULL
+                ask_depth_diff BIGINT, -- only NULL if local_asks is NULL or server_asks is NULL
+                bids_distance REAL, -- only NULL if local_bids is NULL or server_bids is NULL
+                asks_distance REAL, -- only NULL if local_asks is NULL or server_asks is NULL
+                local_bids jsonb, -- only NULL if no bids are found in ws_books, otherwise sorted json array
+                local_asks jsonb, -- only NULL if no asks are found in ws_books, otherwise sorted json array
+                server_bids jsonb, -- only NULL if not found in server response, othwerwise sorted json array
+                server_asks jsonb, -- only NULL if not found in server response, othwerwise sorted json array
+                ws_tick_changes_count BIGINT NOT NULL,
+                ws_tick_changes jsonb NOT NULL, -- json array of json objects
+                ws_tick_change_resub_count BIGINT, -- only NULL if ws_tick_changes is empty
+                ws_tick_change_time BIGINT, -- only NULL if ws_tick_changes is empty
+                local_tick_size REAL, -- NULL if not found in ws_tick_changes
+                server_tick_size REAL, -- NULL if not found in server_response
+                tick_size_distance REAL, -- NULL if local or server tick_size are NULL
+                server_response jsonb NOT NULL
             );
         """)
         log("analytics.create_analytics_table created table if not exists", "INFO")
@@ -109,11 +116,17 @@ async def init(https_cli : aiohttp.ClientSession = None, pg_conn_pool : asyncpg.
     log(f"analytics.init finished", "INFO")
 
 def records_to_maps(records: list[asyncpg.Record]) -> list[dict]:
+    """
+    recrods must be list and consist of asyncpg.Record entries
+    """
     for i in range(len(records)):
         records[i] = dict(records[i])
     return records
 
 def parse_decimal_string(decimal_str: str) -> int:
+    """
+    decimal_str can not be None and must be str
+    """
     try: 
         if "." not in decimal_str:
             return int(decimal_str) * 1_000_000
@@ -128,76 +141,95 @@ def parse_decimal_string(decimal_str: str) -> int:
         raise
 
 def parse_decimal_side(side: list[dict[str, str]]) -> dict[int, int]:
+    if side is None:
+        return None
     try:
         return {parse_decimal_string(entry["price"]): parse_decimal_string(entry["size"]) for entry in side}
     except Exception as e:
         log(f"analytics.parse_decimal_side failed with side '{side}' exception '{e}'")
         raise
 
-def apply_changes(bids: dict[int, int], asks: dict[int, int], changes: list[dict]):
-    try:
-        for change in changes:
-            size = parse_decimal_string(change["size"])
-            price = parse_decimal_string(change["price"])
-            side = change["side"]
-            if change["event_type"] == "last_trade_price":
-                size = -size
-            if side == "BUY":
-                bids[price] = bids.get(price, 0) + size
-            elif side == "SELL":
-                asks[price] = asks.get(price, 0) + size
-    except Exception as e:
-        log(f"analytics.apply_changes with bids '{bids}',asks '{asks}' and changes '{changes}' failed with exception '{e}'")
-        raise
+def parse_changes(changes : list[asyncpg.Record]) -> Tuple[list[str, int, int], list[str, int, int]]:
+    bid_changes  = []
+    ask_changes = []
+    for record in changes:
+        change_str = record["change"] # change is not None and json object by events.py
+        event_type = record["type"]
+        change = orjson.loads(change_str) 
+        side = change.get("side", None)
+        if not isinstance(side, str):
+            log(f"analytics.parse_changes invalid or missing side in '{change_str}'", "WARNING")
+            continue
+        price = change.get("price", None)
+        if not isinstance(price, str):
+            log(f"analytics.parse_changes invalid or missing price in '{change_str}'", "WARNING")
+            continue
+        size = change.get("size", None)
+        if not isinstance(size, str):
+            log(f"analytics.parse_changes invalid or missing size in '{change_str}'", "WARNING")
+            continue
+        try:
+            price = parse_decimal_string(price)
+            size = parse_decimal_string(size)
+        except Exception as e:
+            log(f"analytics.parse_changes parse decimal failed for '{change_str}'", "WARNING")
+            continue
+        if side == "BUY":
+            bid_changes.append((price, size))
+        elif side == "SELL":
+            ask_changes.append((price, size))
+        else:
+            log(f"analytics.parse_changes found unexpected string '{change_str}'", "WARNING")
 
-def distance(side1: dict[int, int], side2: dict[int, int], side: str) -> (float, list[tuple[int, int]], list[tuple[int, int]]):
-    try:
-        if not side1 or not side2:
-            return None
+    return (bid_changes, ask_changes)
 
-        descending = side == "bids"
+def apply_changes(bids: dict[int, int], asks: dict[int, int], bid_changes: list[int, int], ask_changes: list[int, int]):
+    """
+    bids and asks can be none or dict, bid_changes and ask_changes must be dict
+    """
+    if bids:
+        for (price, size) in bid_changes:
+            bids[price] = size
+    if asks:
+        for (price, size) in ask_changes:
+            asks[price] = size
 
-        sorted_side1_list = sorted(side1.items(), key=lambda x: x[0], reverse=descending)
-        sorted_side2_list = sorted(side2.items(), key=lambda x: x[0], reverse=descending)
+def distance(side1: list[tuple[int, int]], side2: list[tuple[int, int]]) -> float:
+    """
+    both side must be either sorted lists or None
+    """
+    if not (side1 and side2):
+        return None
 
-        s1 = np.array(sorted_side1_list, dtype=np.float64)
-        s2 = np.array(sorted_side2_list, dtype=np.float64)
+    s1 = np.array(side1, dtype=np.float64)
+    s2 = np.array(side2, dtype=np.float64)
 
-        l = min(len(s1), len(s2))
-        s1, s2 = s1[:l], s2[:l]
+    l = min(len(s1), len(s2))
+    s1, s2 = s1[:l], s2[:l]
 
-        weights = 1.0 / (np.arange(l) + 1)
+    weights = 1.0 / (np.arange(l) + 1)
 
-        diff_price = s1[:, 0] - s2[:, 0]
-        diff_size = s1[:, 1] - s2[:, 1]
-        diff = np.sqrt(diff_price**2 + diff_size**2)
+    diff_price = s1[:, 0] - s2[:, 0]
+    diff_size = s1[:, 1] - s2[:, 1]
+    diff = np.sqrt(diff_price**2 + diff_size**2)
 
-        dist = np.sum(np.square(diff) * weights) / np.sum(weights)
-        return (dist, sorted_side1_list, sorted_side2_list)
+    dist = np.sum(np.square(diff) * weights) / np.sum(weights)
+    return dist
 
-    except Exception as e:
-        log(f"analytics.distance failed for side '{side}' with exception '{e}'", "WARNING")
-        raise
+def get_ambiguous_changes_count(start_time:int, end_time:int, changes:list)->Tuple[int, int]:
+    """
+    end_time, changes and start_time can be None and must be of correct type
+    """
+    change_count = len(changes)
+    ambiguous_start_count = 0
+    while ambiguous_start_count < change_count and changes[ambiguous_start_count]["server_time"] == start_time:
+        ambiguous_start_count += 1
+    
+    ambiguous_end_count = change_count - 1
+    while ambiguous_end_count >= 0 and changes[ambiguous_end_count]["server_time"] == end_time:
+        ambiguous_end_count -= 1
 
-def get_ambiguous_changes_count(start_time:int, end_time:int, changes:list)->(int, int):
-    ambiguous_start_count = None
-    ambiguous_end_count = None
-    try:
-        change_count = len(changes)
-        if change_count == 0:
-            return (None, None)
-        ambiguous_start_count = 0
-        ambiguous_end_count = change_count - 1
-        while ambiguous_start_count < change_count and changes[ambiguous_start_count]["server_time"] == start_time:
-            ambiguous_start_count += 1
-        
-        while ambiguous_end_count >= 0 and changes[ambiguous_end_count]["end_time"] == end_time:
-            ambiguous_end_count -= 1
-
-        ambiguous_end_count = change_count - (1 + ambiguous_end_count)
-    except Exception as e:
-        log(f"analytics.get_ambiguous_count caught exception '{e}' for start_time '{start_time}', end_time '{end_time}' and changes '{changes}'", "WARNING")
-
+    ambiguous_end_count = change_count - (1 + ambiguous_end_count)
     return (ambiguous_start_count, ambiguous_end_count)
     
 async def fetch_batch(offset: int):
@@ -227,35 +259,65 @@ async def insert_batch():
         conn = await analytics.pg_conn_pool.acquire()
         await conn.executemany("""
             INSERT INTO analytics (
-                asset_id, server_time, resub_count, ws_books_count, ws_books, 
-                ws_ambiguous_start_count, ws_ambiguous_end_count,
-                ws_changes, bid_depth_diff, ask_depth_diff, bids_distance, asks_distance,
-                ws_tick_changes_count, ws_tick_changes, tick_size_distance,
-                local_bids, local_asks, server_bids, server_asks, server_response
+                asset_id,
+                server_time,
+                ws_books_count,
+                ws_books,
+                ws_book_resub_count,
+                ws_book_time,
+                ws_ambiguous_start_count,
+                ws_ambiguous_end_count,
+                ws_changes_count,
+                ws_changes,
+                bid_depth_diff,
+                ask_depth_diff,
+                bids_distance,
+                asks_distance,
+                local_bids,
+                local_asks,
+                server_bids,
+                server_asks,
+                ws_tick_changes_count,
+                ws_tick_changes,
+                ws_tick_change_resub_count,
+                ws_tick_change_time,
+                local_tick_size,
+                server_tick_size,
+                tick_size_distance,
+                server_response
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
-            )
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                $11, $12, $13, $14, $15, $16, $17, $18,
+                $19, $20, $21, $22, $23, $24, $25, $26
+            );
         """, analytics.batch_buf)
+
         if __debug__:
-            log(f"analytics.insert_row successfully inserted {len(analytics.batch_buf)} rows", "INFO")
+            log(f"analytics.insert_batch successfully inserted {len(analytics.batch_buf)} rows", "DEBUG")
     except Exception as e:
-        log(f"analytics.insert_row caught exception '{e}' for rows '{analytics.batch_buf}'", "ERROR")
+        log(f"analytics.insert_batch caught exception '{e}' for rows '{analytics.batch_buf}'", "ERROR")
         raise
     finally:
         if conn is not None:
             await analytics.pg_conn_pool.release(conn)
 
-async def query_ws_data(asset_id: str, timestamp: int) -> (list, list, list, int, int):
+async def query_ws_data(asset_id: str, server_time: int) -> Tuple[list, int, int, int, int, list, dict, dict, list, int, int, float]:
+    """
+    asset_id id and server_time must be not None and correct type
+    """ 
     conn = None
-    max_resub_count = None
-    f_new_tick_size = None
-    tick_changes = []
-    tick_changes_count = None
     books = []
-    books_count = None
-    changes = []
+    book_resub_count = None
+    book_time = None
     ambiguous_start_count = None
     ambiguous_end_count = None
+    changes = []
+    local_bids = None
+    local_asks = None
+    tick_changes = []
+    tick_change_resub_count = None
+    tick_change_time = None
+    local_tick_size = None
     try:
         conn = await analytics.pg_conn_pool.acquire()
         tick_changes = await conn.fetch("""
@@ -264,18 +326,17 @@ async def query_ws_data(asset_id: str, timestamp: int) -> (list, list, list, int
             WHERE asset_id = $1 AND server_time <= $2
             ORDER BY server_time DESC, resub_count DESC
             LIMIT 25;
-        """, asset_id, timestamp)
-
+        """, asset_id, server_time)
         if tick_changes:
             top_tick_change = tick_changes[0]
-            max_time = top_tick_change["server_time"]
-            max_resub_count = top_tick_change["resub_count"]
+            tick_change = orjson.loads(top_tick_change["tick_change"])
+            #log(f"analytics.query_ws_data tick_change found has type '{type(tick_change)}' and is '{tick_change}'", "DEBUG")
+            local_tick_size = tick_change.get("new_tick_size", None) # 'tick_change' is not None and dict by events.py
+            tick_change_time = top_tick_change["server_time"] # must exist since query can't return non null by <= comparison in postgre
+            tick_change_resub_count = top_tick_change["resub_count"] # must exist and be not None bigint by events.py
             tick_changes = [
                 t for t in tick_changes 
-                if t["server_time"] == max_time and t["resub_count"] == max_resub_count]
-            tick_changes_count = len(tick_changes)
-            f_new_tick_size = float(top_tick_change["tick"]["new_tick_size"])
-    
+                if t["server_time"] == tick_change_time and t["resub_count"] == tick_change_resub_count]
 
         books = await conn.fetch("""
             SELECT *
@@ -283,234 +344,227 @@ async def query_ws_data(asset_id: str, timestamp: int) -> (list, list, list, int
             WHERE asset_id = $1 AND server_time <= $2
             ORDER BY server_time DESC, resub_count DESC
             LIMIT 25;
-        """, asset_id, timestamp)
+        """, asset_id, server_time)
 
-        if not books:
-            return (max_resub_count, books_count, books, ambiguous_start_count, ambiguous_end_count, changes, tick_changes_count, tick_changes, f_new_tick_size)
-        
-        top_book = books[0]
-        max_time = top_book["server_time"]
-        max_resub_count = top_book["resub_count"]
-        books = [
-            t for t in books 
-            if t["server_time"] == max_time and t["resub_count"] == max_resub_count]
-        books_count = len(books)
+        if books:
+            top_book = books[0]
+            book_time = top_book["server_time"] # must exist for same reason as above
+            local_book = orjson.loads(top_book["book"]) # must be not None and be json dict by events.py
+            #log(f"analytics.query_ws_data local_book found has type '{type(local_book)}' and is '{local_book}'", "DEBUG")
+            local_bids = local_book.get("bids", None)
+            local_asks = local_book.get("asks", None)
+            book_resub_count = top_book["resub_count"]  # must exist and be not None bigint by events.py
+            books = [
+                t for t in books 
+                if t["server_time"] == book_time and t["resub_count"] == book_resub_count]
 
-        changes = await conn.fetch("""
-            SELECT row_index, insert_time, server_time, resub_count, type, change
-            FROM changes
-            WHERE asset_id = $1
-              AND server_time BETWEEN $2 AND $3
-              AND resub_count = $4
-            ORDER BY server_time ASC, type ASC;
-        """, asset_id, max_time, timestamp, max_resub_count)
-
-        (ambiguous_start_count, ambiguous_end_count) = get_ambiguous_changes_count(max_time, timestamp, changes)
+            changes = await conn.fetch("""
+                SELECT row_index, insert_time, server_time, resub_count, type, change
+                FROM changes
+                WHERE asset_id = $1
+                AND server_time BETWEEN $2 AND $3
+                AND resub_count = $4
+                ORDER BY server_time ASC, type ASC;
+            """, asset_id, book_time, server_time, book_resub_count)
+            (ambiguous_start_count, ambiguous_end_count) = get_ambiguous_changes_count(book_time, server_time, changes)
     except Exception as e:
-        log(f"analytics.query_ws_data caught exception '{e}' with asset_id '{asset_id}' and server_time '{timestamp}'", "ERROR")
+        log(f"analytics.query_ws_data caught exception '{e}' with asset_id '{asset_id}' and server_time '{server_time}'", "ERROR")
         raise
     finally:
         if conn is not None:
             await analytics.pg_conn_pool.release(conn)
 
-    return (max_resub_count, books_count, books, ambiguous_start_count, ambiguous_end_count, changes, tick_changes_count, tick_changes, f_new_tick_size)
+    return (books,
+            book_resub_count,
+            book_time,
+            ambiguous_start_count,
+            ambiguous_end_count,
+            changes,
+            local_bids,
+            local_asks,
+            tick_changes,
+            tick_change_resub_count,
+            tick_change_time,
+            local_tick_size)
 
 async def per_token_pipeline(server_book: dict):
-    asset_id = None
-    i_timestamp = None
-    resub_count = None
-    ws_books_count = None
-    ws_books = []
-    ws_ambiguous_start_count = None
-    ws_ambiguous_end_count = None
-    ws_changes = []
-    ws_tick_changes_count = None
-    ws_tick_changes = []
-    f_server_tick_size = None
-    f_new_tick_size = None
-    tick_size_distance = None
-    local_asks = []
-    local_bids = []
-    server_asks = []
-    server_bids = []
-    bid_depth_diff = None
-    ask_depth_diff = None
-    bids_distance = None
-    asks_distance = None
-
+    """
+    server_book can not be None and must be correct type
+    """
     asset_id = server_book.get("asset_id", None)
     if not isinstance(asset_id, str):
         log(f"analytics.per_token_pipeline received invalid asset_id '{asset_id}' from server_book '{server_book}'", "WARNING")
         return
     try:
-        i_timestamp = int(server_book["timestamp"])
+        server_time = int(server_book["timestamp"])
     except Exception as e:
-        log(f"analytics.per_token_pipeline received invalid timestamp '{server_book.get('timestamp')}' from server_book '{server_book}' with exception '{e}'", "WARNING")
+        log(f"analytics.per_token_pipeline received invalid timestamp from server_book '{server_book}' with exception '{e}'", "WARNING")
         return
     try:
-        f_server_tick_size = float(server_book["tick_size"])
+        server_tick_size = float(server_book["tick_size"])
     except Exception as e:
-        log(f"analytics.per_token_pipeline received invalid tick_size '{server_book.get('tick_size')}' from server_book '{server_book}' with exception '{e}'", "WARNING")
-        f_server_tick_size = None
+        log(f"analytics.per_token_pipeline received invalid tick_size from server_book '{server_book}' with exception '{e}'", "WARNING")
+        server_tick_size = None
 
     server_bids = server_book.get("bids", None)
     if not isinstance(server_bids, list):
-        log(f"analytics.per_token_pipeline received invalid bids '{server_book.get('bids')}' from server_book '{server_book}'", "WARNING")
+        log(f"analytics.per_token_pipeline received invalid bids from server_book '{server_book}'", "WARNING")
         server_bids = None
 
     server_asks = server_book.get("asks", None)
     if not isinstance(server_asks, list):
-        log(f"analytics.per_token_pipeline received invalid asks '{server_book.get('asks')}' from server_book '{server_book}'", "WARNING")
+        log(f"analytics.per_token_pipeline received invalid asks from server_book '{server_book}'", "WARNING")
         server_asks = None
- 
     try:
         (
-            resub_count,
-            ws_books_count,
             ws_books,
+            ws_book_resub_count,
+            ws_book_time,
             ws_ambiguous_start_count,
             ws_ambiguous_end_count,
             ws_changes,
-            ws_tick_changes_count,
+            local_bids,
+            local_asks,
             ws_tick_changes,
-            f_new_tick_size,
-        ) = await query_ws_data(asset_id, i_timestamp)
+            ws_tick_change_resub_count,
+            ws_tick_change_time,
+            local_tick_size
+        ) = await query_ws_data(asset_id, server_time)
     except Exception as e:
-        log(f"analytics.per_token_pipeline failed to query_ws_data for asset_id '{asset_id}' and timestamp '{i_timestamp}' with exception '{e}'", "ERROR")
+        log(f"analytics.per_token_pipeline failed to query_ws_data for asset_id '{asset_id}' and server_time '{server_time}' with exception '{e}'", "ERROR")
         raise
     
-    try:
-        if f_new_tick_size is not None and f_server_tick_size is not None:
-            tick_size_distance = abs(f_new_tick_size - f_server_tick_size)
-    except Exception as e:
-        log(f"""analytics.per_token_pipeline failed to compute tick metrics:\n
-            exception: {e}\n
-            asset_id: {asset_id}\n
-            ws_tick_changes_count: {ws_tick_changes_count}\n
-            f_new_tick_size: {f_new_tick_size}\n
-            f_server_tick_size: {f_server_tick_size}\n
-            tick_size_distance: {tick_size_distance}\n
-            ws_tick_changes: {ws_tick_changes}""", "WARNING")
-
-    top_book = None
-    if ws_books:
+    if local_tick_size is not None:
         try:
-            top_book = orjson.loads(ws_books[0]["book"])
-            local_bids = top_book["bids"]
-            local_asks = top_book["asks"]
-
-            local_bids = parse_decimal_side(local_bids)
-            local_asks = parse_decimal_side(local_asks)
-            server_bids = parse_decimal_side(server_bids)
-            server_asks = parse_decimal_side(server_asks)
-
-            apply_changes(local_bids, local_asks, ws_changes)
-
-            bid_depth_diff = abs(len(local_bids) - len(server_bids))
-            ask_depth_diff = abs(len(local_asks) - len(server_asks))
-            bids_distance, local_bids, server_bids = distance(local_bids, server_bids, "bids")
-            asks_distance, local_asks, server_asks = distance(local_asks, server_asks, "asks")
-
+            local_tick_size = float(local_tick_size)
         except Exception as e:
-            log(f"""analytics.per_token_pipeline failed to compute book metrics:\n
-                exception: {e}\n
-                asset_id: {server_book.get('asset_id')}\n
-                ws_books_count: {ws_books_count}\n
-                bid_depth_diff: {bid_depth_diff}\n
-                ask_depth_diff: {ask_depth_diff}\n
-                bids_distance: {bids_distance}\n
-                asks_distance: {asks_distance}\n
-                top_book: {top_book}\n
-                server_bids: {server_bids}\n
-                server_asks: {server_asks}\n
-                local_bids: {local_bids}\n
-                local_asks: {local_asks}""", "WARNING")
-
-            if not isinstance(local_bids, list):
-                local_bids = []
-            if not isinstance(local_asks, list):
-                local_asks = []
-            if not isinstance(server_bids, list):
-                server_bids = []
-            if not isinstance(server_asks, list):
-                server_asks = []
+            log(f"analytics.per_token_pipeline found invalid local_tick_size in '{ws_tick_changes}' with exception '{e}'", "WARNING")
+            local_tick_size = None
 
 
-    else:
-        remove_unresponsive_token(asset_id)
-    try:
-        ws_books_json = orjson.dumps(records_to_maps(ws_books)).decode("utf-8") if ws_books else None
-        ws_changes_json = orjson.dumps(records_to_maps(ws_changes)).decode("utf-8") if ws_changes else None
-        ws_tick_changes_json = orjson.dumps(records_to_maps(ws_tick_changes)) if ws_tick_changes else None
-        local_bids_json = orjson.dumps(local_bids).decode("utf-8") if local_bids else None
-        local_asks_json = orjson.dumps(local_asks).decode("utf-8") if local_asks else None
-        server_bids_json = orjson.dumps(server_bids).decode("utf-8") if server_bids else None
-        server_asks_json = orjson.dumps(server_asks).decode("utf-8") if server_asks else None
-        server_book_json = orjson.dumps(server_book).decode("utf-8") if server_book else None
+    
+    tick_size_distance = None
+    if local_tick_size is not None and server_tick_size is not None:
+        tick_size_distance = abs(local_tick_size - server_tick_size)
+
+    try: 
+        local_bids = parse_decimal_side(local_bids)
     except Exception as e:
-        log(f"""analytics.per_token_pipeline failed to serialize json fields with exception '{e}':\n
-            ws_books: {ws_books}\n
-            ws_changes: {ws_changes}\n
-            ws_tick_changes: {ws_tick_changes}\n
-            local_bids: {local_bids}\n
-            local_asks: {local_asks}\n
-            server_bids: {server_bids}\n
-            server_asks: {server_asks}\n
-            server_book: {server_book}
-            """, "ERROR")
-        raise
+        log(f"analytics.per_token_pipeline failed to parse_decimal for local_bids", "WARNING")
+        local_bids = None
+    try:
+        local_asks = parse_decimal_side(local_asks)
+    except Exception as e:
+        log(f"analytics.per_token_pipeline failed to parse_decimal for local_asks", "WARNING")
+        local_asks = None
+    try:
+        server_bids = parse_decimal_side(server_bids)
+    except Exception as e:
+        log(f"analytics.per_token_pipeline failed to parse_decimal for server_bids", "WARNING")
+        server_bids = None
+    try:
+        server_asks = parse_decimal_side(server_asks)
+    except Exception as e:
+        log(f"analytics.per_token_pipeline failed to parse_decimal for server_asks", "WARNING")
+        server_asks = None
+    
+    (bid_changes, ask_changes) = parse_changes(ws_changes)
+    #log(f"analytics.per_token_pipeline bid_changes '{bid_changes}' and ask_changes '{ask_changes}'", "DEBUG")
 
-    row = [
+    #try:
+    apply_changes(local_bids, local_asks, bid_changes, ask_changes)
+    #except Exception as e:
+        #log(f"analytics.per_token_pipeline apply_changes exception '{e}'", "DEBUG")
+
+
+    if local_bids:
+        local_bids = sorted(local_bids.items(), key=lambda x: x[0], reverse=True)
+    
+    if local_asks:
+        local_asks = sorted(local_asks.items(), key=lambda x: x[0], reverse=False)
+
+    if server_bids:
+        server_bids = sorted(server_bids.items(), key=lambda x: x[0], reverse=True)
+
+    if server_asks:
+        server_asks = sorted(server_asks.items(), key=lambda x: x[0], reverse=False)
+
+    bid_depth_diff = None
+    if local_bids and server_bids:
+        bid_depth_diff = abs(len(local_bids) - len(server_bids))
+    
+    ask_depth_diff = None
+    if local_asks and server_asks:
+        ask_depth_diff = abs(len(local_asks) - len(server_asks))
+
+    bids_distance = distance(local_bids, server_bids)
+    asks_distance = distance(local_asks, server_asks)
+
+    records_to_maps(ws_books)
+    records_to_maps(ws_changes)
+    records_to_maps(ws_tick_changes)
+
+    row = (
         asset_id,
-        i_timestamp,
-        resub_count,
-        ws_books_count,
-        ws_books_json,
+        server_time,
+        len(ws_books),
+        orjson.dumps(ws_books).decode("utf-8"),
+        ws_book_resub_count,
+        ws_book_time,
         ws_ambiguous_start_count,
         ws_ambiguous_end_count,
-        ws_changes_json,
+        len(ws_changes),
+        orjson.dumps(ws_changes).decode("utf-8"),
         bid_depth_diff,
         ask_depth_diff,
         bids_distance,
         asks_distance,
-        ws_tick_changes_count,
-        ws_tick_changes_json,
+        orjson.dumps(local_bids).decode("utf-8") if local_bids else None,
+        orjson.dumps(local_asks).decode("utf-8") if local_asks else None,
+        orjson.dumps(server_bids).decode("utf-8") if server_bids else None,
+        orjson.dumps(server_asks).decode("utf-8") if server_asks else None,
+        len(ws_tick_changes),
+        orjson.dumps(ws_tick_changes).decode("utf-8"),
+        ws_tick_change_resub_count,
+        ws_tick_change_time,
+        local_tick_size,
+        server_tick_size,
         tick_size_distance,
-        local_bids_json,
-        local_asks_json,
-        server_bids_json,
-        server_asks_json,
-        server_book_json,
-    ]
+        orjson.dumps(server_book).decode("utf-8")
+    )
     analytics.batch_buf.append(row)
 
     if __debug__:
-        log(f"""analytics.per_token_pipeline appended new row:\n
+        log(f"""
+            analytics.per_token_pipeline appended new row:\n
             asset_id: {asset_id}\n
-            timestamp: {i_timestamp}\n
-            resub_count: {resub_count}\n
-            ws_books_count: {ws_books_count}\n
+            server_time: {server_time}\n
+            ws_books_count: {len(ws_books)}\n
             ws_books: {ws_books}\n
-            ws_changes: {ws_changes}\n
-            server_bids: {server_bids}\n
-            server_asks: {server_asks}\n
-            local_bids: {local_bids}\n
-            local_asks: {local_asks}\n
+            ws_book_resub_count: {ws_book_resub_count}\n
+            ws_book_time: {ws_book_time}\n
             ws_ambiguous_start_count: {ws_ambiguous_start_count}\n
             ws_ambiguous_end_count: {ws_ambiguous_end_count}\n
+            ws_changes_count: {len(ws_changes)}\n
+            ws_changes: {ws_changes}\n
             bid_depth_diff: {bid_depth_diff}\n
             ask_depth_diff: {ask_depth_diff}\n
             bids_distance: {bids_distance}\n
             asks_distance: {asks_distance}\n
-            ws_tick_changes_count: {ws_tick_changes_count}\n
+            local_bids: {local_bids}\n
+            local_asks: {local_asks}\n
+            server_bids: {server_bids}\n
+            server_asks: {server_asks}\n
+            ws_tick_changes_count: {len(ws_tick_changes)}\n
             ws_tick_changes: {ws_tick_changes}\n
-            f_new_tick_size: {f_new_tick_size}\n
-            f_server_tick_size: {f_server_tick_size}\n
+            ws_tick_change_resub_count: {ws_tick_change_resub_count}\n
+            ws_tick_change_time: {ws_tick_change_time}\n
+            local_tick_size: {local_tick_size}\n
+            server_tick_size: {server_tick_size}\n
             tick_size_distance: {tick_size_distance}\n
-            top_book: {top_book}\n
-            server_book: {server_book}\n
+            server_response: {server_book}\n
             buffer_size: {len(analytics.batch_buf)}
-            """, "DEBUG")
+        """, "DEBUG")
 
 async def pipeline():
     log(f"analytics.do_analytics started", "INFO")
@@ -519,7 +573,7 @@ async def pipeline():
         await asyncio.sleep(5)
         batch_count = len(analytics.post_bodies)
         if __debug__:
-            log(f"analytics.pipeline new iteration started with {batch_count} batches")
+            log(f"analytics.pipeline new iteration started with {batch_count} batches", "DEBUG")
         for batch_offset in range(batch_count):
             now = time.monotonic_ns()
             should_be = last_request + analytics.rate_limit_ns
@@ -542,7 +596,7 @@ async def pipeline():
                 log(f"analytcis.pipeline caught exception '{e}' from fetching batch")
                 raise
             if not isinstance(json_response, list):
-                log(f"analytics.do_analytics returned non list '{json_response}'", "WARNING")
+                log(f"analytics.pipeline returned non list '{json_response}'", "WARNING")
                 continue
 
             for book in json_response:
@@ -556,8 +610,8 @@ async def pipeline():
             except Exception as e:
                 log(f"analytics.pipeline failed to insert_batch with exception '{e}'", "ERROR")
                 raise
-            analytics.batch_buf.clear()
-
+            finally:
+                analytics.batch_buf.clear()
 
         
     
