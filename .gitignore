@@ -1,0 +1,8 @@
+**/__pycache__/
+**/venv/
+.pg_socket/
+data_collection/
+orderbook_collection/contracts.txt
+orderbook_collection/out.log
+orderbook_collection/startup.log
+orderbook_collection/monitor.log

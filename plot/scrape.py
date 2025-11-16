@@ -21,7 +21,7 @@ DEFAULT_SAMPLE_SIZE = 5000
 # Set ANALYSIS_END_TIME to None to use the current time ("now") on each loop.
 # Format: datetime(YYYY, M, D, H, M, tzinfo=timezone.utc)
 ANALYSIS_START_TIME = datetime(2025, 11, 12, 18, 30, tzinfo=timezone.utc)
-ANALYSIS_END_TIME = None  # Use None for "now"
+ANALYSIS_END_TIME = None
 
 
 # --- Asset ID Ordering Enum ---
