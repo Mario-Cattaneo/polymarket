@@ -6,3 +6,8 @@ orderbook_collection/contracts.txt
 orderbook_collection/out.log
 orderbook_collection/startup.log
 orderbook_collection/monitor.log
+orderbook_collection/test/
+data_analysis/event_partition_asset_agg
+data_analysis/server_book_agg
+polygon_collection/*.png
+polygon_collection/*.csv

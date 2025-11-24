@@ -4,23 +4,14 @@ import time
 import traceback
 from typing import List, Tuple, Optional, Dict, Any
 
-# These are assumed to be imported from your project's modules
 from orderbook import OrderbookRegistry
 from db_cli import DatabaseManager
 from http_cli import (HttpTaskConfig, HttpTaskCallbacks, HttpManager, Method, 
                       RequestProducer, ResponseContent, StatusCode, RTT)
 
-# --- Constants for Database Task IDs and Statements ---
 SERVER_BOOK_INSERTER_ID = "server_book_inserter"
-# **MODIFIED**: Added the false_misses column and the $3 placeholder.
-SERVER_BOOK_INSERT_STMT = """
-    INSERT INTO server_book (server_time, asset_id, false_misses, message)
-    VALUES ($1, $2, $3, $4)
-    ON CONFLICT (server_time, asset_id) DO NOTHING;
-"""
 
 RTT_INSERTER_ID = "analytics_rtt_inserter"
-RTT_INSERT_STMT = "INSERT INTO analytics_rtt (timestamp_ms, rtt) VALUES ($1, $2) ON CONFLICT (timestamp_ms) DO NOTHING;"
 
 MODIFIER_ID = "market_reaper"
 MODIFY_MARKETS_STMT = "UPDATE markets SET closed_time = $1 WHERE asset_id = $2"
@@ -34,7 +25,8 @@ class Analytics:
         self._http_cli = http_man
         self._orderbook_registry = orderbook_reg
 
-        # --- Database Buffers ---
+        self._found_index = 0
+
         self._server_book_rows: List[Tuple] = []
         self._server_book_flag = asyncio.Event()
         self._rtt_rows: List[Tuple] = []
@@ -42,7 +34,6 @@ class Analytics:
         self._modifier_rows: List[Tuple] = []
         self._modifier_flag = asyncio.Event()
 
-        # --- HTTP Client Configuration ---
         self._http_config = HttpTaskConfig(
             base_back_off_s=1.0, max_back_off_s=150.0,
             back_off_rate=2.0, request_break_s=0.15
@@ -53,35 +44,39 @@ class Analytics:
             on_exception=self._on_exception
         )
         
-        # --- Payload and Token Management ---
         self._limit = 500
         self._tokens: List[set[str]] = [set()]
         self._payload_offset: int = 0
         self._payloads: List[bytes] = []
         self._new_batch: List[Dict[str, str]] = []
 
-        # --- State and Task Management ---
         self._started = False
         self._poster_task: Optional[RequestProducer] = None
         self._running_db_tasks: Dict[str, asyncio.Task] = {}
         self._running_internal_tasks: Dict[str, asyncio.Task] = {}
         
-        # --- Serializer State ---
         self._serializer_signal = asyncio.Event()
         self._reserialize_threshold = 2.5
         self._deleted_token_count = 0 
 
-        # --- Generation ID for preventing race conditions ---
         self._generation_id: int = 0
 
-        # --- Per-Token Miss Count Logic ---
         self._miss_counts: Dict[str, int] = {} # Key: asset_id, Value: consecutive miss count
         self._REAP_THRESHOLD = 13 # Set based on forensic data (max 9) + safety margin
 
-        # --- Callback Handles ---
         self._bootstrap_callback_handle: Optional[int] = None
         self._insert_token_callback_handle: Optional[int] = None
         self._delete_token_callback_handle: Optional[int] = None
+
+    def get_buffer_sizes(self) -> Dict[str, int]:
+        """
+        Returns the current sizes of the internal database buffers.
+        """
+        return {
+            "server_book_rows": len(self._server_book_rows),
+            "rtt_rows": len(self._rtt_rows),
+            "modifier_rows": len(self._modifier_rows),
+        }
 
     def task_summary(self) -> dict:
         db_tasks_running = len(self._running_db_tasks)
@@ -175,12 +170,12 @@ class Analytics:
 
     def _start_db_inserters(self):
         self._log("start: Starting database inserters...", "INFO")
-        self._running_db_tasks[SERVER_BOOK_INSERTER_ID] = self._db_cli.exec_persistent(
-            task_id=SERVER_BOOK_INSERTER_ID, stmt=SERVER_BOOK_INSERT_STMT, params_buffer=self._server_book_rows,
+        self._running_db_tasks[SERVER_BOOK_INSERTER_ID] = self._db_cli.copy_persistent(
+            task_id=SERVER_BOOK_INSERTER_ID, table_name="buffer_server_book" , params_buffer=self._server_book_rows,
             signal=self._server_book_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
         )
-        self._running_db_tasks[RTT_INSERTER_ID] = self._db_cli.exec_persistent(
-            task_id=RTT_INSERTER_ID, stmt=RTT_INSERT_STMT, params_buffer=self._rtt_rows,
+        self._running_db_tasks[RTT_INSERTER_ID] = self._db_cli.copy_persistent(
+            task_id=RTT_INSERTER_ID, table_name="buffer_analytics_rtt", params_buffer=self._rtt_rows,
             signal=self._rtt_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
         )
         self._running_db_tasks[MODIFIER_ID] = self._db_cli.exec_persistent(
@@ -251,7 +246,7 @@ class Analytics:
                 self._tokens = [set()]
                 self._new_batch = []
                 self._payloads = []
-                self._miss_counts.clear() # Clear miss counts on reserialize
+                self._miss_counts.clear()
                 
                 self._orderbook_registry.iterate_over_tokens(self._token_insert_callback)
                 self._log(f"serializer: Serialized {self._orderbook_registry.get_token_count()} tokens into {len(self._payloads)} payloads for generation {self._generation_id}.", "INFO")
@@ -303,18 +298,21 @@ class Analytics:
         books_to_add = []
         
         for server_book in server_books:
+            try:
+                timestamp = int(server_book.get("timestamp"))
+            except Exception as e:
+                self._log(f"on_response: failed timestamp {server_book}", "WARNING")
+                timestamp = None
             asset_id = server_book.get("asset_id")
             if isinstance(asset_id, str) and asset_id:
                 response_tokens.add(asset_id)
                 
-                # **MODIFIED**: Get the miss count for this token before it's reset.
                 false_misses = self._miss_counts.get(asset_id, 0)
                 
-                # **MODIFIED**: Create the new 4-element tuple for the database.
-                book_tuple = (now_ms, asset_id, false_misses, orjson.dumps(server_book).decode('utf-8'))
+                book_tuple = (self._found_index, now_ms, timestamp, asset_id, false_misses, orjson.dumps(server_book).decode('utf-8'))
                 books_to_add.append(book_tuple)
+                self._found_index += 1
 
-        # --- Production Per-Token Miss Count Logic with Inline Reaping ---
         sent_tokens = self._tokens[response_offset]
         reaped_this_cycle = 0
 
@@ -354,6 +352,7 @@ class Analytics:
         return False
     
     async def _on_insert_success(self, task_id: str, params: List[Tuple]):
+        #self._log(f"on_copy_success: copied {len(params)}", "DEBUG")
         if task_id == SERVER_BOOK_INSERTER_ID: self._server_book_rows.clear()
         elif task_id == RTT_INSERTER_ID: self._rtt_rows.clear()
         elif task_id == MODIFIER_ID: self._modifier_rows.clear()
@@ -361,3 +360,4 @@ class Analytics:
     async def _on_inserter_failure(self, task_id: str, exception: Exception, params: List[Tuple]):
         self._log(f"on_inserter_failure: '{task_id}' failed with '{exception}'. Stopping analytics.", "FATAL")
         self.stop()
+    

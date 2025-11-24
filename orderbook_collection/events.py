@@ -9,50 +9,6 @@ from db_cli import DatabaseManager
 from wss_cli import WebSocketTaskConfig, WebSocketTaskCallbacks, WebSocketManager
 
 
-MARKETS_INSERT_STMT = """
-    INSERT INTO markets (found_time, asset_id, exhaustion_cycle, market_id, condition_id, negrisk_id, "offset", message) 
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
-    ON CONFLICT (asset_id) DO NOTHING;
-"""
-
-BOOKS_INSERT_STMT = """
-    INSERT INTO books (server_time, asset_id, message)
-    VALUES ($1, $2, $3)
-    ON CONFLICT (server_time, asset_id) DO UPDATE SET
-        conflict_count = books.conflict_count + 1;
-"""
-
-PRICE_CHANGES_INSERT_STMT = """
-    INSERT INTO price_changes (server_time, asset_id, price, size, side, message)
-    VALUES ($1, $2, $3, $4, $5, $6)
-    ON CONFLICT (server_time, side, price, asset_id) DO UPDATE SET
-        conflict_count = price_changes.conflict_count + 1;
-"""
-
-LAST_TRADE_PRICES_INSERT_STMT = """
-    INSERT INTO last_trade_prices (server_time, asset_id, price, size, side, fee_rate_bps, message)
-    VALUES ($1, $2, $3, $4, $5, $6, $7)
-    ON CONFLICT (server_time, side, price, asset_id) DO UPDATE SET
-        conflict_count = last_trade_prices.conflict_count + 1;
-"""
-
-TICK_CHANGES_INSERT_STMT = """
-    INSERT INTO tick_changes (server_time, asset_id, tick_size, message)
-    VALUES ($1, $2, $3, $4)
-    ON CONFLICT (server_time, asset_id) DO UPDATE SET
-        conflict_count = tick_changes.conflict_count + 1;
-"""
-
-EVENTS_CONNECTIONS_INSERT_STMT = """
-    INSERT INTO events_connections (timestamp_ms, success, reason)
-    VALUES ($1, $2, $3)
-    ON CONFLICT (timestamp_ms, success) DO UPDATE SET
-        conflict_count = events_connections.conflict_count + 1,
-        reason = EXCLUDED.reason;
-"""
-
-
-# --- Task IDs for Database Inserters ---
 BOOKS_INSERTER_ID = "books_inserter"
 PRICE_CHANGES_INSERTER_ID = "price_changes_inserter"
 LAST_TRADE_PRICES_INSERTER_ID = "last_trade_prices_inserter"
@@ -74,7 +30,6 @@ class Events:
         self._wss_config = WebSocketTaskConfig(timeout=10, ping_interval=15)
         self._wss_cli = WebSocketManager(callbacks=self._wss_callbacks, config=self._wss_config, request_break_s=0.15, max_concurrent_subscriptions=40)
 
-        # --- Subscription Management ---
         self._limit_per_subscription = 10_000
         self._reserialize_threshold = 1.5
         self._loss_guard_s = 3
@@ -83,29 +38,46 @@ class Events:
         self._new_batch: List[str] = []
         self._deleted_count_since_reserialize = 0
 
-        # --- State and Task Management ---
         self._started = False
         self._running_db_tasks: Dict[str, asyncio.Task] = {}
         self._running_internal_tasks: Dict[str, asyncio.Task] = {}
         self._serializer_signal = asyncio.Event()
         self._markets_exhausted: asyncio.Event = asyncio.Event()
         
-        # --- Callback Handles ---
         self._bootstrap_callback_handle: Optional[int] = None
         self._token_insert_callback_handle: Optional[int] = None
         self._token_delete_callback_handle: Optional[int] = None
 
-        # --- Database Buffers ---
+        self._book_idx = 0
         self._book_rows: List[Tuple] = []
         self._book_flag = asyncio.Event()
+
+        self._price_change_idx = 0
         self._price_change_rows: List[Tuple] = []
         self._price_change_flag = asyncio.Event()
+
+        self._last_trade_price_idx = 0
         self._last_trade_price_rows: List[Tuple] = []
         self._last_trade_price_flag = asyncio.Event()
+
+        self._tick_change_idx = 0
         self._tick_change_rows: List[Tuple] = []
         self._tick_change_flag = asyncio.Event()
+
         self._connection_rows: List[Tuple] = []
         self._connection_flag = asyncio.Event()
+
+    def get_buffer_sizes(self) -> Dict[str, int]:
+        """
+        Returns the current sizes of the internal database buffers.
+        """
+        return {
+            "book_rows": len(self._book_rows),
+            "price_change_rows": len(self._price_change_rows),
+            "last_trade_price_rows": len(self._last_trade_price_rows),
+            "tick_change_rows": len(self._tick_change_rows),
+            "connection_rows": len(self._connection_rows),
+        }
 
     def task_summary(self) -> dict:
         """
@@ -135,48 +107,47 @@ class Events:
         }
         
     async def start(self, markets_exhausted: asyncio.Event, restore = False):
-        if self._started:
+        if self._started: 
             self._log("start: Events module is already running.", "WARNING")
             return
-        
-        if restore:
+        if restore: 
             await self._restore_subscriptions_from_db()
-
         if self._orderbook_registry.get_token_count() == 0:
             self._log("start: No tokens in registry, setting up bootstrap callback.", "INFO")
             self._markets_exhausted = markets_exhausted
-            if self._bootstrap_callback_handle is None:
+            if self._bootstrap_callback_handle is None: 
                 self._bootstrap_callback_handle = self._orderbook_registry.register_insert_callback(self._bootstrap)
             return
-
         try:
-            self._markets_exhausted = markets_exhausted
+            self._markets_exhausted = markets_exhausted; 
             self._start_db_inserters()
-
+            
             self._orderbook_registry.iterate_over_tokens(self._token_insert_callback)
 
-            if self._token_insert_callback_handle is None:
-                self._token_insert_callback_handle = self._orderbook_registry.register_insert_callback(self._token_insert_callback)
-            if self._token_delete_callback_handle is None:
-                self._token_delete_callback_handle = self._orderbook_registry.register_delete_callback(self._token_delete_callback)
+            if self._new_batch:
+                offset = len(self._subscriptions)
+                self._log(f"start: Creating final batch for remaining {len(self._new_batch)} tokens at offset {offset}", "INFO")
+                payload = orjson.dumps({"type": "market", "initial_dump": True, "assets_ids": self._new_batch}).decode('utf-8')
+                self._wss_cli.start_task(offset, self._url, payload)
+                self._new_batch.clear()
+
+            if self._token_insert_callback_handle is None: self._token_insert_callback_handle = self._orderbook_registry.register_insert_callback(self._token_insert_callback)
+            if self._token_delete_callback_handle is None: self._token_delete_callback_handle = self._orderbook_registry.register_delete_callback(self._token_delete_callback)
             
             serializer_task = asyncio.create_task(self._serializer())
             self._running_internal_tasks["serializer"] = serializer_task
             serializer_task.add_done_callback(lambda t: self._running_internal_tasks.pop("serializer", None))
-
+            
             self._started = True
             self._log("start: Events module started successfully.", "INFO")
 
-        except Exception as e:
-            self._log(f"start: Failed with an unhandled exception: '{e}'", "FATAL")
-            traceback.print_exc()
-            self.stop()
+        except Exception as e: self._log(f"start: Failed with an unhandled exception: '{e}'", "FATAL"); traceback.print_exc(); self.stop()
+        
 
     async def _restore_subscriptions_from_db(self):
         self._log("restore_subscriptions_from_db: starting", "INFO")
         stmt = "SELECT DISTINCT asset_id FROM markets WHERE closed_time IS NULL;"
         try:
-            # --- THIS IS THE FIX: Changed 'name' to 'task_id' ---
             results = await self._db_cli.fetch(task_id="get_all_active_asset_ids", stmt=stmt)
             if not results:
                 self._log("No existing active tokens found in database to restore.", "INFO")
@@ -230,24 +201,24 @@ class Events:
     def _start_db_inserters(self):
         self._log("start: Starting database inserters...", "INFO")
 
-        self._running_db_tasks[BOOKS_INSERTER_ID] = self._db_cli.exec_persistent(
-            task_id=BOOKS_INSERTER_ID, stmt=BOOKS_INSERT_STMT, params_buffer=self._book_rows,
+        self._running_db_tasks[BOOKS_INSERTER_ID] = self._db_cli.copy_persistent(
+            task_id=BOOKS_INSERTER_ID, table_name="buffer_books", params_buffer=self._book_rows,
             signal=self._book_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
         )
-        self._running_db_tasks[PRICE_CHANGES_INSERTER_ID] = self._db_cli.exec_persistent(
-            task_id=PRICE_CHANGES_INSERTER_ID, stmt=PRICE_CHANGES_INSERT_STMT, params_buffer=self._price_change_rows,
+        self._running_db_tasks[PRICE_CHANGES_INSERTER_ID] = self._db_cli.copy_persistent(
+            task_id=PRICE_CHANGES_INSERTER_ID, table_name="buffer_price_changes", params_buffer=self._price_change_rows,
             signal=self._price_change_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
         )
-        self._running_db_tasks[LAST_TRADE_PRICES_INSERTER_ID] = self._db_cli.exec_persistent(
-            task_id=LAST_TRADE_PRICES_INSERTER_ID, stmt=LAST_TRADE_PRICES_INSERT_STMT, params_buffer=self._last_trade_price_rows,
+        self._running_db_tasks[LAST_TRADE_PRICES_INSERTER_ID] = self._db_cli.copy_persistent(
+            task_id=LAST_TRADE_PRICES_INSERTER_ID, table_name="buffer_last_trade_prices", params_buffer=self._last_trade_price_rows,
             signal=self._last_trade_price_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
         )
-        self._running_db_tasks[TICK_CHANGES_INSERTER_ID] = self._db_cli.exec_persistent(
-            task_id=TICK_CHANGES_INSERTER_ID, stmt=TICK_CHANGES_INSERT_STMT, params_buffer=self._tick_change_rows,
+        self._running_db_tasks[TICK_CHANGES_INSERTER_ID] = self._db_cli.copy_persistent(
+            task_id=TICK_CHANGES_INSERTER_ID, table_name="buffer_tick_changes", params_buffer=self._tick_change_rows,
             signal=self._tick_change_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
         )
-        self._running_db_tasks[CONNECTIONS_INSERTER_ID] = self._db_cli.exec_persistent(
-            task_id=CONNECTIONS_INSERTER_ID, stmt=EVENTS_CONNECTIONS_INSERT_STMT, params_buffer=self._connection_rows,
+        self._running_db_tasks[CONNECTIONS_INSERTER_ID] = self._db_cli.copy_persistent(
+            task_id=CONNECTIONS_INSERTER_ID, table_name="buffer_events_connections", params_buffer=self._connection_rows,
             signal=self._connection_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
         )
 
@@ -269,6 +240,7 @@ class Events:
             self._markets_exhausted.clear()
         return True
 
+
     def _token_delete_callback(self, token: str)->bool:
         self._deleted_count_since_reserialize += 1
         
@@ -286,12 +258,13 @@ class Events:
         
         return True
 
-    def _serialize(self, token: str):
+    def _serialize(self, token: str)->bool:
         if len(self._new_batch) >= self._limit_per_subscription:
             self._subscriptions.append(orjson.dumps({"type": "market", "initial_dump": True, "assets_ids": self._new_batch}).decode('utf-8'))
             self._new_batch.clear()
             self._markets_exhausted.clear()
         self._new_batch.append(token)
+        return True
 
     async def _serializer(self):
         while True:
@@ -427,7 +400,8 @@ class Events:
             self._log(f"parse_book_event: Skipping book event due to missing or invalid 'asset_id'. Event: '{str(event)[:300]}'", "WARNING")
             return
         
-        self._book_rows.append((timestamp, asset_id, orjson.dumps(event).decode('utf-8')))
+        self._book_rows.append((self._book_idx, time.time_ns() // 1_000_000, timestamp, asset_id,  orjson.dumps(event).decode('utf-8')))
+        self._book_idx += 1
         self._book_flag.set()
 
     def _parse_price_change_event(self, event: dict, timestamp: int):
@@ -463,7 +437,8 @@ class Events:
 
             try:
                 price, size = float(price_str), float(size_str)
-                self._price_change_rows.append((timestamp, asset_id, price, size, side, orjson.dumps(item).decode('utf-8')))
+                self._price_change_rows.append((self._price_change_idx, time.time_ns() // 1_000_000, timestamp, asset_id, price, size, side,  orjson.dumps(item).decode('utf-8')))
+                self._price_change_idx += 1
                 rows_added += 1
             except (ValueError, TypeError):
                 self._log(f"parse_price_change_event: Skipping item for asset '{asset_id}' due to unparseable numeric values. Item: '{item}'", "WARNING")
@@ -506,7 +481,8 @@ class Events:
             self._log(f"parse_last_trade_price_event: Skipping event for asset '{asset_id}' due to unparseable numeric values. Event: '{event}'", "WARNING")
             return
             
-        self._last_trade_price_rows.append((timestamp, asset_id, price, size, side, fee_rate_bps, orjson.dumps(event).decode('utf-8')))
+        self._last_trade_price_rows.append((self._last_trade_price_idx, time.time_ns() // 1_000_000, timestamp, asset_id, price, size, side,  fee_rate_bps, orjson.dumps(event).decode('utf-8')))
+        self._last_trade_price_idx += 1
         self._last_trade_price_flag.set()
 
     def _parse_tick_size_event(self, event: dict, timestamp: int):
@@ -526,5 +502,6 @@ class Events:
             self._log(f"parse_tick_size_event: Skipping event for asset '{asset_id}' due to unparseable 'new_tick_size': '{tick_size_str}'.", "WARNING")
             return
 
-        self._tick_change_rows.append((timestamp, asset_id, tick_size, orjson.dumps(event).decode('utf-8')))
+        self._tick_change_rows.append((self._tick_change_idx, time.time_ns() // 1_000_000, timestamp, asset_id, tick_size,  orjson.dumps(event).decode('utf-8')))
+        self._tick_change_idx += 1
         self._tick_change_flag.set()

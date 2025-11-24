@@ -2,8 +2,7 @@ import asyncio
 import inspect
 import time
 import websockets
-from typing import TypeAlias, List, Tuple, Callable, Optional, Dict, Any
-
+from typing import TypeAlias, Callable, Optional, Dict, Any
 
 Message: TypeAlias = bytes | str
 TaskOffset: TypeAlias = int
@@ -17,7 +16,7 @@ OnConnectFailureCallback: TypeAlias = Optional[Callable[
         Exception,          # The exception that was raised
         str,                # The URL that was being connected to
         Message             # The initial payload that was sent
-    ], 
+    ],
     bool
 ]]
 
@@ -26,18 +25,18 @@ OnReadFailureCallback: TypeAlias = Optional[Callable[
         TaskOffset,         # The offset of the task that failed
         Exception,          # The exception that was raised
         str                 # The URL of the connection
-    ], 
+    ],
     bool
 ]]
 
 class WebSocketTaskConfig:
     """Configuration for all WebSocket managed tasks handled by a manager instance."""
-    __slots__ = ('base_back_off_s', 'max_back_off_s', 'back_off_rate', 'max_queue', 
+    __slots__ = ('base_back_off_s', 'max_back_off_s', 'back_off_rate', 'max_queue',
                  'max_msg_size', 'ping_interval', 'timeout')
 
-    def __init__(self, base_back_off_s: float = 1.0, max_back_off_s: float = 90.0, 
-                 back_off_rate: float = 2.0, max_queue: int = 256, 
-                 max_msg_size: int = 1_048_576, ping_interval: float = 10.0, 
+    def __init__(self, base_back_off_s: float = 1.0, max_back_off_s: float = 90.0,
+                 back_off_rate: float = 2.0, max_queue: int = 256,
+                 max_msg_size: int = 1_048_576, ping_interval: float = 10.0,
                  timeout: float = 5.0):
         if not isinstance(base_back_off_s, (int, float)) or base_back_off_s < 0: raise ValueError("'base_back_off_s' must be a non-negative number.")
         if not isinstance(max_back_off_s, (int, float)) or max_back_off_s < base_back_off_s: raise ValueError("'max_back_off_s' must be >= base_back_off_s.")
@@ -46,7 +45,7 @@ class WebSocketTaskConfig:
         if not isinstance(max_msg_size, int) or max_msg_size <= 0: raise ValueError("'max_msg_size' must be a positive integer.")
         if not isinstance(ping_interval, (int, float)) or ping_interval <= 0: raise ValueError("'ping_interval' must be a positive number.")
         if not isinstance(timeout, (int, float)) or timeout <= 0: raise ValueError("'timeout' must be a positive number.")
-        
+
         self.base_back_off_s = base_back_off_s
         self.max_back_off_s = max_back_off_s
         self.back_off_rate = back_off_rate
@@ -57,7 +56,7 @@ class WebSocketTaskConfig:
 
 class WebSocketTaskCallbacks:
     """Callbacks for all WebSocket managed tasks handled by a manager instance."""
-    __slots__ = ('on_read', 'on_acknowledgement', 'on_read_failure', 
+    __slots__ = ('on_read', 'on_acknowledgement', 'on_read_failure',
                  'on_connect', 'on_connect_failure')
 
     def __init__(self, on_read: OnReadCallback,
@@ -79,7 +78,7 @@ class WebSocketTaskCallbacks:
 
 class _WebSocketTaskState:
     """Internal state unique to a single WebSocket managed task."""
-    __slots__ = ('url', 'connection_attempts', 'connection_failures', 'messages_received', 
+    __slots__ = ('url', 'connection_attempts', 'connection_failures', 'messages_received',
                  'last_activity_time', 'current_back_off_s')
     def __init__(self):
         self.url: str = ""
@@ -91,14 +90,13 @@ class _WebSocketTaskState:
 
 class _ManagedTask:
     """Internal class to bundle the asyncio Task and unique state."""
-    __slots__ = ('main_task', 'state', 'wss_cli', 'connection_state', 'previous_task')
+    __slots__ = ('main_task', 'state', 'wss_cli', 'connection_state')
 
     def __init__(self, main_task: asyncio.Task, state: _WebSocketTaskState):
         self.main_task = main_task
         self.state = state
         self.wss_cli: Optional[websockets.WebSocketClientProtocol] = None
         self.connection_state: str = "DISCONNECTED"
-        self.previous_task: Optional[_ManagedTask] = None
 
     def get_stats(self, config: WebSocketTaskConfig) -> Dict[str, Any]:
         if self.main_task.done():
@@ -106,24 +104,19 @@ class _ManagedTask:
             elif self.main_task.exception(): exc = self.main_task.exception(); status = "failed"; exc_info = f"{type(exc).__name__}: {exc}"
             else: status = "finished"; exc_info = None
         else: status = "running"; exc_info = None
-        
+
         return {
-            "task_status": status,
-            "task_exception": exc_info,
-            "connection_state": self.connection_state,
-            "url": self.state.url,
-            "config": {k: getattr(config, k) for k in config.__slots__},
+            "task_status": status, "task_exception": exc_info, "connection_state": self.connection_state,
+            "url": self.state.url, "config": {k: getattr(config, k) for k in config.__slots__},
             "state": {
-                "connection_attempts": self.state.connection_attempts,
-                "connection_failures": self.state.connection_failures,
-                "messages_received": self.state.messages_received,
-                "last_activity_time_monotonic": self.state.last_activity_time,
+                "connection_attempts": self.state.connection_attempts, "connection_failures": self.state.connection_failures,
+                "messages_received": self.state.messages_received, "last_activity_time_monotonic": self.state.last_activity_time,
                 "current_back_off_s": self.state.current_back_off_s,
             }
         }
 
 class WebSocketManager:
-    def __init__(self, callbacks: WebSocketTaskCallbacks, config: 
+    def __init__(self, callbacks: WebSocketTaskCallbacks, config:
                  WebSocketTaskConfig, request_break_s: float = 0.3,
                  max_concurrent_subscriptions = 3):
         self.callbacks = callbacks
@@ -135,35 +128,28 @@ class WebSocketManager:
 
     async def _reader(self, offset: TaskOffset, managed_task: _ManagedTask):
         state = managed_task.state
-        # The reader no longer needs its own finally block, as the connector's
-        # top-level finally will handle all cleanup.
         while True:
             try:
                 message = await managed_task.wss_cli.recv()
             except Exception as e:
-                if self.callbacks.on_read_failure:
-                    if not self.callbacks.on_read_failure(offset, e, state.url):
-                        return 
-                break # Exit the reader loop on any exception
+                if self.callbacks.on_read_failure and not self.callbacks.on_read_failure(offset, e, state.url):
+                    return
+                break
             state.messages_received += 1
             state.last_activity_time = time.monotonic()
             if not self.callbacks.on_read(offset, message):
                 break
-                
-    async def _connector(self, offset: TaskOffset, payload: 
-                         Message, managed_task: _ManagedTask):
+
+    async def _connector(self, offset: TaskOffset, payload: Message, managed_task: _ManagedTask, old_task_to_cancel: Optional[_ManagedTask] = None):
         state = managed_task.state
         state.current_back_off_s = self.config.base_back_off_s
-        
-        # --- THIS IS THE FIX: A single try/finally block now wraps the entire loop ---
+
         try:
             while True:
                 managed_task.connection_state = "DISCONNECTED"
-                
                 try:
                     async with self._connection_semaphore:
                         managed_task.connection_state = "CONNECTING"
-                        
                         now = time.monotonic()
                         elapsed = now - self._last_request_time
                         if elapsed < self._request_break_s:
@@ -171,14 +157,12 @@ class WebSocketManager:
                         self._last_request_time = time.monotonic()
 
                         state.connection_attempts += 1
-                        
-                        # Connect and assign the connection to the managed task
                         managed_task.wss_cli = await websockets.connect(
                             state.url, max_queue=self.config.max_queue, max_size=self.config.max_msg_size,
                             ping_interval=self.config.ping_interval, open_timeout=self.config.timeout
                         )
                         state.last_activity_time = time.monotonic()
-                        
+
                         await managed_task.wss_cli.send(payload)
                         ack = await managed_task.wss_cli.recv()
                         state.last_activity_time = time.monotonic()
@@ -187,77 +171,53 @@ class WebSocketManager:
                             return
                         if self.callbacks.on_connect and not self.callbacks.on_connect(offset):
                             return
-                        
+
                     managed_task.connection_state = "CONNECTED"
-                    
-                    if managed_task.previous_task:
-                        predecessor = managed_task.previous_task
-                        if predecessor.main_task and not predecessor.main_task.done():
-                            predecessor.main_task.cancel()
-                        managed_task.previous_task = None
-                    
+
+                    if old_task_to_cancel:
+                        if old_task_to_cancel.main_task and not old_task_to_cancel.main_task.done():
+                            old_task_to_cancel.main_task.cancel()
+                        old_task_to_cancel = None 
+
                     state.current_back_off_s = self.config.base_back_off_s
-                    
-                    # This will block until the connection is lost
                     await self._reader(offset, managed_task)
 
                 except asyncio.CancelledError:
-                    # If cancelled during connection or reading, exit the loop
-                    return
+                    raise
                 except Exception as e:
                     state.connection_failures += 1
-                    if self.callbacks.on_connect_failure:
-                        if not self.callbacks.on_connect_failure(offset, e, state.url, payload):
-                            return
-                
-                # Backoff logic for the next iteration of the loop
+                    if self.callbacks.on_connect_failure and not self.callbacks.on_connect_failure(offset, e, state.url, payload):
+                        return
+
                 managed_task.connection_state = "DISCONNECTED"
                 await asyncio.sleep(state.current_back_off_s)
                 state.current_back_off_s = min(state.current_back_off_s * self.config.back_off_rate, self.config.max_back_off_s)
-        
         finally:
-            # This block is now GUARANTEED to run when the task is cancelled,
-            # regardless of where it was awaited.
             managed_task.connection_state = "DISCONNECTED"
             if managed_task.wss_cli and not managed_task.wss_cli.closed:
                 await managed_task.wss_cli.close()
+            # ** NEW: Ensure old task is cancelled on any exit path **
+            if old_task_to_cancel:
+                if old_task_to_cancel.main_task and not old_task_to_cancel.main_task.done():
+                    old_task_to_cancel.main_task.cancel()
 
     def start_task(self, offset: TaskOffset, url: str, initial_payload: Message):
-        current_task = self._managed_tasks.get(offset)
+        old_managed_task = self._managed_tasks.pop(offset, None)
 
-        if current_task and current_task.previous_task:
-            grandparent_task = current_task.previous_task
-            if grandparent_task.main_task and not grandparent_task.main_task.done():
-                grandparent_task.main_task.cancel()
-            current_task.previous_task = None
-        
         state = _WebSocketTaskState()
         state.url = url
-        state.current_back_off_s = self.config.base_back_off_s
         new_managed_task = _ManagedTask(None, state)
-        
-        new_managed_task.previous_task = current_task
-        
+
         main_task = asyncio.create_task(
-            self._connector(offset, initial_payload, new_managed_task)
+            self._connector(offset, initial_payload, new_managed_task, old_task_to_cancel=old_managed_task)
         )
         new_managed_task.main_task = main_task
-        
         self._managed_tasks[offset] = new_managed_task
 
     def terminate_task(self, offset: TaskOffset):
-        managed_task = self._managed_tasks.get(offset)
-        if managed_task:
-            if managed_task.previous_task:
-                predecessor = managed_task.previous_task
-                if predecessor.main_task and not predecessor.main_task.done():
-                    predecessor.main_task.cancel()
-            
-            if managed_task.main_task and not managed_task.main_task.done():
-                managed_task.main_task.cancel()
-            
-            if offset in self._managed_tasks:
-                del self._managed_tasks[offset]
+        managed_task = self._managed_tasks.pop(offset, None)
+        if managed_task and managed_task.main_task and not managed_task.main_task.done():
+            managed_task.main_task.cancel()
 
     def purge_tasks(self):
         for offset in list(self._managed_tasks.keys()):
@@ -268,20 +228,10 @@ class WebSocketManager:
         return managed_task.get_stats(self.config) if managed_task else None
 
     def get_all_stats(self) -> Dict[str, Any]:
-        summary = {
-            "connected": 0,
-            "connecting": 0,
-            "disconnected": 0,
-        }
+        summary = {"connected": 0, "connecting": 0, "disconnected": 0}
         per_task_stats = {}
         for offset, task in self._managed_tasks.items():
-            summary[task.connection_state.lower()] += 1
+            summary[task.connection_state.lower()] = summary.get(task.connection_state.lower(), 0) + 1
             per_task_stats[offset] = task.get_stats(self.config)
-            
-            if task.previous_task and task.previous_task.connection_state == "CONNECTED":
-                summary["connected"] += 1
-                
-        return {
-            "connection_summary": summary,
-            "per_task_stats": per_task_stats
-        }
+
+        return {"connection_summary": summary, "per_task_stats": per_task_stats}

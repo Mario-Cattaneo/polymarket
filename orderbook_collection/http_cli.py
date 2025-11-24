@@ -5,10 +5,8 @@ import time
 from enum import Enum
 from typing import TypeAlias, Callable, Optional, Dict, Any, Tuple, Coroutine, Union, Awaitable, Set
 
-# --- CORRECT: Import the utility function ---
 from utils import maybe_await
 
-# --- Type Aliases ---
 Request_id: TypeAlias = Any
 URL: TypeAlias = str
 Headers: TypeAlias = Dict[str, str]
@@ -17,14 +15,11 @@ RequestContent: TypeAlias = bytes
 StatusCode: TypeAlias = int
 RTT: TypeAlias = float
 
-# --- Enums ---
 class Method(Enum):
     GET = 0
     POST = 1
 
-# --- REMOVED: MaxConcurrencyPolicy is no longer used ---
 
-# --- Callback Signatures ---
 Next_request: TypeAlias = Callable[[], Tuple[Request_id, URL, Method, Optional[Headers], Optional[RequestContent]]]
 
 On_response: TypeAlias = Callable[
@@ -40,9 +35,7 @@ On_exception: TypeAlias = Callable[
 Prerequest: TypeAlias = Callable[['RequestHandler'], Coroutine[None, None, bool]]
 
 
-# --- Data Classes ---
 class HttpTaskConfig:
-    # ... (no changes in this class) ...
     __slots__ = ('base_back_off_s', 'max_back_off_s', 'back_off_rate', 'request_break_s')
 
     def __init__(self, 
@@ -66,7 +59,6 @@ class HttpTaskConfig:
         return str(self.to_dict())
     
 class HttpTaskCallbacks:
-    # ... (no changes in this class) ...
     __slots__ = ('next_request', 'on_response', 'on_exception', 'prerequest')
 
     def __init__(self,
@@ -96,7 +88,6 @@ class HttpTaskCallbacks:
         return str(self.to_dict())
     
 class RequestHandler:
-    # ... (no changes in this class) ...
     __slots__ = ('handler_task', 'requests_made', 'network_failures', 'last_request_time_s', 
                  'request_id', 'url', 'method', 'payload', 'headers')
 
@@ -232,8 +223,6 @@ class RequestProducer:
         if self.producer_task and not self.producer_task.done():
             self.producer_task.cancel()
 
-        # Iterate over a copy of the values, as the dictionary may be modified
-        # by the done_callbacks of the tasks being cancelled.
         for handler in list(self.requests.values()):
             handler.stop()
 
@@ -309,7 +298,6 @@ class RequestProducer:
         return str(self.to_dict())
 
 class HttpManager:
-    # ... (no changes in this class) ...
     def __init__(self, 
                  timeout: float = 5.0, 
                  keepalive_expiry: float = 10.0,
