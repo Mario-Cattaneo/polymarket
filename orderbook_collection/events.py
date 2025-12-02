@@ -146,7 +146,8 @@ class Events:
 
     async def _restore_subscriptions_from_db(self):
         self._log("restore_subscriptions_from_db: starting", "INFO")
-        stmt = "SELECT DISTINCT asset_id FROM markets WHERE closed_time IS NULL;"
+        # UPDATED: markets_2
+        stmt = "SELECT DISTINCT asset_id FROM markets_2 WHERE closed_time IS NULL;"
         try:
             results = await self._db_cli.fetch(task_id="get_all_active_asset_ids", stmt=stmt)
             if not results:
@@ -201,24 +202,29 @@ class Events:
     def _start_db_inserters(self):
         self._log("start: Starting database inserters...", "INFO")
 
+        # UPDATED: buffer_books_2
         self._running_db_tasks[BOOKS_INSERTER_ID] = self._db_cli.copy_persistent(
-            task_id=BOOKS_INSERTER_ID, table_name="buffer_books", params_buffer=self._book_rows,
+            task_id=BOOKS_INSERTER_ID, table_name="buffer_books_2", params_buffer=self._book_rows,
             signal=self._book_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
         )
+        # UPDATED: buffer_price_changes_2
         self._running_db_tasks[PRICE_CHANGES_INSERTER_ID] = self._db_cli.copy_persistent(
-            task_id=PRICE_CHANGES_INSERTER_ID, table_name="buffer_price_changes", params_buffer=self._price_change_rows,
+            task_id=PRICE_CHANGES_INSERTER_ID, table_name="buffer_price_changes_2", params_buffer=self._price_change_rows,
             signal=self._price_change_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
         )
+        # UPDATED: buffer_last_trade_prices_2
         self._running_db_tasks[LAST_TRADE_PRICES_INSERTER_ID] = self._db_cli.copy_persistent(
-            task_id=LAST_TRADE_PRICES_INSERTER_ID, table_name="buffer_last_trade_prices", params_buffer=self._last_trade_price_rows,
+            task_id=LAST_TRADE_PRICES_INSERTER_ID, table_name="buffer_last_trade_prices_2", params_buffer=self._last_trade_price_rows,
             signal=self._last_trade_price_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
         )
+        # UPDATED: buffer_tick_changes_2
         self._running_db_tasks[TICK_CHANGES_INSERTER_ID] = self._db_cli.copy_persistent(
-            task_id=TICK_CHANGES_INSERTER_ID, table_name="buffer_tick_changes", params_buffer=self._tick_change_rows,
+            task_id=TICK_CHANGES_INSERTER_ID, table_name="buffer_tick_changes_2", params_buffer=self._tick_change_rows,
             signal=self._tick_change_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
         )
+        # UPDATED: buffer_events_connections_2
         self._running_db_tasks[CONNECTIONS_INSERTER_ID] = self._db_cli.copy_persistent(
-            task_id=CONNECTIONS_INSERTER_ID, table_name="buffer_events_connections", params_buffer=self._connection_rows,
+            task_id=CONNECTIONS_INSERTER_ID, table_name="buffer_events_connections_2", params_buffer=self._connection_rows,
             signal=self._connection_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
         )
 

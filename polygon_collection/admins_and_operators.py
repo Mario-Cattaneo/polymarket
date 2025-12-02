@@ -18,7 +18,7 @@ DEPLOYER_ADDRESS = "0x81fd0E5E7372ED171f421A7C33a4b263Ea9DCc25"
 
 # Deployment Block
 START_BLOCK = 15949236 
-OUTPUT_CSV = "admins_and_operators.csv"
+OUTPUT_CSV = f"{os.getenv("POLY_CSV")}/admins_and_operators.csv"
 
 # 2. SETUP
 # --------
@@ -125,7 +125,7 @@ def main():
         for future in tqdm(as_completed(future_to_chunk), total=len(chunks), desc="Scanning"):
             all_logs.extend(future.result())
 
-    print(f"✅ Found {len(all_logs)} events. Processing...")
+    print(f"Found {len(all_logs)} events. Processing...")
 
     # Sort Chronologically (Block -> Log Index)
     all_logs.sort(key=lambda x: (int(x['blockNumber'], 16), int(x['logIndex'], 16)))
@@ -184,7 +184,7 @@ def main():
                 'operators_snapshot': json.dumps(sorted(list(operators)))
             })
 
-    print("✅ CSV Generation Complete.")
+    print("CSV Generation Complete.")
     print(f"Final Admin Count: {len(admins)}")
     print(f"Final Operator Count: {len(operators)}")
 

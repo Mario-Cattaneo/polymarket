@@ -5,18 +5,16 @@ nohup: ignoring input
 [INFO] all environment variables are present.
 [INFO] module-specific logger initialized in '/data-hdd/orderbookThesis/logs'.
 [INFO] database manager connected.
-[WARN] RESET flag is TRUE. Tearing down existing schema...
-[WARN] Schema teardown complete.
 [INFO] Setting up database schema...
 [INFO] Database schema setup complete.
 [INFO] Initializing application modules
 [INFO] All application modules initialized
 [INFO] Starting collection services
-[INFO] All collection services started successfully. System is running.
 [INFO] Partition maintenance worker started.
 [INFO] Running partition maintenance check...
 [INFO] Partition maintenance check completed successfully.
 [INFO] Sleeping for 7200 seconds until next maintenance run.
+[INFO] All collection services started successfully. System is running.
 [INFO] Running partition maintenance check...
 [INFO] Partition maintenance check completed successfully.
 [INFO] Sleeping for 7200 seconds until next maintenance run.
@@ -150,3 +148,4 @@ nohup: ignoring input
 [INFO] Partition maintenance check completed successfully.
 [INFO] Sleeping for 7200 seconds until next maintenance run.
 [INFO] Running partition maintenance check...
+[INFO] Partition maintenance check completed successfully.

@@ -12,7 +12,10 @@ from datetime import datetime
 # CONFIGURATION
 # ==========================================
 USE_MOCK_DATA = False
-SAVE_DIR = "event_partition_asset_agg"
+
+# Base Path Logic
+POLY_PLOTS = os.getenv("POLY_PLOTS", "plots") # Default to local 'plots' if env var missing
+BASE_OUTPUT_DIR = os.path.join(POLY_PLOTS, "events_agg")
 
 # Time Aggregation
 K = 2  # Interval multiplier (e.g., K=2 * 3h = 6h steps)
@@ -32,6 +35,7 @@ PLOT_HEIGHT_INCHES = 5.0  # Fixed height for the graph part only
 # ==========================================
 # PER-TABLE CONFIGURATION
 # ==========================================
+# Note: 'table_name' here is the BASE name. Suffixes ('', '_2') are added dynamically.
 PLOTS_CONFIG = {
     "price_changes": {
         "table_name": "agg_price_changes",
@@ -39,7 +43,7 @@ PLOTS_CONFIG = {
         "metrics": [
             {
                 'col': 'total_count', 'title': 'Total Count', 'color': 'blue', 
-                'percentiles': [0.50, 0.95, 0.99]
+                'percentiles': [0.50, 0.95, 0.999]
             },
             {
                 'col': 'ambiguous_count', 'title': 'Ambiguous', 'color': 'orange', 
@@ -127,6 +131,16 @@ async def fetch_table_data(table_name):
             user=os.getenv("POLY_DB_CLI"),
             password=os.getenv("POLY_DB_CLI_PASS")
         )
+        # Check if table exists first to avoid crash
+        exists = await conn.fetchval(
+            "SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = $1)", 
+            table_name
+        )
+        if not exists:
+            print(f"[WARN] Table {table_name} does not exist in DB.")
+            await conn.close()
+            return pd.DataFrame()
+
         query = f"SELECT * FROM {table_name} ORDER BY partition_start_time_ms ASC"
         rows = await conn.fetch(query)
         await conn.close()
@@ -300,10 +314,10 @@ def draw_metric_and_table(ax, df_resampled, metric_col, metric_title, color, per
 # MAIN PROCESSING LOGIC
 # ==========================================
 
-def process_table(key, config, df):
+def process_table(key, config, df, save_dir, actual_table_name):
     if df.empty: return
 
-    print(f"[INFO] Processing {key}...")
+    print(f"[INFO] Processing {actual_table_name} -> {save_dir}")
     
     interval_str = f'{K * PARTITION_SIZE_HOURS}h'
     all_cols = [m['col'] for m in config['metrics']]
@@ -342,10 +356,6 @@ def process_table(key, config, df):
         })
 
         # Calculate height for individual plot
-        # We need enough space for the table.
-        # Table height = (rows * TABLE_ROW_HEIGHT) relative to axes.
-        # But figsize is in inches.
-        # Approx: 1 row ~ 0.25 inches
         num_rows = len(unique_starts) + 1
         table_height_inches = num_rows * 0.25
         total_fig_height = PLOT_HEIGHT_INCHES + table_height_inches + 1
@@ -359,26 +369,22 @@ def process_table(key, config, df):
             step_width_days, all_ticks_pydatetime
         )
         
-        # Adjust bottom margin: fraction of figure height
+        # Adjust bottom margin
         bottom_margin = (table_height_inches + 0.5) / total_fig_height
         plt.subplots_adjust(bottom=bottom_margin)
         
-        filename = f"{config['table_name']}_{metric_cfg['col']}.png"
-        save_path = os.path.join(SAVE_DIR, filename)
+        filename = f"{actual_table_name}_{metric_cfg['col']}.png"
+        save_path = os.path.join(save_dir, filename)
         plt.savefig(save_path, dpi=300)
         print(f"   -> Saved: {filename}")
         plt.close(fig)
 
     # ---------------------------------------------------------
-    # 2. GENERATE MASTER PLOT (Stacked)
+    # 2. GENERATE MASTER PLOT (Stacked) FOR THIS TABLE
     # ---------------------------------------------------------
     if not master_plot_items: return
 
-    print("[INFO] Generating MASTER Combined Plot...")
-    
     # Calculate Total Height & Spacing
-    # We need to ensure the gap between plots is exactly enough for the table.
-    # Gap needed (inches) = (Rows * 0.25) + Buffer
     num_rows = len(unique_starts) + 1
     table_height_inches = num_rows * 0.25
     gap_inches = table_height_inches + 1.0
@@ -396,18 +402,12 @@ def process_table(key, config, df):
             item['cfg']['percentiles'], item['prefix'], item['width'], item['ticks']
         )
 
-    # Calculate hspace ratio
-    # hspace is relative to the average axis height.
-    # Axis height = PLOT_HEIGHT_INCHES
-    # Gap = gap_inches
     hspace_ratio = gap_inches / PLOT_HEIGHT_INCHES
-    
     plt.subplots_adjust(hspace=hspace_ratio, bottom=0.05, top=0.98)
 
-    master_filename = "ALL_METRICS_MASTER.png"
-    master_path = os.path.join(SAVE_DIR, master_filename)
+    master_filename = f"MASTER_{actual_table_name}.png"
+    master_path = os.path.join(save_dir, master_filename)
     plt.savefig(master_path, dpi=300, bbox_inches='tight')
-    print(f"[SUCCESS] Saved Master Plot to: {master_path}")
     plt.close(fig)
 
 # ==========================================
@@ -417,84 +417,105 @@ def main():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
-    os.makedirs(SAVE_DIR, exist_ok=True)
+    print(f"[INIT] Base Output Directory: {BASE_OUTPUT_DIR}")
 
-    # 1. Fetch All Data
-    all_data = {}
-    for key, config in PLOTS_CONFIG.items():
-        if USE_MOCK_DATA:
-            all_data[key] = generate_mock_data()
-        else:
-            try:
-                all_data[key] = loop.run_until_complete(fetch_table_data(config['table_name']))
-            except Exception as e:
-                print(f"[ERROR] Failed to fetch {key}: {e}")
-                all_data[key] = pd.DataFrame()
+    # Define the two versions we want to process
+    versions = [
+        {"suffix": "",   "subdir": "1"}, # Original tables -> /1/
+        {"suffix": "_2", "subdir": "2"}  # V2 tables -> /2/
+    ]
 
-    # 2. Process
-    global_master_items = []
-
-    for key, config in PLOTS_CONFIG.items():
-        df = all_data[key]
-        if df.empty: continue
+    for ver in versions:
+        suffix = ver["suffix"]
+        subdir = ver["subdir"]
         
-        # Process individual table
-        process_table(key, config, df)
+        # Create specific directory: $POLY_PLOTS/events_agg/1/ or /2/
+        current_save_dir = os.path.join(BASE_OUTPUT_DIR, subdir)
+        os.makedirs(current_save_dir, exist_ok=True)
         
-        # Prepare for Global Master
-        interval_str = f'{K * PARTITION_SIZE_HOURS}h'
-        all_cols = [m['col'] for m in config['metrics']]
-        df_resampled = df.groupby([pd.Grouper(key='timestamp', freq=interval_str), 'asset_id'])[all_cols].sum().reset_index()
-        
-        step_hours = K * PARTITION_SIZE_HOURS
-        step_width_days = step_hours / 24.0
-        unique_starts = np.sort(df_resampled['timestamp'].unique())
-        if len(unique_starts) > 0:
-            last_end = unique_starts[-1] + pd.Timedelta(hours=step_hours)
-            all_ticks_pd = np.append(unique_starts, last_end)
-            all_ticks_pydatetime = [pd.Timestamp(t).to_pydatetime() for t in all_ticks_pd]
-        else:
-            all_ticks_pydatetime = []
+        print(f"\n==================================================")
+        print(f" PROCESSING VERSION: '{subdir}' (Suffix: '{suffix}')")
+        print(f" Saving to: {current_save_dir}")
+        print(f"==================================================")
 
-        for metric_cfg in config['metrics']:
-            global_master_items.append({
-                'df': df_resampled,
-                'cfg': metric_cfg,
-                'prefix': config['title_prefix'],
-                'width': step_width_days,
-                'ticks': all_ticks_pydatetime,
-                'rows': len(unique_starts) + 1
-            })
+        # 1. Fetch Data for this version
+        all_data = {}
+        for key, config in PLOTS_CONFIG.items():
+            # Construct actual table name (e.g., agg_price_changes_2)
+            actual_table_name = config['table_name'] + suffix
+            
+            if USE_MOCK_DATA:
+                all_data[key] = generate_mock_data()
+            else:
+                try:
+                    all_data[key] = loop.run_until_complete(fetch_table_data(actual_table_name))
+                except Exception as e:
+                    print(f"[ERROR] Failed to fetch {actual_table_name}: {e}")
+                    all_data[key] = pd.DataFrame()
 
-    # 3. Generate GLOBAL MASTER Plot
-    if global_master_items:
-        print("[INFO] Generating GLOBAL MASTER Combined Plot...")
-        
-        # Find max rows to determine spacing (assuming uniform steps, but safe to check max)
-        max_rows = max(item['rows'] for item in global_master_items)
-        
-        # Calculate spacing
-        table_height_inches = max_rows * 0.25
-        gap_inches = table_height_inches + 1.0
-        total_height = (PLOT_HEIGHT_INCHES + gap_inches) * len(global_master_items)
+        # 2. Process Tables & Prepare Global Master for this version
+        version_master_items = []
 
-        fig = plt.figure(figsize=(FIG_WIDTH, total_height))
-        axes = fig.subplots(len(global_master_items), 1)
+        for key, config in PLOTS_CONFIG.items():
+            df = all_data[key]
+            if df.empty: continue
+            
+            actual_table_name = config['table_name'] + suffix
+            
+            # Process individual table (generates individual plots + table master)
+            process_table(key, config, df, current_save_dir, actual_table_name)
+            
+            # Prepare for GLOBAL MASTER (All tables in this version combined)
+            interval_str = f'{K * PARTITION_SIZE_HOURS}h'
+            all_cols = [m['col'] for m in config['metrics']]
+            df_resampled = df.groupby([pd.Grouper(key='timestamp', freq=interval_str), 'asset_id'])[all_cols].sum().reset_index()
+            
+            step_hours = K * PARTITION_SIZE_HOURS
+            step_width_days = step_hours / 24.0
+            unique_starts = np.sort(df_resampled['timestamp'].unique())
+            if len(unique_starts) > 0:
+                last_end = unique_starts[-1] + pd.Timedelta(hours=step_hours)
+                all_ticks_pd = np.append(unique_starts, last_end)
+                all_ticks_pydatetime = [pd.Timestamp(t).to_pydatetime() for t in all_ticks_pd]
+            else:
+                all_ticks_pydatetime = []
 
-        for i, item in enumerate(global_master_items):
-            draw_metric_and_table(
-                axes[i], item['df'], item['cfg']['col'], item['cfg']['title'], item['cfg']['color'],
-                item['cfg']['percentiles'], item['prefix'], item['width'], item['ticks']
-            )
+            for metric_cfg in config['metrics']:
+                version_master_items.append({
+                    'df': df_resampled,
+                    'cfg': metric_cfg,
+                    'prefix': config['title_prefix'],
+                    'width': step_width_days,
+                    'ticks': all_ticks_pydatetime,
+                    'rows': len(unique_starts) + 1
+                })
 
-        hspace_ratio = gap_inches / PLOT_HEIGHT_INCHES
-        plt.subplots_adjust(hspace=hspace_ratio, bottom=0.02, top=0.99)
+        # 3. Generate GLOBAL MASTER Plot for this version
+        if version_master_items:
+            print(f"[INFO] Generating GLOBAL MASTER for Version {subdir}...")
+            
+            max_rows = max(item['rows'] for item in version_master_items)
+            table_height_inches = max_rows * 0.25
+            gap_inches = table_height_inches + 1.0
+            total_height = (PLOT_HEIGHT_INCHES + gap_inches) * len(version_master_items)
 
-        master_filename = "ALL_METRICS_MASTER.png"
-        master_path = os.path.join(SAVE_DIR, master_filename)
-        plt.savefig(master_path, dpi=300, bbox_inches='tight')
-        print(f"[SUCCESS] Saved Global Master Plot to: {master_path}")
-        plt.close(fig)
+            fig = plt.figure(figsize=(FIG_WIDTH, total_height))
+            axes = fig.subplots(len(version_master_items), 1)
+
+            for i, item in enumerate(version_master_items):
+                draw_metric_and_table(
+                    axes[i], item['df'], item['cfg']['col'], item['cfg']['title'], item['cfg']['color'],
+                    item['cfg']['percentiles'], item['prefix'], item['width'], item['ticks']
+                )
+
+            hspace_ratio = gap_inches / PLOT_HEIGHT_INCHES
+            plt.subplots_adjust(hspace=hspace_ratio, bottom=0.02, top=0.99)
+
+            master_filename = "ALL_METRICS_MASTER.png"
+            master_path = os.path.join(current_save_dir, master_filename)
+            plt.savefig(master_path, dpi=300, bbox_inches='tight')
+            print(f"[SUCCESS] Saved Global Master to: {master_path}")
+            plt.close(fig)
 
 if __name__ == "__main__":
     main()

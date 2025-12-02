@@ -13,8 +13,9 @@ SERVER_BOOK_INSERTER_ID = "server_book_inserter"
 
 RTT_INSERTER_ID = "analytics_rtt_inserter"
 
-MODIFIER_ID = "market_reaper"
-MODIFY_MARKETS_STMT = "UPDATE markets SET closed_time = $1 WHERE asset_id = $2"
+MISSED_UPDATER_ID = "missed_count_updater"
+# UPDATED: markets_2
+MISSED_UPDATE_STMT = "UPDATE markets_2 SET missed_before_gone = $1 WHERE asset_id = $2"
 
 SERIALIZER_ID = "serializer"
 
@@ -29,10 +30,12 @@ class Analytics:
 
         self._server_book_rows: List[Tuple] = []
         self._server_book_flag = asyncio.Event()
+        
         self._rtt_rows: List[Tuple] = []
         self._rtt_flag = asyncio.Event()
-        self._modifier_rows: List[Tuple] = []
-        self._modifier_flag = asyncio.Event()
+        
+        self._missed_update_rows: List[Tuple] = []
+        self._missed_update_flag = asyncio.Event()
 
         self._http_config = HttpTaskConfig(
             base_back_off_s=1.0, max_back_off_s=150.0,
@@ -61,21 +64,17 @@ class Analytics:
 
         self._generation_id: int = 0
 
-        self._miss_counts: Dict[str, int] = {} # Key: asset_id, Value: consecutive miss count
-        self._REAP_THRESHOLD = 13 # Set based on forensic data (max 9) + safety margin
+        self._miss_counts: Dict[str, int] = {} 
 
         self._bootstrap_callback_handle: Optional[int] = None
         self._insert_token_callback_handle: Optional[int] = None
         self._delete_token_callback_handle: Optional[int] = None
 
     def get_buffer_sizes(self) -> Dict[str, int]:
-        """
-        Returns the current sizes of the internal database buffers.
-        """
         return {
             "server_book_rows": len(self._server_book_rows),
             "rtt_rows": len(self._rtt_rows),
-            "modifier_rows": len(self._modifier_rows),
+            "missed_update_rows": len(self._missed_update_rows),
         }
 
     def task_summary(self) -> dict:
@@ -116,6 +115,7 @@ class Analytics:
             
             if self._insert_token_callback_handle is None:
                 self._insert_token_callback_handle = self._orderbook_registry.register_insert_callback(self._token_insert_callback)
+            
             if self._delete_token_callback_handle is None:
                 self._delete_token_callback_handle = self._orderbook_registry.register_delete_callback(self._token_delete_callback)
             
@@ -155,7 +155,7 @@ class Analytics:
             if not task.done(): task.cancel()
         self._running_internal_tasks.clear()
 
-        self._server_book_rows.clear(); self._rtt_rows.clear(); self._modifier_rows.clear()
+        self._server_book_rows.clear(); self._rtt_rows.clear(); self._missed_update_rows.clear()
         self._tokens = [set()]; self._payloads = []; self._new_batch = []
         self._payload_offset = 0; self._deleted_token_count = 0
 
@@ -170,17 +170,19 @@ class Analytics:
 
     def _start_db_inserters(self):
         self._log("start: Starting database inserters...", "INFO")
+        # UPDATED: buffer_server_book_2
         self._running_db_tasks[SERVER_BOOK_INSERTER_ID] = self._db_cli.copy_persistent(
-            task_id=SERVER_BOOK_INSERTER_ID, table_name="buffer_server_book" , params_buffer=self._server_book_rows,
+            task_id=SERVER_BOOK_INSERTER_ID, table_name="buffer_server_book_2" , params_buffer=self._server_book_rows,
             signal=self._server_book_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
         )
+        # UPDATED: buffer_analytics_rtt_2
         self._running_db_tasks[RTT_INSERTER_ID] = self._db_cli.copy_persistent(
-            task_id=RTT_INSERTER_ID, table_name="buffer_analytics_rtt", params_buffer=self._rtt_rows,
+            task_id=RTT_INSERTER_ID, table_name="buffer_analytics_rtt_2", params_buffer=self._rtt_rows,
             signal=self._rtt_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
         )
-        self._running_db_tasks[MODIFIER_ID] = self._db_cli.exec_persistent(
-            task_id=MODIFIER_ID, stmt=MODIFY_MARKETS_STMT, params_buffer=self._modifier_rows,
-            signal=self._modifier_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
+        self._running_db_tasks[MISSED_UPDATER_ID] = self._db_cli.exec_persistent(
+            task_id=MISSED_UPDATER_ID, stmt=MISSED_UPDATE_STMT, params_buffer=self._missed_update_rows,
+            signal=self._missed_update_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
         )
 
     def _start_http_producer(self):
@@ -208,6 +210,11 @@ class Analytics:
     def _token_delete_callback(self, token: str):
         self._deleted_token_count += 1
         
+        final_miss_count = self._miss_counts.pop(token, 0)
+        
+        self._missed_update_rows.append((final_miss_count, token))
+        self._missed_update_flag.set()
+
         if self._orderbook_registry.get_token_count() == 0:
             self._log("token_delete_callback: All tokens removed. Stopping and resetting to bootstrap.", "WARNING")
             self.stop()
@@ -246,7 +253,6 @@ class Analytics:
                 self._tokens = [set()]
                 self._new_batch = []
                 self._payloads = []
-                self._miss_counts.clear()
                 
                 self._orderbook_registry.iterate_over_tokens(self._token_insert_callback)
                 self._log(f"serializer: Serialized {self._orderbook_registry.get_token_count()} tokens into {len(self._payloads)} payloads for generation {self._generation_id}.", "INFO")
@@ -314,32 +320,14 @@ class Analytics:
                 self._found_index += 1
 
         sent_tokens = self._tokens[response_offset]
-        reaped_this_cycle = 0
 
         for token in sent_tokens:
             if token in response_tokens:
-                # Token is present, reset its miss count if it was ever missing.
                 if token in self._miss_counts:
                     self._miss_counts.pop(token, None)
             else:
-                # Token is missing, increment its miss count.
-                miss_count = self._miss_counts.get(token, 0) + 1
-                self._miss_counts[token] = miss_count
-                
-                #self._log(f"Token '{token}' missing from response. Miss count: {miss_count}/{self._REAP_THRESHOLD}", "WARNING")
-
-                # If threshold is reached, reap it inline.
-                if miss_count >= self._REAP_THRESHOLD:
-                    self._modifier_rows.append((now_ms, token))
-                    self._orderbook_registry.delete_token(token)
-                    self._miss_counts.pop(token, None)
-                    reaped_this_cycle += 1
+                self._miss_counts[token] = self._miss_counts.get(token, 0) + 1
         
-        # After the loop, log the summary and set the flag if anything was reaped.
-        if reaped_this_cycle > 0:
-            self._log(f"Reaped {reaped_this_cycle} tokens this cycle after reaching threshold.", "INFO")
-            self._modifier_flag.set()
-
         if books_to_add:
             self._server_book_rows.extend(books_to_add)
             self._server_book_flag.set()
@@ -352,12 +340,10 @@ class Analytics:
         return False
     
     async def _on_insert_success(self, task_id: str, params: List[Tuple]):
-        #self._log(f"on_copy_success: copied {len(params)}", "DEBUG")
         if task_id == SERVER_BOOK_INSERTER_ID: self._server_book_rows.clear()
         elif task_id == RTT_INSERTER_ID: self._rtt_rows.clear()
-        elif task_id == MODIFIER_ID: self._modifier_rows.clear()
+        elif task_id == MISSED_UPDATER_ID: self._missed_update_rows.clear()
     
     async def _on_inserter_failure(self, task_id: str, exception: Exception, params: List[Tuple]):
         self._log(f"on_inserter_failure: '{task_id}' failed with '{exception}'. Stopping analytics.", "FATAL")
         self.stop()
-    

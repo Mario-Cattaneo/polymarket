@@ -14,7 +14,7 @@ import markets
 import events
 import analytics
 
-RESET = True
+RESET = False
 
 POLY_HOME = None
 POLY_LOGS = None
@@ -36,39 +36,31 @@ def monitor_log(log_content: str):
 # ====================================================================
 
 # --- Partition Timing ---
-# The duration of each partition in milliseconds.
-# 3 hours = 10,800,000 ms
 partition_duration_ms = 10800000
-
-# The number of future partitions to create as a safety buffer.
-# 2 provides a 6-hour (2 * 3 hours) safety window.
 partition_buffer_count = 2
 
 # --- Application Scheduler ---
-# How often the background asyncio task should run to check for new partitions.
-# 2 hours = 7200 seconds
 MAINTENANCE_INTERVAL_SECONDS = 7200
 
 # List of all tables that require partition management.
+# UPDATED: Suffix _2 added
 PARTITIONED_TABLES = [
-    'buffer_markets',
-    'buffer_books',
-    'buffer_price_changes',
-    'buffer_last_trade_prices',
-    'buffer_tick_changes',
-    'buffer_server_book',
-    'buffer_markets_rtt',
-    'buffer_analytics_rtt',
-    'buffer_events_connections',
+    'buffer_markets_2',
+    'buffer_books_2',
+    'buffer_price_changes_2',
+    'buffer_last_trade_prices_2',
+    'buffer_tick_changes_2',
+    'buffer_server_book_2',
+    'buffer_markets_rtt_2',
+    'buffer_analytics_rtt_2',
+    'buffer_events_connections_2',
 ]
 
 
 # ====================================================================
-# DATABASE INITIALIZATION SCRIPT (F-STRING) - NO DATA DELETION
+# DATABASE INITIALIZATION SCRIPT (F-STRING)
 # ====================================================================
 
-# This f-string will be populated with the parameters defined above.
-# NOTE: All pg_cron logic has been removed.
 SETUP_SCHEMA_STMT = f"""
 -- Part 1: Schema and Function Definition
 DO $$ BEGIN
@@ -76,25 +68,47 @@ DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'event') THEN CREATE TYPE EVENT AS ENUM ('price_change', 'last_trade_price', 'book'); END IF;
 END$$;
 
-CREATE TABLE IF NOT EXISTS markets (found_index BIGINT, found_time_ms BIGINT, asset_id TEXT PRIMARY KEY, exhaustion_cycle BIGINT , market_id TEXT , condition_id TEXT, question_id TEXT, negrisk_id TEXT, "offset" BIGINT , closed_time BIGINT DEFAULT NULL, message jsonb );
-CREATE TABLE IF NOT EXISTS books (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, conflict_count BIGINT  DEFAULT 1, message jsonb , PRIMARY KEY (asset_id, server_time_ms));
-CREATE TABLE IF NOT EXISTS price_changes (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, price REAL, size REAL, side SIDE, conflict_count BIGINT  DEFAULT 1, message jsonb , PRIMARY KEY (asset_id, server_time_ms, side, price));
-CREATE TABLE IF NOT EXISTS last_trade_prices (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, price REAL, size REAL, side SIDE, conflict_count BIGINT  DEFAULT 1, fee_rate_bps REAL , message jsonb , PRIMARY KEY (asset_id, server_time_ms, side, price));
-CREATE TABLE IF NOT EXISTS tick_changes (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, tick_size REAL, conflict_count BIGINT  DEFAULT 1, message jsonb , PRIMARY KEY (asset_id, server_time_ms));
-CREATE TABLE IF NOT EXISTS server_book (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, false_misses BIGINT , message jsonb , PRIMARY KEY (asset_id, server_time_ms));
-CREATE TABLE IF NOT EXISTS markets_rtt (found_time_ms BIGINT PRIMARY KEY, rtt REAL );
-CREATE TABLE IF NOT EXISTS analytics_rtt (found_time_ms BIGINT PRIMARY KEY, rtt REAL );
-CREATE TABLE IF NOT EXISTS events_connections(found_time_ms BIGINT, timestamp_ms BIGINT, success BOOLEAN , reason TEXT DEFAULT NULL, CONSTRAINT pk_events_connections PRIMARY KEY (success, found_time_ms));
+-- UPDATED: markets_2 with missed_before_gone
+CREATE TABLE IF NOT EXISTS markets_2 (
+    found_index BIGINT, 
+    found_time_ms BIGINT, 
+    asset_id TEXT PRIMARY KEY, 
+    exhaustion_cycle BIGINT, 
+    market_id TEXT, 
+    condition_id TEXT, 
+    question_id TEXT, 
+    negrisk_id TEXT, 
+    "offset" BIGINT, 
+    closed_time BIGINT DEFAULT NULL, 
+    missed_before_gone BIGINT DEFAULT NULL,
+    message jsonb 
+);
 
-CREATE TABLE IF NOT EXISTS buffer_markets  (found_index BIGINT, found_time_ms BIGINT, asset_id TEXT, exhaustion_cycle BIGINT, market_id TEXT , condition_id TEXT, question_id TEXT, negrisk_id TEXT, "offset" BIGINT , closed_time BIGINT DEFAULT NULL, message jsonb ) PARTITION BY RANGE (found_time_ms);
-CREATE TABLE IF NOT EXISTS buffer_books (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, message jsonb ) PARTITION BY RANGE (found_time_ms);
-CREATE TABLE IF NOT EXISTS buffer_price_changes (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, price REAL, size REAL, side SIDE, message jsonb ) PARTITION BY RANGE (found_time_ms);
-CREATE TABLE IF NOT EXISTS buffer_last_trade_prices (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, price REAL, size REAL, side SIDE, fee_rate_bps REAL , message jsonb ) PARTITION BY RANGE (found_time_ms);
-CREATE TABLE IF NOT EXISTS buffer_tick_changes (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, tick_size REAL, message jsonb ) PARTITION BY RANGE (found_time_ms);
-CREATE TABLE IF NOT EXISTS buffer_server_book (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, false_misses BIGINT , message jsonb ) PARTITION BY RANGE (found_time_ms);
-CREATE TABLE IF NOT EXISTS buffer_markets_rtt (found_time_ms BIGINT, rtt REAL) PARTITION BY RANGE (found_time_ms);
-CREATE TABLE IF NOT EXISTS buffer_analytics_rtt (found_time_ms BIGINT, rtt REAL) PARTITION BY RANGE (found_time_ms);
-CREATE TABLE IF NOT EXISTS buffer_events_connections(found_time_ms BIGINT, success BOOLEAN, reason TEXT) PARTITION BY RANGE (found_time_ms);
+-- UPDATED: buffer_markets_2 with missed_before_gone
+CREATE TABLE IF NOT EXISTS buffer_markets_2 (
+    found_index BIGINT, 
+    found_time_ms BIGINT, 
+    asset_id TEXT, 
+    exhaustion_cycle BIGINT, 
+    market_id TEXT, 
+    condition_id TEXT, 
+    question_id TEXT, 
+    negrisk_id TEXT, 
+    "offset" BIGINT, 
+    closed_time BIGINT DEFAULT NULL, 
+    missed_before_gone BIGINT DEFAULT NULL,
+    message jsonb 
+) PARTITION BY RANGE (found_time_ms);
+
+-- UPDATED: All other buffers renamed to _2
+CREATE TABLE IF NOT EXISTS buffer_books_2 (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, message jsonb ) PARTITION BY RANGE (found_time_ms);
+CREATE TABLE IF NOT EXISTS buffer_price_changes_2 (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, price REAL, size REAL, side SIDE, message jsonb ) PARTITION BY RANGE (found_time_ms);
+CREATE TABLE IF NOT EXISTS buffer_last_trade_prices_2 (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, price REAL, size REAL, side SIDE, fee_rate_bps REAL , message jsonb ) PARTITION BY RANGE (found_time_ms);
+CREATE TABLE IF NOT EXISTS buffer_tick_changes_2 (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, tick_size REAL, message jsonb ) PARTITION BY RANGE (found_time_ms);
+CREATE TABLE IF NOT EXISTS buffer_server_book_2 (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, false_misses BIGINT , message jsonb ) PARTITION BY RANGE (found_time_ms);
+CREATE TABLE IF NOT EXISTS buffer_markets_rtt_2 (found_time_ms BIGINT, rtt REAL) PARTITION BY RANGE (found_time_ms);
+CREATE TABLE IF NOT EXISTS buffer_analytics_rtt_2 (found_time_ms BIGINT, rtt REAL) PARTITION BY RANGE (found_time_ms);
+CREATE TABLE IF NOT EXISTS buffer_events_connections_2 (found_time_ms BIGINT, success BOOLEAN, reason TEXT) PARTITION BY RANGE (found_time_ms);
 
 CREATE TABLE IF NOT EXISTS partition_manager_config (system_start_time_ms BIGINT PRIMARY KEY);
 
@@ -130,15 +144,15 @@ BEGIN
     IF EXISTS (SELECT 1 FROM partition_manager_config) THEN RAISE NOTICE 'Partition manager already initialized.'; RETURN; END IF;
     RAISE NOTICE 'INITIALIZING PARTITION MANAGER...';
     INSERT INTO partition_manager_config (system_start_time_ms) VALUES ((EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT);
-    PERFORM create_floating_partition_if_needed('buffer_markets');
-    PERFORM create_floating_partition_if_needed('buffer_books');
-    PERFORM create_floating_partition_if_needed('buffer_price_changes');
-    PERFORM create_floating_partition_if_needed('buffer_last_trade_prices');
-    PERFORM create_floating_partition_if_needed('buffer_tick_changes');
-    PERFORM create_floating_partition_if_needed('buffer_server_book');
-    PERFORM create_floating_partition_if_needed('buffer_markets_rtt');
-    PERFORM create_floating_partition_if_needed('buffer_analytics_rtt');
-    PERFORM create_floating_partition_if_needed('buffer_events_connections');
+    PERFORM create_floating_partition_if_needed('buffer_markets_2');
+    PERFORM create_floating_partition_if_needed('buffer_books_2');
+    PERFORM create_floating_partition_if_needed('buffer_price_changes_2');
+    PERFORM create_floating_partition_if_needed('buffer_last_trade_prices_2');
+    PERFORM create_floating_partition_if_needed('buffer_tick_changes_2');
+    PERFORM create_floating_partition_if_needed('buffer_server_book_2');
+    PERFORM create_floating_partition_if_needed('buffer_markets_rtt_2');
+    PERFORM create_floating_partition_if_needed('buffer_analytics_rtt_2');
+    PERFORM create_floating_partition_if_needed('buffer_events_connections_2');
     RAISE NOTICE 'INITIALIZATION COMPLETE.';
 END;
 $$;
@@ -146,11 +160,10 @@ $$;
 
 TEARDOWN_SCHEMA_STMT = """
     DROP TABLE IF EXISTS
-        markets, books, price_changes, last_trade_prices, tick_changes, server_book,
-        markets_rtt, analytics_rtt, events_connections,
-        buffer_markets, buffer_books, buffer_price_changes, buffer_last_trade_prices,
-        buffer_tick_changes, buffer_server_book, buffer_markets_rtt,
-        buffer_analytics_rtt, buffer_events_connections,
+        markets_2, 
+        buffer_markets_2, buffer_books_2, buffer_price_changes_2, buffer_last_trade_prices_2,
+        buffer_tick_changes_2, buffer_server_book_2, buffer_markets_rtt_2,
+        buffer_analytics_rtt_2, buffer_events_connections_2,
         partition_manager_config CASCADE;
     
     DROP FUNCTION IF EXISTS create_floating_partition_if_needed(TEXT) CASCADE;

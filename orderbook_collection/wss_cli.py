@@ -194,8 +194,10 @@ class WebSocketManager:
                 state.current_back_off_s = min(state.current_back_off_s * self.config.back_off_rate, self.config.max_back_off_s)
         finally:
             managed_task.connection_state = "DISCONNECTED"
-            if managed_task.wss_cli and not managed_task.wss_cli.closed:
+            # FIX: Just call close(). It handles the state check internally.
+            if managed_task.wss_cli:
                 await managed_task.wss_cli.close()
+            
             # ** NEW: Ensure old task is cancelled on any exit path **
             if old_task_to_cancel:
                 if old_task_to_cancel.main_task and not old_task_to_cancel.main_task.done():
