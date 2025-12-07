@@ -8,6 +8,16 @@ import numpy as np
 from scipy.stats import skew, kurtosis
 from datetime import datetime
 
+# ----------------------------------------------------------------
+# 0. GLOBAL CONFIGURATION BOARDS
+# ----------------------------------------------------------------
+
+# Set to True to process the original tables (Fork 1, suffix "")
+PROCESS_FORK_1 = False 
+
+# Set to True to process the V2 tables (Fork 2, suffix "_2")
+PROCESS_FORK_2 = True 
+
 # ==========================================
 # CONFIGURATION
 # ==========================================
@@ -313,117 +323,22 @@ def draw_metric_and_table(ax, df_resampled, metric_col, metric_title, color, per
 # ==========================================
 # MAIN PROCESSING LOGIC
 # ==========================================
-
-def process_table(key, config, df, save_dir, actual_table_name):
-    if df.empty: return
-
-    print(f"[INFO] Processing {actual_table_name} -> {save_dir}")
-    
-    interval_str = f'{K * PARTITION_SIZE_HOURS}h'
-    all_cols = [m['col'] for m in config['metrics']]
-    
-    # Aggregate
-    df_resampled = df.groupby(
-        [pd.Grouper(key='timestamp', freq=interval_str), 'asset_id']
-    )[all_cols].sum().reset_index()
-
-    # Common Vars
-    step_hours = K * PARTITION_SIZE_HOURS
-    step_width_days = step_hours / 24.0
-    unique_starts = np.sort(df_resampled['timestamp'].unique())
-    
-    if len(unique_starts) > 0:
-        last_end = unique_starts[-1] + pd.Timedelta(hours=step_hours)
-        all_ticks_pd = np.append(unique_starts, last_end)
-        all_ticks_pydatetime = [pd.Timestamp(t).to_pydatetime() for t in all_ticks_pd]
-    else:
-        all_ticks_pydatetime = []
-
-    # ---------------------------------------------------------
-    # 1. GENERATE INDIVIDUAL PLOTS
-    # ---------------------------------------------------------
-    master_plot_items = []
-
-    for metric_cfg in config['metrics']:
-        
-        # Store for Master
-        master_plot_items.append({
-            'df': df_resampled,
-            'cfg': metric_cfg,
-            'prefix': config['title_prefix'],
-            'width': step_width_days,
-            'ticks': all_ticks_pydatetime
-        })
-
-        # Calculate height for individual plot
-        num_rows = len(unique_starts) + 1
-        table_height_inches = num_rows * 0.25
-        total_fig_height = PLOT_HEIGHT_INCHES + table_height_inches + 1
-
-        fig = plt.figure(figsize=(FIG_WIDTH, total_fig_height))
-        ax = fig.add_subplot(111)
-        
-        draw_metric_and_table(
-            ax, df_resampled, metric_cfg['col'], metric_cfg['title'], metric_cfg['color'], 
-            metric_cfg['percentiles'], config['title_prefix'], 
-            step_width_days, all_ticks_pydatetime
-        )
-        
-        # Adjust bottom margin
-        bottom_margin = (table_height_inches + 0.5) / total_fig_height
-        plt.subplots_adjust(bottom=bottom_margin)
-        
-        filename = f"{actual_table_name}_{metric_cfg['col']}.png"
-        save_path = os.path.join(save_dir, filename)
-        plt.savefig(save_path, dpi=300)
-        print(f"   -> Saved: {filename}")
-        plt.close(fig)
-
-    # ---------------------------------------------------------
-    # 2. GENERATE MASTER PLOT (Stacked) FOR THIS TABLE
-    # ---------------------------------------------------------
-    if not master_plot_items: return
-
-    # Calculate Total Height & Spacing
-    num_rows = len(unique_starts) + 1
-    table_height_inches = num_rows * 0.25
-    gap_inches = table_height_inches + 1.0
-    
-    num_metrics = len(master_plot_items)
-    total_master_height = (PLOT_HEIGHT_INCHES + gap_inches) * num_metrics
-    
-    fig = plt.figure(figsize=(FIG_WIDTH, total_master_height))
-    axes = fig.subplots(num_metrics, 1)
-    if num_metrics == 1: axes = [axes]
-
-    for i, item in enumerate(master_plot_items):
-        draw_metric_and_table(
-            axes[i], item['df'], item['cfg']['col'], item['cfg']['title'], item['cfg']['color'],
-            item['cfg']['percentiles'], item['prefix'], item['width'], item['ticks']
-        )
-
-    hspace_ratio = gap_inches / PLOT_HEIGHT_INCHES
-    plt.subplots_adjust(hspace=hspace_ratio, bottom=0.05, top=0.98)
-
-    master_filename = f"MASTER_{actual_table_name}.png"
-    master_path = os.path.join(save_dir, master_filename)
-    plt.savefig(master_path, dpi=300, bbox_inches='tight')
-    plt.close(fig)
-
-# ==========================================
-# MAIN EXECUTION
-# ==========================================
 def main():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
     print(f"[INIT] Base Output Directory: {BASE_OUTPUT_DIR}")
 
-    # Define the two versions we want to process
-    versions = [
-        {"suffix": "",   "subdir": "1"}, # Original tables -> /1/
-        {"suffix": "_2", "subdir": "2"}  # V2 tables -> /2/
-    ]
+    # Define the versions we want to process based on global booleans
+    versions = []
+    if PROCESS_FORK_1:
+        versions.append({"suffix": "",   "subdir": "1"}) # Original tables -> /1/
+    if PROCESS_FORK_2:
+        versions.append({"suffix": "_2", "subdir": "2"})  # V2 tables -> /2/
+        
+    if not versions:
+        print("[FATAL] Both PROCESS_FORK_1 and PROCESS_FORK_2 are False. Nothing to process.")
+        return
 
     for ver in versions:
         suffix = ver["suffix"]
@@ -468,6 +383,8 @@ def main():
             # Prepare for GLOBAL MASTER (All tables in this version combined)
             interval_str = f'{K * PARTITION_SIZE_HOURS}h'
             all_cols = [m['col'] for m in config['metrics']]
+            
+            # CRITICAL: Use 'timestamp' column for Grouper
             df_resampled = df.groupby([pd.Grouper(key='timestamp', freq=interval_str), 'asset_id'])[all_cols].sum().reset_index()
             
             step_hours = K * PARTITION_SIZE_HOURS
@@ -497,10 +414,14 @@ def main():
             max_rows = max(item['rows'] for item in version_master_items)
             table_height_inches = max_rows * 0.25
             gap_inches = table_height_inches + 1.0
-            total_height = (PLOT_HEIGHT_INCHES + gap_inches) * len(version_master_items)
-
-            fig = plt.figure(figsize=(FIG_WIDTH, total_height))
-            axes = fig.subplots(len(version_master_items), 1)
+            
+            # Calculate total height based on PLOT_HEIGHT_INCHES and the required gap
+            num_metrics = len(version_master_items)
+            total_master_height = (PLOT_HEIGHT_INCHES * num_metrics) + (gap_inches * (num_metrics - 1)) + 1.0
+            
+            fig = plt.figure(figsize=(FIG_WIDTH, total_master_height))
+            axes = fig.subplots(num_metrics, 1)
+            if num_metrics == 1: axes = [axes]
 
             for i, item in enumerate(version_master_items):
                 draw_metric_and_table(
@@ -508,6 +429,7 @@ def main():
                     item['cfg']['percentiles'], item['prefix'], item['width'], item['ticks']
                 )
 
+            # Adjust hspace to match the calculated gap
             hspace_ratio = gap_inches / PLOT_HEIGHT_INCHES
             plt.subplots_adjust(hspace=hspace_ratio, bottom=0.02, top=0.99)
 

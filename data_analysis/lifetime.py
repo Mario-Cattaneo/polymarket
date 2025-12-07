@@ -10,6 +10,17 @@ from web3 import Web3
 import aiohttp
 from pathlib import Path
 
+# ----------------------------------------------------------------
+# 0. GLOBAL CONFIGURATION BOARDS
+# ----------------------------------------------------------------
+
+# Set to True to process the 'markets' table (Fork 1)
+PROCESS_FORK_1 = False 
+
+# Set to True to process the 'markets_2' table (Fork 2)
+PROCESS_FORK_2 = True 
+
+# ----------------------------------------------------------------
 # 1. CONFIGURATION
 # ----------------
 # DB Config
@@ -101,12 +112,13 @@ def interpolate_timestamp(df, min_blk, min_ts, max_blk, max_ts):
         df['time'] = min_ts
         return df
 
-    def calculate_time(row):
-        block_diff = row['block_number'] - min_blk
-        time_offset = (block_diff / total_block_diff) * total_time_diff
-        return min_ts + pd.Timedelta(seconds=time_offset)
-
-    df['time'] = df.apply(calculate_time, axis=1)
+    # Vectorized calculation is much faster than df.apply
+    block_diff = df['block_number'] - min_blk
+    time_offset = (block_diff / total_block_diff) * total_time_diff
+    
+    # Create a Timedelta Series and add it to the min_ts
+    df['time'] = min_ts + pd.to_timedelta(time_offset, unit='s')
+    
     return df
 
 async def calculate_dynamic_time_ranges(conn, table_name):
@@ -191,8 +203,11 @@ async def get_market_data(conn, table_name, time_range, filter_k):
     return pd.DataFrame(found_times, columns=['time']), pd.DataFrame(closed_times, columns=['time'])
 
 async def get_event_data(conn, min_blk, min_ts, max_blk, max_ts):
-    """Fetches and interpolates ALL relevant event data from polygon_events."""
-    print("🔌 Fetching all event data from polygon_events...")
+    """
+    OPTIMIZED: Fetches event counts per block instead of all rows.
+    Reconstructs the DataFrame for plotting and interpolates time in Python.
+    """
+    print("🔌 Fetching aggregated event data from polygon_events...")
     
     events_of_interest = [
         'TokenRegistered', 'MarketPrepared', 'QuestionPrepared',
@@ -200,18 +215,31 @@ async def get_event_data(conn, min_blk, min_ts, max_blk, max_ts):
         'QuestionResolved', 'QuestionEmergencyResolved'
     ]
     
+    # OPTIMIZED QUERY: Group by block_number, contract_address, and event_name and COUNT
+    # This is the fastest SELECT query possible for this data.
     query = f"""
-        SELECT block_number, created_at, contract_address, event_name
+        SELECT block_number, contract_address, event_name, COUNT(*) as event_count
         FROM polygon_events
         WHERE event_name = ANY($1::text[])
+        GROUP BY block_number, contract_address, event_name
         ORDER BY block_number
     """
     rows = await conn.fetch(query, events_of_interest)
     
-    df = pd.DataFrame(rows, columns=['block_number', 'time', 'contract_address', 'event_name'])
+    # Convert the aggregated rows into a DataFrame
+    agg_df = pd.DataFrame(rows, columns=['block_number', 'contract_address', 'event_name', 'event_count'])
     
-    df['time'] = pd.to_datetime(df['time']).dt.tz_localize(timezone.utc)
+    if agg_df.empty:
+        return pd.DataFrame(columns=['block_number', 'time', 'contract_address', 'event_name'])
+
+    # Reconstruct the DataFrame: Repeat each row 'event_count' times
+    # Use a more efficient Pandas method for reconstruction (repeat index)
+    df = agg_df.loc[agg_df.index.repeat(agg_df['event_count'])].reset_index(drop=True)
     
+    # Drop the temporary event_count column
+    df = df.drop(columns=['event_count'])
+    
+    # Interpolate the timestamp based on the block_number
     df = interpolate_timestamp(df, min_blk, min_ts, max_blk, max_ts)
     
     return df
@@ -259,13 +287,14 @@ def plot_cdf(data_dict, title, filename, time_range):
 def plot_net_active_count(market_found_df, market_closed_df, cond_prep_df, cond_res_df, title, filename, time_range):
     """
     Plots the difference between the CDFs for Markets and Conditions on one graph.
+    Includes the new 2*Net Active Conditions line.
     """
     plt.figure(figsize=(14, 9))
     sns.set_style("whitegrid")
     
     print(f"   Generating {title}...")
 
-    def calculate_net_active(found_df, closed_df, label, color):
+    def calculate_net_active(found_df, closed_df, label, color, multiplier=1):
         found_df = found_df.sort_values('time')
         closed_df = closed_df.sort_values('time')
         
@@ -293,7 +322,9 @@ def plot_net_active_count(market_found_df, market_closed_df, cond_prep_df, cond_
                 closed_count += 1
                 closed_idx += 1
                 
-            cdf_data.append({'time': t, 'active': found_count - closed_count})
+            # Apply the multiplier to the net active count
+            net_active = (found_count - closed_count) * multiplier
+            cdf_data.append({'time': t, 'active': net_active})
 
         active_df = pd.DataFrame(cdf_data)
         plt.plot(active_df['time'], active_df['active'], label=label, linewidth=2.5, color=color)
@@ -303,6 +334,9 @@ def plot_net_active_count(market_found_df, market_closed_df, cond_prep_df, cond_
     
     # Plot 4.2: Conditions
     calculate_net_active(cond_prep_df, cond_res_df, "Net Active Conditions (Prepared - Resolved)", 'red')
+    
+    # NEW Plot 4.3: 2 * Net Active Conditions
+    calculate_net_active(cond_prep_df, cond_res_df, "2 * Net Active Conditions (Prepared - Resolved)", 'orange', multiplier=2)
     
     plt.title(title, fontsize=16, fontweight='bold')
     plt.xlabel("Date (UTC)", fontsize=12)
@@ -330,21 +364,35 @@ async def main():
         database=DB_NAME, host=PG_HOST, port=PG_PORT
     )
     
+    # Determine which forks to process based on global booleans
+    forks_to_process = {}
+    if PROCESS_FORK_1:
+        forks_to_process[1] = MARKET_TABLES[1]
+    if PROCESS_FORK_2:
+        forks_to_process[2] = MARKET_TABLES[2]
+        
+    if not forks_to_process:
+        print("❌ Error: Both PROCESS_FORK_1 and PROCESS_FORK_2 are False. Nothing to process.")
+        await conn.close()
+        return
+
+    
     connector = aiohttp.TCPConnector(limit=5)
     async with aiohttp.ClientSession(connector=connector) as session:
+        # Fetch min/max block and time (slow, but necessary once)
         min_blk, min_ts, max_blk, max_ts = await fetch_block_timestamps(conn, session)
         
         if not min_blk:
             await conn.close()
             return
 
-        # Fetch all chain events once (unfiltered by time)
+        # Fetch aggregated chain events (fast query, slow reconstruction)
         all_events_df = await get_event_data(conn, min_blk, min_ts, max_blk, max_ts)
         
         await conn.close()
 
     # --- Process and Plot for each Fork ---
-    for fork_id, table_name in MARKET_TABLES.items():
+    for fork_id, table_name in forks_to_process.items():
         print(f"\n--- Processing Fork {fork_id} ({table_name}) ---")
         
         # 1. Calculate Dynamic Time Ranges
@@ -370,6 +418,13 @@ async def main():
             (all_events_df['time'] >= plot_1_range[0]) & 
             (all_events_df['time'] <= plot_1_range[1])
         ]
+        
+        # Filter for ConditionPreparation events
+        cond_prep_events = p1_events[p1_events['event_name'] == 'ConditionPreparation']
+        
+        # Create the 2*ConditionPreparation DataFrame
+        # We simply duplicate the DataFrame to double the count in the CDF
+        cond_prep_2x_events = pd.concat([cond_prep_events, cond_prep_events], ignore_index=True)
         
         plot_1_data = {
             f"DB: Orderbooks Found (K={filter_k})": db_found[
@@ -401,9 +456,10 @@ async def main():
                 (p1_events['event_name'] == 'QuestionPrepared') & (p1_events['contract_address'] == _NEG_RISK_OPERATOR)
             ],
             
-            f"Chain: Conditional Tokens (ConditionPreparation)": p1_events[
-                p1_events['event_name'] == 'ConditionPreparation'
-            ],
+            f"Chain: Conditional Tokens (ConditionPreparation)": cond_prep_events,
+            
+            # NEW LINE: 2 * ConditionPreparation
+            f"Chain: 2 * ConditionPreparation": cond_prep_2x_events,
         }
         plot_cdf(plot_1_data, f"Fork {fork_id} CDF: Market Creation & Discovery", output_dir / "plot_1_creation.png", plot_1_range)
 
@@ -441,6 +497,7 @@ async def main():
         p4_cond_prep_df = p4_events[p4_events['event_name'] == 'ConditionPreparation'].copy()
         p4_cond_res_df = p4_events[p4_events['event_name'] == 'ConditionResolution'].copy()
         
+        # The calculate_net_active function now handles the multiplier
         plot_net_active_count(
             db_found, 
             db_closed, 
