@@ -30,7 +30,7 @@ ADDR = {
 }
 
 # --- Setup basic logging ---
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(message)s", datefmt="%Y-m-%d %H:%M:%S")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 logger = logging.getLogger()
 
 
@@ -46,14 +46,14 @@ async def fetch_data(pool, query, params=[]):
 
 async def main():
     """Main function to connect, fetch, analyze, and print results."""
+    # Use the specified timestamp range
+    min_ts = 1764053596065
+    max_ts = 1765267123725
+    
     pool = await asyncpg.create_pool(user=DB_USER, password=DB_PASS, database=DB_NAME, host=PG_HOST, port=PG_PORT)
     logger.info("Successfully connected to the database.")
 
-    # --- Step 1: Get Time Range ---
-    time_range_query = f"SELECT MIN(found_time_ms) as min_ts, MAX(found_time_ms) as max_ts FROM {FORK_MARKET_TABLE} WHERE exhaustion_cycle != 0"
-    time_range = await pool.fetchrow(time_range_query)
-    min_ts, max_ts = time_range['min_ts'], time_range['max_ts']
-    logger.info(f"Time range for Fork 2 established: {pd.to_datetime(min_ts, unit='ms', utc=True)} to {pd.to_datetime(max_ts, unit='ms', utc=True)}")
+    logger.info(f"Using specified time range: {pd.to_datetime(min_ts, unit='ms', utc=True)} to {pd.to_datetime(max_ts, unit='ms', utc=True)}")
 
     # --- Step 2: Fetch All Data ---
     cond_prep_query = "SELECT topics[2] as condition_id, topics[3] as oracle_topic, topics[4] as question_id FROM events_conditional_tokens WHERE event_name = 'ConditionPreparation' AND LOWER(contract_address) = $1 AND timestamp_ms BETWEEN $2 AND $3"
@@ -76,9 +76,8 @@ async def main():
     neg_uma_df = await fetch_data(pool, moo_question_query, [ADDR['neg_uma'], min_ts, max_ts])
     logger.info(f"Fetched {len(neg_uma_df)} 'negrisk_uma' (QuestionInitialized) events.")
 
-    # THE FIX: Correctly use "questionID" for the JSONB key
-    markets_query = f"SELECT condition_id, message ->> 'questionID' as question_id FROM {FORK_MARKET_TABLE} WHERE exhaustion_cycle != 0"
-    clob_df = await fetch_data(pool, markets_query)
+    markets_query = f"SELECT condition_id, message ->> 'questionID' as question_id FROM {FORK_MARKET_TABLE} WHERE found_time_ms BETWEEN $1 AND $2 AND exhaustion_cycle != 0"
+    clob_df = await fetch_data(pool, markets_query, [min_ts, max_ts])
     logger.info(f"Fetched {len(clob_df)} 'clob' (orderbook) entries.")
 
     await pool.close()
@@ -144,8 +143,9 @@ async def main():
     combined_ctfe = negrisk_ctfe_conditions.union(base_ctfe_conditions)
     shared_ctfe = negrisk_ctfe_conditions.intersection(base_ctfe_conditions)
     print("\n--- [C] CTFE Token Sets (by condition_id) ---")
-    print(f"1) combined_ctfe (negrisk_ctfe U base_ctfe): {len(combined_ctfe):,}")
-    print(f"2) shared_ctfe (negrisk_ctfe ^ base_ctfe): {len(shared_ctfe):,}")
+    print(f"1) base_ctfe (TokenRegistered): {len(base_ctfe_conditions):,}")
+    print(f"2) negrisk_ctfe (TokenRegistered): {len(negrisk_ctfe_conditions):,}")
+    print(f"3) shared_ctfe (negrisk_ctfe ^ base_ctfe): {len(shared_ctfe):,}")
 
     # D) Oracle Question Sets
     combined_main_oracles = moo_uma_questions.union(negrisk_adapter_questions)
@@ -161,20 +161,27 @@ async def main():
     print(f"1) combined_negrisk (negrisk_adapter U negrisk_uma): {len(combined_negrisk):,}")
     print(f"2) shared_negrisk (negrisk_adapter ^ negrisk_uma): {len(shared_negrisk):,}")
 
-    # F) Bridge Sets (clob vs ctf)
-    combined_condition_bridges = clob_conditions.union(ctf_conditions)
+    # F) Bridge Sets (clob vs ctf) - MODIFIED
     shared_condition_bridges = clob_conditions.intersection(ctf_conditions)
-    combined_question_bridges = clob_questions.union(ctf_questions)
     shared_question_bridges = clob_questions.intersection(ctf_questions)
+    shared_pairs = clob_pairs.intersection(ctf_pairs)
     print("\n--- [F] Bridge Sets (clob vs ctf) ---")
-    print(f"1) combined_bridges (pairs): {len(clob_pairs.union(ctf_pairs)):,}")
-    print(f"2) shared_bridges (pairs): {len(clob_pairs.intersection(ctf_pairs)):,}")
-    print(f"3) combined_condition_bridges: {len(combined_condition_bridges):,}")
-    print(f"4) shared_condition_bridges: {len(shared_condition_bridges):,}")
-    print(f"5) combined_question_bridges: {len(combined_question_bridges):,}")
-    print(f"6) shared_question_bridges: {len(shared_question_bridges):,}")
+    print("--- (condition, question) PAIRS ---")
+    print(f"1) shared (clob ^ ctf): {len(shared_pairs):,}")
+    print(f"2) only in orderbook (clob \\ ctf): {len(clob_pairs - ctf_pairs):,}")
+    print(f"3) only on-chain (ctf \\ clob): {len(ctf_pairs - clob_pairs):,}")
+    print("--- CONDITIONS ---")
+    print(f"4) shared (clob ^ ctf): {len(shared_condition_bridges):,}")
+    print(f"5) only in orderbook (clob \\ ctf): {len(clob_conditions - ctf_conditions):,}")
+    print(f"6) only on-chain (ctf \\ clob): {len(ctf_conditions - clob_conditions):,}")
+    print("--- QUESTIONS ---")
+    print(f"7) shared (clob ^ ctf): {len(shared_question_bridges):,}")
+    print(f"8) only in orderbook (clob \\ ctf): {len(clob_questions - ctf_questions):,}")
+    print(f"9) only on-chain (ctf \\ clob): {len(ctf_questions - clob_questions):,}")
 
     # G) No Bridge
+    combined_condition_bridges = clob_conditions.union(ctf_conditions)
+    combined_question_bridges = clob_questions.union(ctf_questions)
     print("\n--- [G] Items Not Found in Bridges ---")
     print("--- base_ctfe (conditions) ---")
     print(f"  \\ combined_condition_bridges: {len(base_ctfe_conditions - combined_condition_bridges):,}")
@@ -197,28 +204,62 @@ async def main():
     print(f"  \\ clob_questions: {len(moo_uma_questions - clob_questions):,}")
     print(f"  \\ ctf_questions: {len(moo_uma_questions - ctf_questions):,}")
 
-    # H) Unregistered / Missing
+    # H) Unregistered / Missing - MODIFIED
+    ctf_only_conditions = ctf_conditions - clob_conditions
+    clob_only_conditions = clob_conditions - ctf_conditions
+    ctf_only_questions = ctf_questions - clob_questions
+    clob_only_questions = clob_questions - ctf_questions
     print("\n--- [H] Unregistered Conditions / Missing Oracles ---")
-    print(f"1) unregistered_conditions (Bridge conditions not in any token registration): {len(combined_condition_bridges - combined_ctfe):,}")
-    print(f"2) missing_oracle (Bridge questions not from a main oracle): {len(combined_question_bridges - combined_main_oracles):,}")
+    print("--- Unregistered Conditions (Bridge conditions not in any token registration) ---")
+    print(f"1) From intersection (ctf ^ clob): {len(shared_condition_bridges - combined_ctfe):,}")
+    print(f"2) From only on-chain (ctf \\ clob): {len(ctf_only_conditions - combined_ctfe):,}")
+    print(f"3) From only orderbook (clob \\ ctf): {len(clob_only_conditions - combined_ctfe):,}")
+    print("--- Missing Oracles (Bridge questions not from a main oracle) ---")
+    print(f"4) From intersection (ctf ^ clob): {len(shared_question_bridges - combined_main_oracles):,}")
+    print(f"5) From only on-chain (ctf \\ clob): {len(ctf_only_questions - combined_main_oracles):,}")
+    print(f"6) From only orderbook (clob \\ ctf): {len(clob_only_questions - combined_main_oracles):,}")
 
-    # I) Off-chain vs On-chain
+    # I) Off-chain vs On-chain - MODIFIED
     print("\n--- [I] Off-chain vs On-chain Analysis ---")
-    tokens_not_in_ctf = combined_ctfe - ctf_conditions
-    conditions_not_in_tokens = ctf_conditions - combined_ctfe
-    oracles_not_in_ctf = combined_main_oracles - ctf_questions
-    ctf_not_in_oracles = ctf_questions - combined_main_oracles
+    # 1. Orderbooks for registered tokens not prepared on-chain
+    base_tokens_not_in_ctf = base_ctfe_conditions - ctf_conditions
+    negrisk_tokens_not_in_ctf = negrisk_ctfe_conditions - ctf_conditions
+    print(f"1) Orderbooks for 'base_ctfe' tokens not prepared on-chain: {len(clob_conditions.intersection(base_tokens_not_in_ctf)):,}")
+    print(f"2) Orderbooks for 'negrisk_ctfe' tokens not prepared on-chain: {len(clob_conditions.intersection(negrisk_tokens_not_in_ctf)):,}")
 
-    print(f"1) Orderbooks for Tokens Registered but Not Prepared On-Chain: {len(clob_conditions.intersection(tokens_not_in_ctf)):,}")
-    print(f"2) Conditions Prepared On-Chain but Not Registered as Tokens: {len(conditions_not_in_tokens):,}")
-    print(f"3) Orderbooks for Questions from Oracles but Not Prepared On-Chain: {len(clob_questions.intersection(oracles_not_in_ctf)):,}")
-    print(f"4) Conditions Prepared On-Chain for Questions Not from Main Oracles: {len(ctf_not_in_oracles):,}")
+    # 2. Conditions prepared on-chain but not registered
+    conditions_not_in_tokens = ctf_conditions - combined_ctfe
+    print(f"3) Conditions prepared on-chain but not registered as tokens: {len(conditions_not_in_tokens):,}")
+
+    # 3. Orderbooks for oracle questions not prepared on-chain
+    oracles_not_in_ctf = combined_main_oracles - ctf_questions
+    print(f"4) Orderbooks for questions from oracles but not prepared on-chain: {len(clob_questions.intersection(oracles_not_in_ctf)):,}")
+
+    # 4. Conditions prepared for questions not from main oracles
+    ctf_not_in_oracles = ctf_questions - combined_main_oracles
+    print(f"5) Conditions prepared on-chain for questions not from main oracles: {len(ctf_not_in_oracles):,}")
+
+    # 5. NEW: For conditions prepared on-chain but NOT in orderbooks, how many have a matching oracle?
+    onchain_not_in_clob = ctf_conditions - clob_conditions
+    # Filter these by registration type
+    onchain_not_in_clob_base = onchain_not_in_clob.intersection(base_ctfe_conditions)
+    onchain_not_in_clob_negrisk = onchain_not_in_clob.intersection(negrisk_ctfe_conditions)
+    # Get the question IDs for these subsets from the original ctf dataframe
+    questions_for_base_subset = set(ctf_df[ctf_df['condition_id'].isin(onchain_not_in_clob_base)]['question_id'])
+    questions_for_negrisk_subset = set(ctf_df[ctf_df['condition_id'].isin(onchain_not_in_clob_negrisk)]['question_id'])
+    # Check how many of those question IDs are in the main oracle set
+    base_with_matching_oracle = len(questions_for_base_subset.intersection(combined_main_oracles))
+    negrisk_with_matching_oracle = len(questions_for_negrisk_subset.intersection(combined_main_oracles))
+    print(f"6) Conditions on-chain but not in orderbook ('base_ctfe' tokens): {len(onchain_not_in_clob_base):,}")
+    print(f"   - Of these, count with a matching oracle entry: {base_with_matching_oracle:,}")
+    print(f"7) Conditions on-chain but not in orderbook ('negrisk_ctfe' tokens): {len(onchain_not_in_clob_negrisk):,}")
+    print(f"   - Of these, count with a matching oracle entry: {negrisk_with_matching_oracle:,}")
 
     print("\n" + "="*60)
 
 
 if __name__ == "__main__":
     if not all([PG_HOST, DB_NAME, DB_USER, DB_PASS]):
-        logger.error("Database credentials are not set.")
+        logger.error("Database credentials are not set. Please set PG_SOCKET, POLY_PG_PORT, POLY_DB, POLY_DB_CLI, and POLY_DB_CLI_PASS environment variables.")
     else:
         asyncio.run(main())

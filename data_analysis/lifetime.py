@@ -5,511 +5,264 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-from datetime import datetime, timezone
-from web3 import Web3
-import aiohttp
+import logging
 from pathlib import Path
 
 # ----------------------------------------------------------------
-# 0. GLOBAL CONFIGURATION BOARDS
+# 0. GLOBAL CONFIGURATION
 # ----------------------------------------------------------------
 
-# Set to True to process the 'markets' table (Fork 1)
-PROCESS_FORK_1 = False 
-
-# Set to True to process the 'markets_2' table (Fork 2)
-PROCESS_FORK_2 = True 
+PROCESS_FORK_1 = False # Set to False to only process Fork 2
+PROCESS_FORK_2 = True
 
 # ----------------------------------------------------------------
-# 1. CONFIGURATION
-# ----------------
-# DB Config
-PG_HOST = os.getenv("PG_SOCKET")
-PG_PORT = os.getenv("POLY_PG_PORT")
-DB_NAME = os.getenv("POLY_DB")
-DB_USER = os.getenv("POLY_DB_CLI")
-DB_PASS = os.getenv("POLY_DB_CLI_PASS")
+# 1. SETUP
+# ----------------------------------------------------------------
 
-# Plot Output Directory
-POLY_PLOTS_DIR = os.getenv('POLY_PLOTS')
-if not POLY_PLOTS_DIR:
-    print("❌ Error: POLY_PLOTS not set.")
-    exit(1)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+logger = logging.getLogger()
 
-# Infura Config (for block timestamps)
-INFURA_KEY = os.getenv('INFURA_KEY_2')
-if not INFURA_KEY:
-    print("❌ Error: INFURA_KEY not set.")
-    exit(1)
-RPC_URL = f"https://polygon-mainnet.infura.io/v3/{INFURA_KEY}"
+PG_HOST, PG_PORT, DB_NAME, DB_USER, DB_PASS = (os.getenv("PG_SOCKET"), os.getenv("POLY_PG_PORT"), os.getenv("POLY_DB"), os.getenv("POLY_DB_CLI"), os.getenv("POLY_DB_CLI_PASS"))
+PLOTS_DIR = os.getenv('POLY_PLOTS', './plots')
 
-# Market Tables
-MARKET_TABLES = {
-    1: "markets",
-    2: "markets_2"
+MARKET_TABLES = {1: "markets", 2: "markets_2"}
+
+CONTRACT_CONFIG = {
+    'negrisk_exchange': {'table': 'events_neg_risk_exchange', 'address': '0xc5d563a36ae78145c45a50134d48a1215220f80a'},
+    'ctfe_exchange': {'table': 'events_ctf_exchange', 'address': '0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e'},
+    'conditional_tokens': {'table': 'events_conditional_tokens', 'address': '0x4d97dcd97ec945f40cf65f87097ace5ea0476045'},
+    'negrisk_op': {'table': 'events_neg_risk_operator', 'address': '0x71523d0f655b41e805cec45b17163f528b59b820'},
+    'negrisk_adapt': {'table': 'events_neg_risk_adapter', 'address': '0xd91e80cf2e7be2e162c6513ced06f1dd0da35296'},
+    'neg_uma': {'table': 'events_uma_adapter', 'address': '0x2F5e3684cb1F318ec51b00Edba38d79Ac2c0aA9d'},
+    'ctfe_uma': {'table': 'events_uma_adapter', 'address': '0x6A9D222616C90FcA5754cd1333cFD9b7fb6a4F74'},
+    'moo_uma': {'table': 'events_uma_adapter', 'address': '0x65070BE91477460D8A7AeEb94ef92fe056C2f2A7'}
 }
 
-# NEW FILTER PARAMETERS: Remove the first K markets by found_time_ms
-FILTER_START_K = {
-    1: 30750,  # For 'markets'
-    2: 34250  # For 'markets_2'
-}
+# ----------------------------------------------------------------
+# 2. DATA LOADING & PROCESSING (REWRITTEN FOR ACCURACY)
+# ----------------------------------------------------------------
 
-# Contract Addresses (from LogHarvester)
-_CTF_EXCHANGE = "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e"
-_NEG_RISK_ADAPTER = "0xd91e80cf2e7be2e162c6513ced06f1dd0da35296"
-_NEG_RISK_CTF = "0xc5d563a36ae78145c45a50134d48a1215220f80a"
-_CONDITIONAL_TOKENS = "0x4d97dcd97ec945f40cf65f87097ace5ea0476045"
-_NEG_RISK_OPERATOR = "0x71523d0f655b41e805cec45b17163f528b59b820"
+async def calculate_fork_time_range(pool, market_table_name):
+    """Calculates the precise time range using MIN/MAX of found_time_ms."""
+    logger.info(f"Calculating precise time range from '{market_table_name}'...")
+    query = f"SELECT MIN(found_time_ms) as min_ts, MAX(found_time_ms) as max_ts FROM {market_table_name} WHERE exhaustion_cycle != 0"
+    row = await pool.fetchrow(query)
+    if not row or not row['min_ts']: return None, None
+    return pd.to_datetime(row['min_ts'], unit='ms', utc=True), pd.to_datetime(row['max_ts'], unit='ms', utc=True)
 
-
-# 2. TIMESTAMP INTERPOLATION & DYNAMIC RANGE
-# ------------------------------------------
-
-async def fetch_block_timestamps(conn, session):
-    """Fetches min/max block numbers and their timestamps from DB/Infura."""
-    query = "SELECT MIN(block_number) as min_blk, MAX(block_number) as max_blk FROM polygon_events"
-    row = await conn.fetchrow(query)
-    min_blk = row['min_blk']
-    max_blk = row['max_blk']
+async def get_events(pool, event_name, contract_key, time_range):
+    """
+    NEW AND CORRECT: Fetches a specific set of events with a targeted SQL query.
+    This is the most efficient and reliable method.
+    """
+    config = CONTRACT_CONFIG[contract_key]
+    table, address = config['table'], config['address'].lower()
+    min_ts_ms = int(time_range[0].timestamp() * 1000)
+    max_ts_ms = int(time_range[1].timestamp() * 1000)
     
-    if not min_blk or not max_blk:
-        print("⚠️ No events found in polygon_events table.")
-        return None, None, None, None
+    query = f"SELECT timestamp_ms FROM {table} WHERE event_name = $1 AND LOWER(contract_address) = $2 AND timestamp_ms BETWEEN $3 AND $4"
+    
+    logger.info(f"Fetching '{event_name}' events for '{contract_key}'...")
+    rows = await pool.fetch(query, event_name, address, min_ts_ms, max_ts_ms)
+    
+    df = pd.DataFrame([dict(r) for r in rows]) if rows else pd.DataFrame()
+    if not df.empty:
+        df['time'] = pd.to_datetime(df['timestamp_ms'], unit='ms', utc=True)
+    
+    logger.info(f"-> Found {len(df)} events.")
+    return df
 
-    w3 = Web3()
-    async def get_block_time(block_num):
-        payload = {"jsonrpc": "2.0", "method": "eth_getBlockByNumber", "params": [hex(block_num), False], "id": 1}
+async def get_market_data(pool, market_table_name):
+    """Fetches found/closed times from the markets table."""
+    logger.info(f"Fetching market data from '{market_table_name}'...")
+    query = f"SELECT found_time_ms, closed_time FROM {market_table_name} WHERE exhaustion_cycle != 0"
+    rows = await pool.fetch(query)
+    if not rows: return pd.DataFrame(columns=['time']), pd.DataFrame(columns=['time'])
+
+    found_times = [r['found_time_ms'] for r in rows if r['found_time_ms']]
+    closed_times = [r['closed_time'] for r in rows if r['closed_time']]
+    found_df = pd.DataFrame(found_times, columns=['time'])
+    found_df['time'] = pd.to_datetime(found_df['time'], unit='ms', utc=True)
+    
+    def parse_closed_time(ts):
         try:
-            async with session.post(RPC_URL, json=payload, timeout=10) as resp:
-                data = await resp.json()
-                if 'result' in data and data['result']:
-                    ts = int(data['result']['timestamp'], 16)
-                    return datetime.fromtimestamp(ts, tz=timezone.utc)
-        except Exception as e:
-            print(f"❌ Error fetching block {block_num}: {e}")
-            return None
+            ts = float(ts)
+            if ts > 30000000000: ts /= 1000
+            return pd.to_datetime(ts, unit='s', utc=True)
+        except (ValueError, TypeError): return pd.NaT
+    closed_df = pd.DataFrame(closed_times, columns=['ts_str'])
+    closed_df['time'] = closed_df['ts_str'].apply(parse_closed_time)
+    
+    return found_df, closed_df.dropna()
 
-    min_ts = await get_block_time(min_blk)
-    max_ts = await get_block_time(max_blk)
-    
-    if not min_ts or not max_ts:
-        print("❌ Could not fetch timestamps for min/max blocks.")
-        return None, None, None, None
+def create_cdf_df(df):
+    if df.empty: return pd.DataFrame(columns=['time', 'count'])
+    df_sorted = df.sort_values('time').reset_index(drop=True)
+    df_sorted['count'] = df_sorted.index + 1
+    return df_sorted
 
-    print(f"⏱️ Block Range: {min_blk} ({min_ts.isoformat()}) -> {max_blk} ({max_ts.isoformat()})")
-    return min_blk, min_ts, max_blk, max_ts
+def calculate_net_active_df(creation_df, resolution_df):
+    creation = creation_df.copy()
+    resolution = resolution_df.copy()
+    if creation.empty and resolution.empty: return pd.DataFrame(columns=['time', 'net_active'])
+    creation['value'] = 1
+    resolution['value'] = -1
+    combined = pd.concat([creation, resolution]).sort_values('time')
+    combined['net_active'] = combined['value'].cumsum()
+    return combined[['time', 'net_active']]
 
-def interpolate_timestamp(df, min_blk, min_ts, max_blk, max_ts):
-    """Fills timestamps using linear interpolation based on block number."""
-    if df.empty or not min_blk:
-        return df
+# ----------------------------------------------------------------
+# 3. PLOTTING FUNCTIONS (Unchanged)
+# ----------------------------------------------------------------
 
-    total_time_diff = (max_ts - min_ts).total_seconds()
-    total_block_diff = max_blk - min_blk
-    
-    if total_block_diff <= 0:
-        df['time'] = min_ts
-        return df
-
-    # Vectorized calculation is much faster than df.apply
-    block_diff = df['block_number'] - min_blk
-    time_offset = (block_diff / total_block_diff) * total_time_diff
-    
-    # Create a Timedelta Series and add it to the min_ts
-    df['time'] = min_ts + pd.to_timedelta(time_offset, unit='s')
-    
-    return df
-
-async def calculate_dynamic_time_ranges(conn, table_name):
-    """Calculates the min/max times for found and closed markets."""
-    query = f"""
-        SELECT found_time_ms, closed_time
-        FROM {table_name} 
-        WHERE condition_id IS NOT NULL
-        ORDER BY found_time_ms ASC
-    """
-    rows = await conn.fetch(query)
-    
-    # Convert ms to datetime
-    def to_dt(ms):
-        if ms is None: return None
-        ts = float(ms)
-        if ts > 30000000000: ts /= 1000.0 
-        return datetime.fromtimestamp(ts, tz=timezone.utc)
-
-    found_times = [to_dt(r['found_time_ms']) for r in rows if r['found_time_ms']]
-    closed_times = [to_dt(r['closed_time']) for r in rows if r['closed_time']]
-    
-    if not found_times and not closed_times:
-        return (None, None), (None, None), (None, None)
-
-    # Plot 1 Range: Min Found -> Max Found
-    min_found = min(found_times) if found_times else None
-    max_found = max(found_times) if found_times else None
-    plot_1_range = (min_found, max_found)
-    
-    # Plot 2 Range: Min Closed -> Max Closed
-    min_closed = min(closed_times) if closed_times else None
-    max_closed = max(closed_times) if closed_times else None
-    plot_2_range = (min_closed, max_closed)
-    
-    # Plot 4 Range: Min(Min Found, Min Closed) -> Max(Max Found, Max Closed)
-    all_mins = [dt for dt in [min_found, min_closed] if dt is not None]
-    all_maxs = [dt for dt in [max_found, max_closed] if dt is not None]
-    
-    plot_4_range = (min(all_mins) if all_mins else None, max(all_maxs) if all_maxs else None)
-    
-    return plot_1_range, plot_2_range, plot_4_range
-
-
-# 3. DATA LOADING
-# ----------------
-async def get_market_data(conn, table_name, time_range, filter_k):
-    """Fetches market data for a specific fork table, filtered by time_range and K."""
-    
-    query = f"""
-        SELECT found_time_ms, closed_time
-        FROM {table_name} 
-        WHERE condition_id IS NOT NULL
-        ORDER BY found_time_ms ASC
-    """
-    rows = await conn.fetch(query)
-    
-    # Apply K filter: remove the first 'filter_k' markets by found_time_ms
-    if filter_k > 0:
-        rows = rows[filter_k:]
-    
-    found_times = []
-    closed_times = []
-    
-    for r in rows:
-        # 1. Found Time
-        if r['found_time_ms']:
-            dt = datetime.fromtimestamp(r['found_time_ms'] / 1000.0, tz=timezone.utc)
-            if time_range[0] <= dt <= time_range[1]:
-                found_times.append(dt)
-            
-        # 2. Closed Time
-        if r['closed_time']:
-            try:
-                ts = float(r['closed_time'])
-                if ts > 30000000000: ts /= 1000.0 # Handle ms vs s
-                dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-                if time_range[0] <= dt <= time_range[1]:
-                    closed_times.append(dt)
-            except: pass
-            
-    return pd.DataFrame(found_times, columns=['time']), pd.DataFrame(closed_times, columns=['time'])
-
-async def get_event_data(conn, min_blk, min_ts, max_blk, max_ts):
-    """
-    OPTIMIZED: Fetches event counts per block instead of all rows.
-    Reconstructs the DataFrame for plotting and interpolates time in Python.
-    """
-    print("🔌 Fetching aggregated event data from polygon_events...")
-    
-    events_of_interest = [
-        'TokenRegistered', 'MarketPrepared', 'QuestionPrepared',
-        'ConditionPreparation', 'ConditionResolution',
-        'QuestionResolved', 'QuestionEmergencyResolved'
-    ]
-    
-    # OPTIMIZED QUERY: Group by block_number, contract_address, and event_name and COUNT
-    # This is the fastest SELECT query possible for this data.
-    query = f"""
-        SELECT block_number, contract_address, event_name, COUNT(*) as event_count
-        FROM polygon_events
-        WHERE event_name = ANY($1::text[])
-        GROUP BY block_number, contract_address, event_name
-        ORDER BY block_number
-    """
-    rows = await conn.fetch(query, events_of_interest)
-    
-    # Convert the aggregated rows into a DataFrame
-    agg_df = pd.DataFrame(rows, columns=['block_number', 'contract_address', 'event_name', 'event_count'])
-    
-    if agg_df.empty:
-        return pd.DataFrame(columns=['block_number', 'time', 'contract_address', 'event_name'])
-
-    # Reconstruct the DataFrame: Repeat each row 'event_count' times
-    # Use a more efficient Pandas method for reconstruction (repeat index)
-    df = agg_df.loc[agg_df.index.repeat(agg_df['event_count'])].reset_index(drop=True)
-    
-    # Drop the temporary event_count column
-    df = df.drop(columns=['event_count'])
-    
-    # Interpolate the timestamp based on the block_number
-    df = interpolate_timestamp(df, min_blk, min_ts, max_blk, max_ts)
-    
-    return df
-
-# 4. PLOTTING HELPER
-# ------------------
-def plot_cdf(data_dict, title, filename, time_range):
-    plt.figure(figsize=(14, 9))
-    sns.set_style("whitegrid")
-    
+def plot_cdfs(data_dict, title, filename, time_range):
+    plt.style.use('seaborn-v0_8-whitegrid')
+    plt.figure(figsize=(20, 14))
     palette = sns.color_palette("bright", len(data_dict))
-    
-    print(f"   Generating {title}...")
-    
+    logger.info(f"Generating plot: {title}")
     for i, (label, df) in enumerate(data_dict.items()):
-        count = len(df)
-        label_with_count = f"{label} (N={count})"
-            
-        sns.ecdfplot(
-            data=df, 
-            x="time", 
-            label=label_with_count, 
-            stat="count", 
-            linewidth=2.5, 
-            color=palette[i],
-            alpha=0.8
-        )
-
-    plt.title(title, fontsize=16, fontweight='bold')
-    plt.xlabel("Date (UTC)", fontsize=12)
-    plt.ylabel("Cumulative Count", fontsize=12)
-    
-    plt.xlim(time_range[0], time_range[1])
-    
-    ax = plt.gca()
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
-    plt.xticks(rotation=45)
-    
-    plt.legend(fontsize=11, loc="upper left", frameon=True, framealpha=0.9)
+        cdf = create_cdf_df(df)
+        if not cdf.empty:
+            plt.plot(cdf['time'], cdf['count'], label=f"{label} (N={len(df)})", color=palette[i], linewidth=2.5)
+    plt.title(title, fontsize=20, fontweight='bold')
+    plt.xlabel("Date (UTC)", fontsize=14)
+    plt.ylabel("Cumulative Count", fontsize=14)
+    if time_range[0] and time_range[1]: plt.xlim(time_range)
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    plt.xticks(rotation=45, ha="right", fontsize=12)
+    plt.yticks(fontsize=12)
+    plt.legend(fontsize=10)
     plt.tight_layout()
     plt.savefig(filename)
-    print(f"✅ Saved {filename}")
+    logger.info(f"Saved plot to {filename}")
     plt.close()
 
-def plot_net_active_count(market_found_df, market_closed_df, cond_prep_df, cond_res_df, title, filename, time_range):
-    """
-    Plots the difference between the CDFs for Markets and Conditions on one graph.
-    Includes the new 2*Net Active Conditions line.
-    """
-    plt.figure(figsize=(14, 9))
-    sns.set_style("whitegrid")
-    
-    print(f"   Generating {title}...")
-
-    def calculate_net_active(found_df, closed_df, label, color, multiplier=1):
-        found_df = found_df.sort_values('time')
-        closed_df = closed_df.sort_values('time')
-        
-        all_times = pd.concat([found_df['time'], closed_df['time']]).sort_values().unique()
-        all_times = all_times[(all_times >= time_range[0]) & (all_times <= time_range[1])]
-        
-        if len(all_times) == 0:
-            plt.plot([], [], label=f"{label} (N=0)", color=color)
-            return
-
-        cdf_data = []
-        found_count = 0
-        closed_count = 0
-        found_idx = 0
-        closed_idx = 0
-        
-        cdf_data.append({'time': time_range[0], 'active': 0})
-        
-        for t in all_times:
-            while found_idx < len(found_df) and found_df.iloc[found_idx]['time'] <= t:
-                found_count += 1
-                found_idx += 1
-            
-            while closed_idx < len(closed_df) and closed_df.iloc[closed_idx]['time'] <= t:
-                closed_count += 1
-                closed_idx += 1
-                
-            # Apply the multiplier to the net active count
-            net_active = (found_count - closed_count) * multiplier
-            cdf_data.append({'time': t, 'active': net_active})
-
-        active_df = pd.DataFrame(cdf_data)
-        plt.plot(active_df['time'], active_df['active'], label=label, linewidth=2.5, color=color)
-
-    # Plot 4.1: Markets
-    calculate_net_active(market_found_df, market_closed_df, "Net Active Orderbooks (Found - Closed)", 'blue')
-    
-    # Plot 4.2: Conditions
-    calculate_net_active(cond_prep_df, cond_res_df, "Net Active Conditions (Prepared - Resolved)", 'red')
-    
-    # NEW Plot 4.3: 2 * Net Active Conditions
-    calculate_net_active(cond_prep_df, cond_res_df, "2 * Net Active Conditions (Prepared - Resolved)", 'orange', multiplier=2)
-    
-    plt.title(title, fontsize=16, fontweight='bold')
-    plt.xlabel("Date (UTC)", fontsize=12)
-    plt.ylabel("Active Count (Net CDF)", fontsize=12)
-    
-    plt.xlim(time_range[0], time_range[1])
-    
-    ax = plt.gca()
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
-    plt.xticks(rotation=45)
-    
-    plt.legend(fontsize=11, loc="upper left", frameon=True, framealpha=0.9)
+def plot_lines(data_dict, title, filename, time_range):
+    plt.style.use('seaborn-v0_8-whitegrid')
+    plt.figure(figsize=(20, 14))
+    palette = sns.color_palette("deep", len(data_dict))
+    logger.info(f"Generating plot: {title}")
+    for i, (label, df) in enumerate(data_dict.items()):
+        if not df.empty:
+            plt.plot(df['time'], df.iloc[:, 1], label=label, color=palette[i], linewidth=2.5)
+    plt.title(title, fontsize=20, fontweight='bold')
+    plt.xlabel("Date (UTC)", fontsize=14)
+    plt.ylabel("Net Active Count", fontsize=14)
+    if time_range[0] and time_range[1]: plt.xlim(time_range)
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    plt.xticks(rotation=45, ha="right", fontsize=12)
+    plt.yticks(fontsize=12)
+    plt.legend(fontsize=11)
     plt.tight_layout()
     plt.savefig(filename)
-    print(f"✅ Saved {filename}")
+    logger.info(f"Saved plot to {filename}")
     plt.close()
 
+# ----------------------------------------------------------------
+# 4. PLOT GENERATION LOGIC (REWRITTEN FOR ACCURACY)
+# ----------------------------------------------------------------
 
-# 5. MAIN EXECUTION
-# -----------------
+async def generate_fork_plots(pool, fork_id, market_data, time_range, output_dir):
+    logger.info(f"--- Generating all plots for Fork {fork_id} ---")
+
+    # --- PLOT 1: CREATION ---
+    negrisk_tokens = await get_events(pool, 'TokenRegistered', 'negrisk_exchange', time_range)
+    ctfe_tokens = await get_events(pool, 'TokenRegistered', 'ctfe_exchange', time_range)
+    cond_prepared = await get_events(pool, 'ConditionPreparation', 'conditional_tokens', time_range)
+    uma_q_init = {
+        'neg': await get_events(pool, 'QuestionInitialized', 'neg_uma', time_range),
+        'ctfe': await get_events(pool, 'QuestionInitialized', 'ctfe_uma', time_range),
+        'moo': await get_events(pool, 'QuestionInitialized', 'moo_uma', time_range)
+    }
+    
+    creation_plot_data = {
+        "NegRisk Tokens Registered": negrisk_tokens,
+        "CTFE Tokens Registered": ctfe_tokens,
+        "All Tokens Registered": pd.concat([negrisk_tokens, ctfe_tokens]),
+        "2 * Conditions Prepared": pd.concat([cond_prepared, cond_prepared]),
+        "Orderbooks Found (from DB)": market_data['found'],
+        "NegRisk Op Question Prepared": await get_events(pool, 'QuestionPrepared', 'negrisk_op', time_range),
+        "NegRisk Op Market Prepared": await get_events(pool, 'MarketPrepared', 'negrisk_op', time_range),
+        "NegRisk Adapt Question Prepared": await get_events(pool, 'QuestionPrepared', 'negrisk_adapt', time_range),
+        "NegRisk Adapt Market Prepared": await get_events(pool, 'MarketPrepared', 'negrisk_adapt', time_range),
+        "2 * Neg UMA (QuestionInitialized)": pd.concat([uma_q_init['neg'], uma_q_init['neg']]),
+        "2 * CTFE UMA (QuestionInitialized)": pd.concat([uma_q_init['ctfe'], uma_q_init['ctfe']]),
+        "2 * MOO UMA (QuestionInitialized)": pd.concat([uma_q_init['moo'], uma_q_init['moo']]),
+        "2 * (CTFE + MOO) UMA (QuestionInitialized)": pd.concat([uma_q_init['ctfe'], uma_q_init['ctfe'], uma_q_init['moo'], uma_q_init['moo']]),
+        "2 * (All UMA) (QuestionInitialized)": pd.concat([uma_q_init['neg'], uma_q_init['neg'], uma_q_init['ctfe'], uma_q_init['ctfe'], uma_q_init['moo'], uma_q_init['moo']]),
+    }
+    plot_cdfs(creation_plot_data, f"Fork {fork_id} CDF: Market Creation Events", output_dir / "plot_1_creation.png", time_range)
+
+    # --- PLOT 2: RESOLUTION ---
+    uma_q_resolved = {
+        'neg': await get_events(pool, 'QuestionResolved', 'neg_uma', time_range),
+        'ctfe': await get_events(pool, 'QuestionResolved', 'ctfe_uma', time_range),
+        'moo': await get_events(pool, 'QuestionResolved', 'moo_uma', time_range)
+    }
+    resolution_plot_data = {
+        "Orderbooks Closed (from DB)": market_data['closed'],
+        "NegRisk Op QuestionResolved": await get_events(pool, 'QuestionResolved', 'negrisk_op', time_range),
+        "NegRisk Adapt OutcomeReported": await get_events(pool, 'OutcomeReported', 'negrisk_adapt', time_range),
+        "Neg UMA QuestionManuallyResolved": await get_events(pool, 'QuestionManuallyResolved', 'neg_uma', time_range),
+        "CTFE UMA QuestionManuallyResolved": await get_events(pool, 'QuestionManuallyResolved', 'ctfe_uma', time_range),
+        "MOO UMA QuestionManuallyResolved": await get_events(pool, 'QuestionManuallyResolved', 'moo_uma', time_range),
+        "2 * Neg UMA (QuestionResolved)": pd.concat([uma_q_resolved['neg'], uma_q_resolved['neg']]),
+        "2 * CTFE UMA (QuestionResolved)": pd.concat([uma_q_resolved['ctfe'], uma_q_resolved['ctfe']]),
+        "2 * MOO UMA (QuestionResolved)": pd.concat([uma_q_resolved['moo'], uma_q_resolved['moo']]),
+        "2 * (CTFE + MOO) UMA (QuestionResolved)": pd.concat([uma_q_resolved['ctfe'], uma_q_resolved['ctfe'], uma_q_resolved['moo'], uma_q_resolved['moo']]),
+        "2 * (All UMA) (QuestionResolved)": pd.concat([uma_q_resolved['neg'], uma_q_resolved['neg'], uma_q_resolved['ctfe'], uma_q_resolved['ctfe'], uma_q_resolved['moo'], uma_q_resolved['moo']]),
+    }
+    plot_cdfs(resolution_plot_data, f"Fork {fork_id} CDF: Market Resolution Events", output_dir / "plot_2_resolution.png", time_range)
+    
+    # --- PLOT 3: NET ACTIVE ---
+    net_active_data = {
+        "Net Active Orderbooks (DB)": calculate_net_active_df(market_data['found'], market_data['closed']),
+        "2 * (Conditions Prepared - Resolved)": calculate_net_active_df(pd.concat([cond_prepared, cond_prepared]), await get_events(pool, 'ConditionResolution', 'conditional_tokens', time_range)),
+        "NegRisk Tokens - Neg UMA Resolved": calculate_net_active_df(negrisk_tokens, uma_q_resolved['neg']),
+        "CTFE Tokens - (MOO+CTFE) UMA Resolved": calculate_net_active_df(ctfe_tokens, pd.concat([uma_q_resolved['moo'], uma_q_resolved['ctfe']])),
+        "All Tokens - All UMA Resolved": calculate_net_active_df(pd.concat([negrisk_tokens, ctfe_tokens]), pd.concat(uma_q_resolved.values())),
+        "Neg UMA (Init - Resolved)": calculate_net_active_df(uma_q_init['neg'], uma_q_resolved['neg']),
+        "CTFE & MOO UMA (Init - Resolved)": calculate_net_active_df(pd.concat([uma_q_init['ctfe'], uma_q_init['moo']]), pd.concat([uma_q_resolved['ctfe'], uma_q_resolved['moo']])),
+        "All UMA (Init - Resolved)": calculate_net_active_df(pd.concat(uma_q_init.values()), pd.concat(uma_q_resolved.values())),
+    }
+    plot_lines(net_active_data, f"Fork {fork_id} Net Active Markets", output_dir / "plot_4_net_active.png", time_range)
+
+# ----------------------------------------------------------------
+# 5. MAIN EXECUTION (REWRITTEN FOR ACCURACY)
+# ----------------------------------------------------------------
+
 async def main():
-    # Initial DB connection for setup
-    conn = await asyncpg.connect(
-        user=DB_USER, password=DB_PASS,
-        database=DB_NAME, host=PG_HOST, port=PG_PORT
-    )
-    
-    # Determine which forks to process based on global booleans
+    pool = await asyncpg.create_pool(user=DB_USER, password=DB_PASS, database=DB_NAME, host=PG_HOST, port=PG_PORT)
     forks_to_process = {}
-    if PROCESS_FORK_1:
-        forks_to_process[1] = MARKET_TABLES[1]
-    if PROCESS_FORK_2:
-        forks_to_process[2] = MARKET_TABLES[2]
-        
+    if PROCESS_FORK_1: forks_to_process[1] = MARKET_TABLES[1]
+    if PROCESS_FORK_2: forks_to_process[2] = MARKET_TABLES[2]
     if not forks_to_process:
-        print("❌ Error: Both PROCESS_FORK_1 and PROCESS_FORK_2 are False. Nothing to process.")
-        await conn.close()
+        logger.warning("Both PROCESS_FORK_1 and PROCESS_FORK_2 are False. Nothing to process.")
+        await pool.close()
         return
 
-    
-    connector = aiohttp.TCPConnector(limit=5)
-    async with aiohttp.ClientSession(connector=connector) as session:
-        # Fetch min/max block and time (slow, but necessary once)
-        min_blk, min_ts, max_blk, max_ts = await fetch_block_timestamps(conn, session)
+    for fork_id, market_table in forks_to_process.items():
+        logger.info(f"===== Processing Fork {fork_id} (markets table: {market_table}) =====")
         
-        if not min_blk:
-            await conn.close()
-            return
-
-        # Fetch aggregated chain events (fast query, slow reconstruction)
-        all_events_df = await get_event_data(conn, min_blk, min_ts, max_blk, max_ts)
-        
-        await conn.close()
-
-    # --- Process and Plot for each Fork ---
-    for fork_id, table_name in forks_to_process.items():
-        print(f"\n--- Processing Fork {fork_id} ({table_name}) ---")
-        
-        # 1. Calculate Dynamic Time Ranges
-        conn = await asyncpg.connect(user=DB_USER, password=DB_PASS, database=DB_NAME, host=PG_HOST, port=PG_PORT)
-        plot_1_range, plot_2_range, plot_4_range = await calculate_dynamic_time_ranges(conn, table_name)
-        
-        if not plot_4_range[0]:
-            print(f"⚠️ Skipping Fork {fork_id}: No valid market data found for time range calculation.")
-            await conn.close()
+        # 1. First, calculate the precise time range for the fork.
+        time_range = await calculate_fork_time_range(pool, market_table)
+        if not time_range[0]:
+            logger.warning(f"Skipping Fork {fork_id}: No data found in '{market_table}'.")
             continue
-            
-        # 2. Fetch Market Data (Filtered by Plot 4 Range and K)
-        filter_k = FILTER_START_K.get(fork_id, 0)
-        db_found, db_closed = await get_market_data(conn, table_name, plot_4_range, filter_k)
-        await conn.close()
+        logger.info(f"Fork {fork_id} time range: {time_range[0]} to {time_range[1]}")
 
-        # Create output directory
-        output_dir = Path(POLY_PLOTS_DIR) / "lifetime" / str(fork_id)
+        # 2. Fetch other necessary data like market found/closed times.
+        market_data = {}
+        market_data['found'], market_data['closed'] = await get_market_data(pool, market_table)
+        
+        output_dir = Path(PLOTS_DIR) / "lifetime" / str(fork_id)
         output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 3. Generate plots by passing the pool and time_range. Data is fetched inside.
+        await generate_fork_plots(pool, fork_id, market_data, time_range, output_dir)
 
-        # --- PLOT 1: CREATION / DISCOVERY (CDF) ---
-        p1_events = all_events_df[
-            (all_events_df['time'] >= plot_1_range[0]) & 
-            (all_events_df['time'] <= plot_1_range[1])
-        ]
-        
-        # Filter for ConditionPreparation events
-        cond_prep_events = p1_events[p1_events['event_name'] == 'ConditionPreparation']
-        
-        # Create the 2*ConditionPreparation DataFrame
-        # We simply duplicate the DataFrame to double the count in the CDF
-        cond_prep_2x_events = pd.concat([cond_prep_events, cond_prep_events], ignore_index=True)
-        
-        plot_1_data = {
-            f"DB: Orderbooks Found (K={filter_k})": db_found[
-                (db_found['time'] >= plot_1_range[0]) & (db_found['time'] <= plot_1_range[1])
-            ],
-            
-            f"Chain: CTF Exchange (TokenRegistered)": p1_events[
-                (p1_events['event_name'] == 'TokenRegistered') & (p1_events['contract_address'] == _CTF_EXCHANGE)
-            ],
-            f"Chain: NegRisk CTF (TokenRegistered)": p1_events[
-                (p1_events['event_name'] == 'TokenRegistered') & (p1_events['contract_address'] == _NEG_RISK_CTF)
-            ],
-            f"Chain: Combined TokenRegistered": p1_events[
-                (p1_events['event_name'] == 'TokenRegistered') & 
-                (p1_events['contract_address'].isin([_CTF_EXCHANGE, _NEG_RISK_CTF]))
-            ],
-            
-            f"Chain: NegRisk Adapter (MarketPrepared)": p1_events[
-                (p1_events['event_name'] == 'MarketPrepared') & (p1_events['contract_address'] == _NEG_RISK_ADAPTER)
-            ],
-            f"Chain: NegRisk Operator (MarketPrepared)": p1_events[
-                (p1_events['event_name'] == 'MarketPrepared') & (p1_events['contract_address'] == _NEG_RISK_OPERATOR)
-            ],
-            
-            f"Chain: NegRisk Adapter (QuestionPrepared)": p1_events[
-                (p1_events['event_name'] == 'QuestionPrepared') & (p1_events['contract_address'] == _NEG_RISK_ADAPTER)
-            ],
-            f"Chain: NegRisk Operator (QuestionPrepared)": p1_events[
-                (p1_events['event_name'] == 'QuestionPrepared') & (p1_events['contract_address'] == _NEG_RISK_OPERATOR)
-            ],
-            
-            f"Chain: Conditional Tokens (ConditionPreparation)": cond_prep_events,
-            
-            # NEW LINE: 2 * ConditionPreparation
-            f"Chain: 2 * ConditionPreparation": cond_prep_2x_events,
-        }
-        plot_cdf(plot_1_data, f"Fork {fork_id} CDF: Market Creation & Discovery", output_dir / "plot_1_creation.png", plot_1_range)
-
-        # --- PLOT 2: RESOLUTION / END (CDF) ---
-        p2_events = all_events_df[
-            (all_events_df['time'] >= plot_2_range[0]) & 
-            (all_events_df['time'] <= plot_2_range[1])
-        ]
-        
-        plot_2_data = {
-            f"DB: Orderbooks Closed (K={filter_k})": db_closed[
-                (db_closed['time'] >= plot_2_range[0]) & (db_closed['time'] <= plot_2_range[1])
-            ],
-            
-            f"Chain: Conditional Tokens (ConditionResolution)": p2_events[
-                p2_events['event_name'] == 'ConditionResolution'
-            ],
-            
-            f"Chain: NegRisk Operator (QuestionResolved)": p2_events[
-                (p2_events['event_name'] == 'QuestionResolved') & 
-                (p2_events['contract_address'] == _NEG_RISK_OPERATOR)
-            ],
-            f"Chain: NegRisk Operator (QuestionEmergencyResolved)": p2_events[
-                (p2_events['event_name'] == 'QuestionEmergencyResolved') & 
-                (p2_events['contract_address'] == _NEG_RISK_OPERATOR)
-            ],
-        }
-        plot_cdf(plot_2_data, f"Fork {fork_id} CDF: Market Resolution & End Dates", output_dir / "plot_2_resolution.png", plot_2_range)
-
-        # --- PLOT 4: NET ACTIVE COUNT (CDF Difference) ---
-        p4_events = all_events_df[
-            (all_events_df['time'] >= plot_4_range[0]) & 
-            (all_events_df['time'] <= plot_4_range[1])
-        ]
-        p4_cond_prep_df = p4_events[p4_events['event_name'] == 'ConditionPreparation'].copy()
-        p4_cond_res_df = p4_events[p4_events['event_name'] == 'ConditionResolution'].copy()
-        
-        # The calculate_net_active function now handles the multiplier
-        plot_net_active_count(
-            db_found, 
-            db_closed, 
-            p4_cond_prep_df, 
-            p4_cond_res_df, 
-            f"Fork {fork_id} Net Active Count (K={filter_k})", 
-            output_dir / "plot_4_net_active.png", 
-            plot_4_range
-        )
-
+    await pool.close()
+    logger.info("===== Plot generation complete. =====")
 
 if __name__ == "__main__":
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(main())
+    asyncio.run(main())
