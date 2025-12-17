@@ -1,0 +1,63 @@
+
+--- ctf_exchange (Total Events: 58029349) ---
+  OrderFilled     | P=0.715913 (41543956)
+  OrdersMatched   | P=0.282693 (16404483)
+  TokenRegistered | P=0.001394 (80910)
+
+--- neg_risk_exchange (Total Events: 16506122) ---
+  OrderFilled     | P=0.702876 (11601759)
+  OrdersMatched   | P=0.295302 (4874289)
+  TokenRegistered | P=0.001822 (30074)
+
+--- conditional_tokens (Total Events: 31285447) ---
+  PositionSplit        | P=0.728211 (22782417)
+  PayoutRedemption     | P=0.197920 (6192001)
+  PositionsMerge       | P=0.070469 (2204669)
+  ConditionPreparation | P=0.001777 (55608)
+  ConditionResolution  | P=0.001622 (50752)
+
+--- neg_risk_operator (Total Events: 39578) ---
+  QuestionPrepared | P=0.380767 (15070)
+  QuestionReported | P=0.288974 (11437)
+  QuestionResolved | P=0.288241 (11408)
+  MarketPrepared   | P=0.042018 (1663)
+
+--- neg_risk_adapter (Total Events: 5434719) ---
+  PositionSplit      | P=0.675929 (3673483)
+  PayoutRedemption   | P=0.145955 (793224)
+  PositionsMerge     | P=0.145284 (789576)
+  PositionsConverted | P=0.027655 (150295)
+  QuestionPrepared   | P=0.002773 (15070)
+  OutcomeReported    | P=0.002099 (11408)
+  MarketPrepared     | P=0.000306 (1663)
+
+--- neg_uma_adapter (Total Events: 26825) ---
+  QuestionInitialized  | P=0.562684 (15094)
+  QuestionResolved     | P=0.426356 (11437)
+  AncillaryDataUpdated | P=0.008984 (241)
+  QuestionReset        | P=0.001976 (53)
+
+--- ctfe_uma_adapter (Total Events: 81) ---
+  QuestionResolved | P=0.987654 (80)
+  QuestionReset    | P=0.012346 (1)
+
+--- moo_uma_adapter (Total Events: 57577) ---
+  QuestionInitialized  | P=0.508206 (29261)
+  QuestionResolved     | P=0.485941 (27979)
+  AncillaryDataUpdated | P=0.004377 (252)
+  QuestionReset        | P=0.001476 (85)
+
+--- managed_oracle (Total Events: 85914) ---
+  RequestPrice | P=0.341574 (29346)
+  Settle       | P=0.328631 (28234)
+  ProposePrice | P=0.328631 (28234)
+  DisputePrice | P=0.001164 (100)
+
+--- oracle_tunnel_child (Total Events: 663) ---
+  PushedPrice         | P=0.257919 (171)
+  MessageSent         | P=0.247360 (164)
+  PriceRequestAdded   | P=0.247360 (164)
+  PriceRequestBridged | P=0.247360 (164)
+
+--- fx_tunnel (Total Events: 1597) ---
+  NewFxMessage | P=1.000000 (1597)

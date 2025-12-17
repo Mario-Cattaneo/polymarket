@@ -39,11 +39,10 @@ CONTRACT_CONFIG = {
 }
 
 # ----------------------------------------------------------------
-# 2. DATA LOADING & PROCESSING (REWRITTEN FOR ACCURACY)
+# 2. DATA LOADING & PROCESSING
 # ----------------------------------------------------------------
 
 async def calculate_fork_time_range(pool, market_table_name):
-    """Calculates the precise time range using MIN/MAX of found_time_ms."""
     logger.info(f"Calculating precise time range from '{market_table_name}'...")
     query = f"SELECT MIN(found_time_ms) as min_ts, MAX(found_time_ms) as max_ts FROM {market_table_name} WHERE exhaustion_cycle != 0"
     row = await pool.fetchrow(query)
@@ -51,39 +50,63 @@ async def calculate_fork_time_range(pool, market_table_name):
     return pd.to_datetime(row['min_ts'], unit='ms', utc=True), pd.to_datetime(row['max_ts'], unit='ms', utc=True)
 
 async def get_events(pool, event_name, contract_key, time_range):
-    """
-    NEW AND CORRECT: Fetches a specific set of events with a targeted SQL query.
-    This is the most efficient and reliable method.
-    """
     config = CONTRACT_CONFIG[contract_key]
     table, address = config['table'], config['address'].lower()
     min_ts_ms = int(time_range[0].timestamp() * 1000)
     max_ts_ms = int(time_range[1].timestamp() * 1000)
-    
     query = f"SELECT timestamp_ms FROM {table} WHERE event_name = $1 AND LOWER(contract_address) = $2 AND timestamp_ms BETWEEN $3 AND $4"
-    
     logger.info(f"Fetching '{event_name}' events for '{contract_key}'...")
     rows = await pool.fetch(query, event_name, address, min_ts_ms, max_ts_ms)
-    
     df = pd.DataFrame([dict(r) for r in rows]) if rows else pd.DataFrame()
     if not df.empty:
         df['time'] = pd.to_datetime(df['timestamp_ms'], unit='ms', utc=True)
-    
     logger.info(f"-> Found {len(df)} events.")
     return df
 
-async def get_market_data(pool, market_table_name):
-    """Fetches found/closed times from the markets table."""
-    logger.info(f"Fetching market data from '{market_table_name}'...")
-    query = f"SELECT found_time_ms, closed_time FROM {market_table_name} WHERE exhaustion_cycle != 0"
-    rows = await pool.fetch(query)
-    if not rows: return pd.DataFrame(columns=['time']), pd.DataFrame(columns=['time'])
+# NEW FUNCTION: To fetch events without filtering by contract address
+async def get_events_no_address(pool, event_name, table_name, time_range):
+    min_ts_ms = int(time_range[0].timestamp() * 1000)
+    max_ts_ms = int(time_range[1].timestamp() * 1000)
+    query = f"SELECT timestamp_ms FROM {table_name} WHERE event_name = $1 AND timestamp_ms BETWEEN $2 AND $3"
+    logger.info(f"Fetching '{event_name}' events from table '{table_name}' (any address)...")
+    rows = await pool.fetch(query, event_name, min_ts_ms, max_ts_ms)
+    df = pd.DataFrame([dict(r) for r in rows]) if rows else pd.DataFrame()
+    if not df.empty:
+        df['time'] = pd.to_datetime(df['timestamp_ms'], unit='ms', utc=True)
+    logger.info(f"-> Found {len(df)} events.")
+    return df
 
-    found_times = [r['found_time_ms'] for r in rows if r['found_time_ms']]
-    closed_times = [r['closed_time'] for r in rows if r['closed_time']]
-    found_df = pd.DataFrame(found_times, columns=['time'])
-    found_df['time'] = pd.to_datetime(found_df['time'], unit='ms', utc=True)
-    
+async def get_events_with_topics(pool, event_name, contract_key, time_range, topic_map):
+    config = CONTRACT_CONFIG[contract_key]
+    table, address = config['table'], config['address'].lower()
+    min_ts_ms = int(time_range[0].timestamp() * 1000)
+    max_ts_ms = int(time_range[1].timestamp() * 1000)
+    select_clause = ", ".join([f"topics[{idx}] as {name}" for name, idx in topic_map.items()])
+    query = f"SELECT timestamp_ms, {select_clause} FROM {table} WHERE event_name = $1 AND LOWER(contract_address) = $2 AND timestamp_ms BETWEEN $3 AND $4"
+    logger.info(f"Fetching '{event_name}' with topics for '{contract_key}'...")
+    rows = await pool.fetch(query, event_name, address, min_ts_ms, max_ts_ms)
+    df = pd.DataFrame([dict(r) for r in rows]) if rows else pd.DataFrame()
+    if not df.empty:
+        df['time'] = pd.to_datetime(df['timestamp_ms'], unit='ms', utc=True)
+        for col in topic_map.keys():
+            df[col] = df[col].str.lower()
+    logger.info(f"-> Found {len(df)} events with details.")
+    return df
+
+async def get_market_data(pool, market_table_name, time_range):
+    logger.info(f"Fetching market data from '{market_table_name}'...")
+    min_ts_ms = int(time_range[0].timestamp() * 1000)
+    max_ts_ms = int(time_range[1].timestamp() * 1000)
+    query = f"SELECT found_time_ms, closed_time, condition_id, message ->> 'questionID' as question_id FROM {market_table_name} WHERE exhaustion_cycle != 0 AND found_time_ms BETWEEN $1 AND $2"
+    rows = await pool.fetch(query, min_ts_ms, max_ts_ms)
+    if not rows: return pd.DataFrame(), pd.DataFrame()
+    df = pd.DataFrame([dict(r) for r in rows])
+    df['condition_id'] = df['condition_id'].str.lower()
+    df['question_id'] = df['question_id'].str.lower()
+    found_df = df[['found_time_ms', 'condition_id', 'question_id']].copy()
+    found_df.rename(columns={'found_time_ms': 'timestamp_ms'}, inplace=True)
+    found_df['time'] = pd.to_datetime(found_df['timestamp_ms'], unit='ms', utc=True)
+    closed_times = df['closed_time'].dropna().tolist()
     def parse_closed_time(ts):
         try:
             ts = float(ts)
@@ -92,8 +115,7 @@ async def get_market_data(pool, market_table_name):
         except (ValueError, TypeError): return pd.NaT
     closed_df = pd.DataFrame(closed_times, columns=['ts_str'])
     closed_df['time'] = closed_df['ts_str'].apply(parse_closed_time)
-    
-    return found_df, closed_df.dropna()
+    return found_df.dropna(subset=['time']), closed_df.dropna(subset=['time'])
 
 def create_cdf_df(df):
     if df.empty: return pd.DataFrame(columns=['time', 'count'])
@@ -112,7 +134,7 @@ def calculate_net_active_df(creation_df, resolution_df):
     return combined[['time', 'net_active']]
 
 # ----------------------------------------------------------------
-# 3. PLOTTING FUNCTIONS (Unchanged)
+# 3. PLOTTING FUNCTIONS
 # ----------------------------------------------------------------
 
 def plot_cdfs(data_dict, title, filename, time_range):
@@ -120,10 +142,27 @@ def plot_cdfs(data_dict, title, filename, time_range):
     plt.figure(figsize=(20, 14))
     palette = sns.color_palette("bright", len(data_dict))
     logger.info(f"Generating plot: {title}")
-    for i, (label, df) in enumerate(data_dict.items()):
+
+    # Prepare data for sorting
+    plot_items = []
+    for label, data in data_dict.items():
+        df, multiplier = (data, 1) if isinstance(data, pd.DataFrame) else data
+        if not df.empty:
+            final_count = len(df) * multiplier
+            plot_items.append({'label': label, 'data': data, 'final_count': final_count})
+
+    # Sort items by final count, descending, to order the legend
+    sorted_plot_items = sorted(plot_items, key=lambda x: x['final_count'], reverse=True)
+
+    # Plot sorted items
+    for i, item in enumerate(sorted_plot_items):
+        label, data, total_n = item['label'], item['data'], item['final_count']
+        df, multiplier = (data, 1) if isinstance(data, pd.DataFrame) else data
         cdf = create_cdf_df(df)
         if not cdf.empty:
-            plt.plot(cdf['time'], cdf['count'], label=f"{label} (N={len(df)})", color=palette[i], linewidth=2.5)
+            cdf['count'] *= multiplier
+            plt.plot(cdf['time'], cdf['count'], label=f"{label} (N={total_n})", color=palette[i], linewidth=2.5)
+
     plt.title(title, fontsize=20, fontweight='bold')
     plt.xlabel("Date (UTC)", fontsize=14)
     plt.ylabel("Cumulative Count", fontsize=14)
@@ -159,76 +198,114 @@ def plot_lines(data_dict, title, filename, time_range):
     plt.close()
 
 # ----------------------------------------------------------------
-# 4. PLOT GENERATION LOGIC (REWRITTEN FOR ACCURACY)
+# 4. PLOT GENERATION LOGIC
 # ----------------------------------------------------------------
 
 async def generate_fork_plots(pool, fork_id, market_data, time_range, output_dir):
     logger.info(f"--- Generating all plots for Fork {fork_id} ---")
 
-    # --- PLOT 1: CREATION ---
+    # --- Data Fetching for ALL plots ---
     negrisk_tokens = await get_events(pool, 'TokenRegistered', 'negrisk_exchange', time_range)
     ctfe_tokens = await get_events(pool, 'TokenRegistered', 'ctfe_exchange', time_range)
     cond_prepared = await get_events(pool, 'ConditionPreparation', 'conditional_tokens', time_range)
+    
+    # Data for Plot 1 specifically
+    # CORRECTED: Use the new function for RequestPrice
+    moo_request_price = await get_events_no_address(pool, 'RequestPrice', 'events_managed_oracle', time_range)
+    negrisk_adapt_q_prepared = await get_events(pool, 'QuestionPrepared', 'negrisk_adapt', time_range)
+    negrisk_adapt_market_prepared = await get_events(pool, 'MarketPrepared', 'negrisk_adapt', time_range)
+    negrisk_op_q_prepared = await get_events(pool, 'QuestionPrepared', 'negrisk_op', time_range)
+    negrisk_op_market_prepared = await get_events(pool, 'MarketPrepared', 'negrisk_op', time_range)
+
+    # Data for multiple plots (original structure)
     uma_q_init = {
         'neg': await get_events(pool, 'QuestionInitialized', 'neg_uma', time_range),
         'ctfe': await get_events(pool, 'QuestionInitialized', 'ctfe_uma', time_range),
         'moo': await get_events(pool, 'QuestionInitialized', 'moo_uma', time_range)
     }
-    
-    creation_plot_data = {
-        "NegRisk Tokens Registered": negrisk_tokens,
-        "CTFE Tokens Registered": ctfe_tokens,
-        "All Tokens Registered": pd.concat([negrisk_tokens, ctfe_tokens]),
-        "2 * Conditions Prepared": pd.concat([cond_prepared, cond_prepared]),
-        "Orderbooks Found (from DB)": market_data['found'],
-        "NegRisk Op Question Prepared": await get_events(pool, 'QuestionPrepared', 'negrisk_op', time_range),
-        "NegRisk Op Market Prepared": await get_events(pool, 'MarketPrepared', 'negrisk_op', time_range),
-        "NegRisk Adapt Question Prepared": await get_events(pool, 'QuestionPrepared', 'negrisk_adapt', time_range),
-        "NegRisk Adapt Market Prepared": await get_events(pool, 'MarketPrepared', 'negrisk_adapt', time_range),
-        "2 * Neg UMA (QuestionInitialized)": pd.concat([uma_q_init['neg'], uma_q_init['neg']]),
-        "2 * CTFE UMA (QuestionInitialized)": pd.concat([uma_q_init['ctfe'], uma_q_init['ctfe']]),
-        "2 * MOO UMA (QuestionInitialized)": pd.concat([uma_q_init['moo'], uma_q_init['moo']]),
-        "2 * (CTFE + MOO) UMA (QuestionInitialized)": pd.concat([uma_q_init['ctfe'], uma_q_init['ctfe'], uma_q_init['moo'], uma_q_init['moo']]),
-        "2 * (All UMA) (QuestionInitialized)": pd.concat([uma_q_init['neg'], uma_q_init['neg'], uma_q_init['ctfe'], uma_q_init['ctfe'], uma_q_init['moo'], uma_q_init['moo']]),
-    }
-    plot_cdfs(creation_plot_data, f"Fork {fork_id} CDF: Market Creation Events", output_dir / "plot_1_creation.png", time_range)
-
-    # --- PLOT 2: RESOLUTION ---
     uma_q_resolved = {
         'neg': await get_events(pool, 'QuestionResolved', 'neg_uma', time_range),
         'ctfe': await get_events(pool, 'QuestionResolved', 'ctfe_uma', time_range),
         'moo': await get_events(pool, 'QuestionResolved', 'moo_uma', time_range)
     }
+
+    # --- PLOT 1: CREATION (MODIFIED) ---
+    creation_plot_data = {
+        "A) NegRisk CTFE TokensRegistered": negrisk_tokens,
+        "B) Base CTFE TokensRegistered": ctfe_tokens,
+        "C) Combined CTFE TokensRegistered": pd.concat([negrisk_tokens, ctfe_tokens]),
+        "D) 2 * CTF ConditionPreparation": (cond_prepared, 2),
+        "E) Orderbooks Found (from DB)": market_data['found'],
+        "F) 2 * MOO RequestPrice": (moo_request_price, 2),
+        "G) 2 * MOO UMA Adapter QuestionInitialized": (uma_q_init['moo'], 2),
+        "H) 2 * (NegRisk Adapter QuestionPrepared & MOO UMA QuestionInitialized)": (pd.concat([negrisk_adapt_q_prepared, uma_q_init['moo']]), 2),
+        "I) 2 * NegRisk UMA Adapter QuestionInitialized": (uma_q_init['neg'], 2),
+        "J) 2 * NegRisk Adapter MarketPrepared": (negrisk_adapt_market_prepared, 2),
+        "K) 2 * NegRisk Operator QuestionPrepared": (negrisk_op_q_prepared, 2),
+        "L) 2 * NegRisk Operator MarketPrepared": (negrisk_op_market_prepared, 2),
+    }
+    plot_cdfs(creation_plot_data, f"Fork {fork_id} CDF: Market Creation Events", output_dir / "plot_1_creation.png", time_range)
+
+    # --- PLOT 1.1: CREATION ANALYSIS (UNCHANGED) ---
+    logger.info("--- Generating Plot 1.1: Creation Discrepancy Analysis ---")
+    ctf_details = await get_events_with_topics(pool, 'ConditionPreparation', 'conditional_tokens', time_range, {'condition_id': 2, 'question_id': 4})
+    base_ctfe_details = await get_events_with_topics(pool, 'TokenRegistered', 'ctfe_exchange', time_range, {'condition_id': 4})
+    negrisk_ctfe_details = await get_events_with_topics(pool, 'TokenRegistered', 'negrisk_exchange', time_range, {'condition_id': 4})
+    moo_uma_details = await get_events_with_topics(pool, 'QuestionInitialized', 'moo_uma', time_range, {'question_id': 2})
+    negrisk_adapter_details = await get_events_with_topics(pool, 'QuestionPrepared', 'negrisk_adapt', time_range, {'question_id': 3})
+    
+    combined_exchanges_details = pd.concat([base_ctfe_details, negrisk_ctfe_details])
+    combined_oracles_details = pd.concat([moo_uma_details, negrisk_adapter_details])
+
+    ctf_conditions = set(ctf_details['condition_id'].dropna())
+    orderbook_conditions = set(market_data['found']['condition_id'].dropna())
+    base_ctfe_conditions = set(base_ctfe_details['condition_id'].dropna())
+    negrisk_ctfe_conditions = set(negrisk_ctfe_details['condition_id'].dropna())
+    combined_exchanges_conditions = base_ctfe_conditions.union(negrisk_ctfe_conditions)
+    
+    orderbook_questions = set(market_data['found']['question_id'].dropna())
+    moo_uma_questions = set(moo_uma_details['question_id'].dropna())
+    negrisk_adapter_questions = set(negrisk_adapter_details['question_id'].dropna())
+    combined_oracles_questions = moo_uma_questions.union(negrisk_adapter_questions)
+
+    def filter_and_deduplicate(df, id_column, id_set):
+        if df.empty or not id_set: return pd.DataFrame(columns=['time'])
+        matching_events = df[df[id_column].isin(id_set)]
+        first_occurrence = matching_events.sort_values('time').drop_duplicates(subset=[id_column], keep='first')
+        return first_occurrence[['time']]
+
+    plot_data_1_1 = {
+        "2 * (ctf \\ orderbooks) conditions": (filter_and_deduplicate(ctf_details, 'condition_id', ctf_conditions - orderbook_conditions), 2),
+        "2 * (combined exchanges \\ orderbooks) conditions": (filter_and_deduplicate(combined_exchanges_details, 'condition_id', combined_exchanges_conditions - orderbook_conditions), 2),
+        "2 * (base ctfe \\ orderbooks) conditions": (filter_and_deduplicate(base_ctfe_details, 'condition_id', base_ctfe_conditions - orderbook_conditions), 2),
+        "2 * (neg risk \\ orderbooks) conditions": (filter_and_deduplicate(negrisk_ctfe_details, 'condition_id', negrisk_ctfe_conditions - orderbook_conditions), 2),
+        "2 * (combined exchanges \\ ctf) conditions": (filter_and_deduplicate(combined_exchanges_details, 'condition_id', combined_exchanges_conditions - ctf_conditions), 2),
+        "2 * (base ctfe \\ ctf) conditions": (filter_and_deduplicate(base_ctfe_details, 'condition_id', base_ctfe_conditions - ctf_conditions), 2),
+        "2 * (neg risk \\ ctf) conditions": (filter_and_deduplicate(negrisk_ctfe_details, 'condition_id', negrisk_ctfe_conditions - ctf_conditions), 2),
+        "2 * (combined oracles \\ orderbooks) questions": (filter_and_deduplicate(combined_oracles_details, 'question_id', combined_oracles_questions - orderbook_questions), 2),
+        "2 * (moo uma \\ orderbooks) questions": (filter_and_deduplicate(moo_uma_details, 'question_id', moo_uma_questions - orderbook_questions), 2),
+        "2 * (neg risk adapter \\ orderbooks) questions": (filter_and_deduplicate(negrisk_adapter_details, 'question_id', negrisk_adapter_questions - orderbook_questions), 2),
+    }
+    plot_cdfs(plot_data_1_1, f"Fork {fork_id} CDF: Creation Discrepancy Analysis", output_dir / "creation_analysis1.1.png", time_range)
+
+    # --- PLOT 2: RESOLUTION (UNCHANGED) ---
     resolution_plot_data = {
         "Orderbooks Closed (from DB)": market_data['closed'],
-        "NegRisk Op QuestionResolved": await get_events(pool, 'QuestionResolved', 'negrisk_op', time_range),
-        "NegRisk Adapt OutcomeReported": await get_events(pool, 'OutcomeReported', 'negrisk_adapt', time_range),
-        "Neg UMA QuestionManuallyResolved": await get_events(pool, 'QuestionManuallyResolved', 'neg_uma', time_range),
-        "CTFE UMA QuestionManuallyResolved": await get_events(pool, 'QuestionManuallyResolved', 'ctfe_uma', time_range),
-        "MOO UMA QuestionManuallyResolved": await get_events(pool, 'QuestionManuallyResolved', 'moo_uma', time_range),
-        "2 * Neg UMA (QuestionResolved)": pd.concat([uma_q_resolved['neg'], uma_q_resolved['neg']]),
-        "2 * CTFE UMA (QuestionResolved)": pd.concat([uma_q_resolved['ctfe'], uma_q_resolved['ctfe']]),
-        "2 * MOO UMA (QuestionResolved)": pd.concat([uma_q_resolved['moo'], uma_q_resolved['moo']]),
-        "2 * (CTFE + MOO) UMA (QuestionResolved)": pd.concat([uma_q_resolved['ctfe'], uma_q_resolved['ctfe'], uma_q_resolved['moo'], uma_q_resolved['moo']]),
-        "2 * (All UMA) (QuestionResolved)": pd.concat([uma_q_resolved['neg'], uma_q_resolved['neg'], uma_q_resolved['ctfe'], uma_q_resolved['ctfe'], uma_q_resolved['moo'], uma_q_resolved['moo']]),
+        "2 * (All UMA) (QuestionResolved)": (pd.concat(uma_q_resolved.values()), 2),
     }
     plot_cdfs(resolution_plot_data, f"Fork {fork_id} CDF: Market Resolution Events", output_dir / "plot_2_resolution.png", time_range)
     
-    # --- PLOT 3: NET ACTIVE ---
+    # --- PLOT 3: NET ACTIVE (UNCHANGED) ---
     net_active_data = {
         "Net Active Orderbooks (DB)": calculate_net_active_df(market_data['found'], market_data['closed']),
-        "2 * (Conditions Prepared - Resolved)": calculate_net_active_df(pd.concat([cond_prepared, cond_prepared]), await get_events(pool, 'ConditionResolution', 'conditional_tokens', time_range)),
-        "NegRisk Tokens - Neg UMA Resolved": calculate_net_active_df(negrisk_tokens, uma_q_resolved['neg']),
-        "CTFE Tokens - (MOO+CTFE) UMA Resolved": calculate_net_active_df(ctfe_tokens, pd.concat([uma_q_resolved['moo'], uma_q_resolved['ctfe']])),
+        "2 * (Conditions Prepared - Resolved)": calculate_net_active_df(pd.concat([cond_prepared]*2), await get_events(pool, 'ConditionResolution', 'conditional_tokens', time_range)),
         "All Tokens - All UMA Resolved": calculate_net_active_df(pd.concat([negrisk_tokens, ctfe_tokens]), pd.concat(uma_q_resolved.values())),
-        "Neg UMA (Init - Resolved)": calculate_net_active_df(uma_q_init['neg'], uma_q_resolved['neg']),
-        "CTFE & MOO UMA (Init - Resolved)": calculate_net_active_df(pd.concat([uma_q_init['ctfe'], uma_q_init['moo']]), pd.concat([uma_q_resolved['ctfe'], uma_q_resolved['moo']])),
         "All UMA (Init - Resolved)": calculate_net_active_df(pd.concat(uma_q_init.values()), pd.concat(uma_q_resolved.values())),
     }
     plot_lines(net_active_data, f"Fork {fork_id} Net Active Markets", output_dir / "plot_4_net_active.png", time_range)
 
 # ----------------------------------------------------------------
-# 5. MAIN EXECUTION (REWRITTEN FOR ACCURACY)
+# 5. MAIN EXECUTION
 # ----------------------------------------------------------------
 
 async def main():
@@ -243,22 +320,15 @@ async def main():
 
     for fork_id, market_table in forks_to_process.items():
         logger.info(f"===== Processing Fork {fork_id} (markets table: {market_table}) =====")
-        
-        # 1. First, calculate the precise time range for the fork.
         time_range = await calculate_fork_time_range(pool, market_table)
         if not time_range[0]:
             logger.warning(f"Skipping Fork {fork_id}: No data found in '{market_table}'.")
             continue
         logger.info(f"Fork {fork_id} time range: {time_range[0]} to {time_range[1]}")
-
-        # 2. Fetch other necessary data like market found/closed times.
         market_data = {}
-        market_data['found'], market_data['closed'] = await get_market_data(pool, market_table)
-        
+        market_data['found'], market_data['closed'] = await get_market_data(pool, market_table, time_range)
         output_dir = Path(PLOTS_DIR) / "lifetime" / str(fork_id)
         output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 3. Generate plots by passing the pool and time_range. Data is fetched inside.
         await generate_fork_plots(pool, fork_id, market_data, time_range, output_dir)
 
     await pool.close()

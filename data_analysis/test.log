@@ -1,0 +1,46 @@
+2025-12-15 08:39:17 | INFO | Successfully connected to the database.
+2025-12-15 08:39:17 | INFO | 
+=============== FINDING 2 SETTLED LIFECYCLES ===============
+2025-12-15 08:39:17 | INFO | 
+--- Settled Lifecycle #1 ---
+2025-12-15 08:39:17 | INFO | Tracing True Lifecycle for Ancillary Data: "q: title: Will the price of Solana be above $190 on December 11?, desc..."
+2025-12-15 08:39:17 | INFO | Found starting 'Settle' event in Tx: 0x71032e732beacc2850cb5afd3405903483bc4d171d36c8a03301f5325c598e81
+2025-12-15 08:39:17 | INFO |   -> RequestPrice    | Block: 79881322 | Time: 2025-12-04 17:01:15 UTC
+2025-12-15 08:39:17 | INFO |      Tx: 0xdf7f26efc76a3878f581a9f0d21ea421c197713f50eae89414a71bf33c8339c8
+2025-12-15 08:39:17 | INFO |      Topics: [ requester: 0x65070be91477460d8a7aeeb94ef92fe056c2f2a7 ]
+2025-12-15 08:39:17 | INFO |   -> ProposePrice    | Block: 80183597 | Time: 2025-12-11 16:57:05 UTC
+2025-12-15 08:39:17 | INFO |      Tx: 0x8615309d02349c8d99cfbf5cd5842a701f34d4276e83c8df54b0a1c3b12dbc9e
+2025-12-15 08:39:17 | INFO |      Topics: [ requester: 0x65070be91477460d8a7aeeb94ef92fe056c2f2a7, proposer: 0x176a56a10b952c4ab1acb234384e97c5574bbdf9 ]
+2025-12-15 08:39:17 | INFO |   -> Settle          | Block: 80188233 | Time: 2025-12-11 19:31:37 UTC
+2025-12-15 08:39:17 | INFO |      Tx: 0x71032e732beacc2850cb5afd3405903483bc4d171d36c8a03301f5325c598e81
+2025-12-15 08:39:17 | INFO |      Topics: [ requester: 0x65070be91477460d8a7aeeb94ef92fe056c2f2a7, proposer: 0x176a56a10b952c4ab1acb234384e97c5574bbdf9 ]
+2025-12-15 08:39:17 | INFO | 
+--- Settled Lifecycle #2 ---
+2025-12-15 08:39:17 | INFO | Tracing True Lifecycle for Ancillary Data: "q: title: Colts Team Total: O/U 19.5, description: In the upcoming NFL..."
+2025-12-15 08:39:17 | INFO | Found starting 'Settle' event in Tx: 0xb6ecf0e451a42c3b3e1353345388881e2f3e6aaa86c0f0e952c447ed945f7fd3
+2025-12-15 08:39:18 | INFO |   -> RequestPrice    | Block: 79669370 | Time: 2025-11-29 19:16:11 UTC
+2025-12-15 08:39:18 | INFO |      Tx: 0x8771b87daf3a9b3162677b9ddc54f6b3cb81b0cf85b4df2d9de75d8ff91f925a
+2025-12-15 08:39:18 | INFO |      Topics: [ requester: 0x65070be91477460d8a7aeeb94ef92fe056c2f2a7 ]
+2025-12-15 08:39:18 | INFO |   -> ProposePrice    | Block: 79716630 | Time: 2025-11-30 21:31:31 UTC
+2025-12-15 08:39:18 | INFO |      Tx: 0x04f829d2a7a3c5e548d858d4a8274fb5d8c18882fcf909921dd69f02a7f99ff3
+2025-12-15 08:39:18 | INFO |      Topics: [ requester: 0x65070be91477460d8a7aeeb94ef92fe056c2f2a7, proposer: 0x674eefeb269e880f75dd545c56ff4d05a2c96ec5 ]
+2025-12-15 08:39:18 | INFO |   -> Settle          | Block: 79720722 | Time: 2025-11-30 23:47:55 UTC
+2025-12-15 08:39:18 | INFO |      Tx: 0xb6ecf0e451a42c3b3e1353345388881e2f3e6aaa86c0f0e952c447ed945f7fd3
+2025-12-15 08:39:18 | INFO |      Topics: [ requester: 0x65070be91477460d8a7aeeb94ef92fe056c2f2a7, proposer: 0x674eefeb269e880f75dd545c56ff4d05a2c96ec5 ]
+2025-12-15 08:39:18 | INFO | 
+=============== FINDING 1 DISPUTED LIFECYCLE ===============
+2025-12-15 08:39:18 | INFO | 
+--- Disputed Lifecycle #1 ---
+2025-12-15 08:39:18 | INFO | Tracing True Lifecycle for Ancillary Data: "q: title: Will AI be on the Time 2025 person of the year shortlist?, d..."
+2025-12-15 08:39:18 | INFO | Found starting 'DisputePrice' event in Tx: 0x71d4a048aaaa35427f173e4111b7185710eb59c5a21711713d5cc9747d82f539
+2025-12-15 08:39:18 | INFO |   -> RequestPrice    | Block: 79936037 | Time: 2025-12-05 23:25:05 UTC
+2025-12-15 08:39:18 | INFO |      Tx: 0x53ae49aa9b866cb2d5d48655c8b21411a26ebcad1c3bc4cda1eb2462d875cb9f
+2025-12-15 08:39:18 | INFO |      Topics: [ requester: 0x65070be91477460d8a7aeeb94ef92fe056c2f2a7 ]
+2025-12-15 08:39:18 | INFO |   -> ProposePrice    | Block: 80175948 | Time: 2025-12-11 12:42:07 UTC
+2025-12-15 08:39:18 | INFO |      Tx: 0x7b5428b69f75f14fe0dd7531ab9e7884d98db33dd3e630c032ebc454d6b6b467
+2025-12-15 08:39:18 | INFO |      Topics: [ requester: 0x65070be91477460d8a7aeeb94ef92fe056c2f2a7, proposer: 0xc25427ea224b8f9fa2df801233f944006ed33f73 ]
+2025-12-15 08:39:18 | INFO |   -> DisputePrice    | Block: 80178073 | Time: 2025-12-11 13:52:57 UTC
+2025-12-15 08:39:18 | INFO |      Tx: 0x71d4a048aaaa35427f173e4111b7185710eb59c5a21711713d5cc9747d82f539
+2025-12-15 08:39:18 | INFO |      Topics: [ requester: 0x65070be91477460d8a7aeeb94ef92fe056c2f2a7, proposer: 0xc25427ea224b8f9fa2df801233f944006ed33f73, disputer: 0x0bfd7ae78ed2b89f7e7d85938e9317b5d494047b ]
+2025-12-15 08:39:18 | INFO | 
+Database connection pool closed.

@@ -3,23 +3,28 @@ import asyncio
 import asyncpg
 import pandas as pd
 import logging
+from pathlib import Path
 
 # ----------------------------------------------------------------
-# PREREQUISITE:
-# pip install pandas "asyncpg<0.29.0"
+# 1. SETUP & CONFIGURATION
 # ----------------------------------------------------------------
 
-# --- Set your database credentials as environment variables ---
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+logger = logging.getLogger()
+
+# --- Database Credentials ---
 PG_HOST = os.getenv("PG_SOCKET")
 PG_PORT = os.getenv("POLY_PG_PORT")
 DB_NAME = os.getenv("POLY_DB")
 DB_USER = os.getenv("POLY_DB_CLI")
 DB_PASS = os.getenv("POLY_DB_CLI_PASS")
 
-# --- Configuration ---
-FORK_MARKET_TABLE = "markets_2"
+# --- File Paths ---
+CSV_DIR = os.getenv('POLY_CSV', '.')
+LABELS_FILE = Path(CSV_DIR) / 'labels.csv'
 
-# --- Contract Addresses (lowercase for reliable matching) ---
+# --- Table & Contract Config ---
+FORK_MARKET_TABLE = "markets_2"
 ADDR = {
     'negrisk_exchange': "0xc5d563a36ae78145c45a50134d48a1215220f80a".lower(),
     'ctfe_exchange': "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e".lower(),
@@ -29,59 +34,119 @@ ADDR = {
     'negrisk_adapt': "0xd91e80cf2e7be2e162c6513ced06f1dd0da35296".lower()
 }
 
-# --- Setup basic logging ---
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-logger = logging.getLogger()
-
+# ----------------------------------------------------------------
+# 2. HELPER FUNCTIONS
+# ----------------------------------------------------------------
 
 async def fetch_data(pool, query, params=[]):
     """Helper to fetch data and return a DataFrame."""
     try:
-        rows = await pool.fetch(query, *params)
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(query, *params)
         return pd.DataFrame([dict(row) for row in rows]) if rows else pd.DataFrame()
     except asyncpg.exceptions.PostgresError as e:
         logger.error(f"SQL Error: {e}. Please check your query and table schema.")
         return pd.DataFrame()
 
+def load_labels(file_path):
+    """Loads labels from the specified CSV file."""
+    if not file_path.exists():
+        logger.error(f"Labels file not found at '{file_path}'. Cannot perform semantic analysis.")
+        return None
+    df = pd.read_csv(file_path)
+    labels = df['representative_label'].tolist()
+    logger.info(f"Loaded {len(labels)} labels for semantic analysis.")
+    return labels
+
+# ----------------------------------------------------------------
+# 3. SEMANTIC ANALYSIS FUNCTION
+# ----------------------------------------------------------------
+
+async def analyze_semantics(pool, labels):
+    """Fetches semantic data and prints statistical summaries."""
+    print("\n" + "="*60)
+    print("SEMANTIC ANALYSIS SUMMARY")
+    print("="*60)
+
+    semantic_categories = {
+        "CLOB but not CTF Questions": "semantic_clob_not_ctf",
+        "Oracles but not CLOB Questions": "semantic_oracles_not_clob",
+        "Shared Bridge (CLOB and CTF) Questions": "semantic_shared_bridge"
+    }
+
+    for category_name, table_name in semantic_categories.items():
+        # Check if the table exists before querying
+        table_exists_query = "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = $1);"
+        exists = await pool.fetchval(table_exists_query, table_name)
+        
+        if not exists:
+            logger.warning(f"Semantic table '{table_name}' not found. Skipping analysis for '{category_name}'.")
+            continue
+
+        label_cols = ", ".join([f'"{f"label_{i}"}"' for i in range(len(labels))])
+        query = f"SELECT {label_cols} FROM {table_name};"
+        
+        df = await fetch_data(pool, query)
+
+        if df.empty:
+            logger.warning(f"No data found in semantic table '{table_name}'. Skipping.")
+            continue
+
+        print(f"\n--- Analysis for '{category_name}' ({len(df):,} questions) ---")
+
+        # 1. Mean Vector Calculation
+        mean_vector = df.mean()
+        print("\nMean Label Vector:")
+        for i, label in enumerate(labels):
+            col_name = f"label_{i}"
+            print(f"  - {label:<12}: {mean_vector[col_name]:.4f}")
+
+        # 2. Percentiles Calculation
+        percentiles = df.quantile([0.01, 0.30, 0.60, 0.99])
+        print("\nLabel Percentiles:")
+        for i, label in enumerate(labels):
+            col_name = f"label_{i}"
+            p_values = percentiles[col_name]
+            print(f"  {label}:")
+            print(f"    - 1st percentile:  {p_values[0.01]:.4f}")
+            print(f"    - 30th percentile: {p_values[0.30]:.4f}")
+            print(f"    - 60th percentile: {p_values[0.60]:.4f}")
+            print(f"    - 99th percentile: {p_values[0.99]:.4f}")
+
+# ----------------------------------------------------------------
+# 4. MAIN EXECUTION
+# ----------------------------------------------------------------
 
 async def main():
     """Main function to connect, fetch, analyze, and print results."""
-    # Use the specified timestamp range
-    min_ts = 1764053596065
-    max_ts = 1765267123725
-    
     pool = await asyncpg.create_pool(user=DB_USER, password=DB_PASS, database=DB_NAME, host=PG_HOST, port=PG_PORT)
     logger.info("Successfully connected to the database.")
 
-    logger.info(f"Using specified time range: {pd.to_datetime(min_ts, unit='ms', utc=True)} to {pd.to_datetime(max_ts, unit='ms', utc=True)}")
+    # --- Step 1: Get Time Range ---
+    time_range_query = f"SELECT MIN(found_time_ms) as min_ts, MAX(found_time_ms) as max_ts FROM {FORK_MARKET_TABLE} WHERE exhaustion_cycle != 0"
+    time_range = await pool.fetchrow(time_range_query)
+    min_ts, max_ts = time_range['min_ts'], time_range['max_ts']
+    logger.info(f"Time range for Fork 2 established: {pd.to_datetime(min_ts, unit='ms', utc=True)} to {pd.to_datetime(max_ts, unit='ms', utc=True)}")
 
     # --- Step 2: Fetch All Data ---
     cond_prep_query = "SELECT topics[2] as condition_id, topics[3] as oracle_topic, topics[4] as question_id FROM events_conditional_tokens WHERE event_name = 'ConditionPreparation' AND LOWER(contract_address) = $1 AND timestamp_ms BETWEEN $2 AND $3"
     ctf_df = await fetch_data(pool, cond_prep_query, [ADDR['conditional_tokens'], min_ts, max_ts])
-    logger.info(f"Fetched {len(ctf_df)} 'ctf' (ConditionPreparation) events.")
-
+    
     token_reg_query = "SELECT topics[4] as condition_id FROM {table} WHERE event_name = 'TokenRegistered' AND LOWER(contract_address) = $1 AND timestamp_ms BETWEEN $2 AND $3"
     negrisk_ctfe_df = await fetch_data(pool, token_reg_query.format(table='events_neg_risk_exchange'), [ADDR['negrisk_exchange'], min_ts, max_ts])
-    logger.info(f"Fetched {len(negrisk_ctfe_df)} 'negrisk_ctfe' (TokenRegistered) events.")
     base_ctfe_df = await fetch_data(pool, token_reg_query.format(table='events_ctf_exchange'), [ADDR['ctfe_exchange'], min_ts, max_ts])
-    logger.info(f"Fetched {len(base_ctfe_df)} 'base_ctfe' (TokenRegistered) events.")
-
+    
     negrisk_question_query = "SELECT topics[3] as question_id FROM events_neg_risk_adapter WHERE event_name = 'QuestionPrepared' AND LOWER(contract_address) = $1 AND timestamp_ms BETWEEN $2 AND $3"
     negrisk_adapter_df = await fetch_data(pool, negrisk_question_query, [ADDR['negrisk_adapt'], min_ts, max_ts])
-    logger.info(f"Fetched {len(negrisk_adapter_df)} 'negrisk_adapter' (QuestionPrepared) events.")
-
+    
     moo_question_query = "SELECT topics[2] as question_id FROM events_uma_adapter WHERE event_name = 'QuestionInitialized' AND LOWER(contract_address) = $1 AND timestamp_ms BETWEEN $2 AND $3"
     moo_uma_df = await fetch_data(pool, moo_question_query, [ADDR['moo_uma'], min_ts, max_ts])
-    logger.info(f"Fetched {len(moo_uma_df)} 'moo_uma' (QuestionInitialized) events.")
     neg_uma_df = await fetch_data(pool, moo_question_query, [ADDR['neg_uma'], min_ts, max_ts])
-    logger.info(f"Fetched {len(neg_uma_df)} 'negrisk_uma' (QuestionInitialized) events.")
-
-    markets_query = f"SELECT condition_id, message ->> 'questionID' as question_id FROM {FORK_MARKET_TABLE} WHERE found_time_ms BETWEEN $1 AND $2 AND exhaustion_cycle != 0"
-    clob_df = await fetch_data(pool, markets_query, [min_ts, max_ts])
-    logger.info(f"Fetched {len(clob_df)} 'clob' (orderbook) entries.")
-
-    await pool.close()
-    logger.info("Database connection closed. Starting analysis...")
+    
+    markets_query = f"SELECT condition_id, message ->> 'questionID' as question_id FROM {FORK_MARKET_TABLE} WHERE exhaustion_cycle != 0"
+    clob_df = await fetch_data(pool, markets_query)
+    
+    logger.info("All data fetched. Starting analysis...")
 
     # --- Step 3: Create Normalized Sets ---
     def get_lists_and_sets(series):
@@ -161,7 +226,14 @@ async def main():
     print(f"1) combined_negrisk (negrisk_adapter U negrisk_uma): {len(combined_negrisk):,}")
     print(f"2) shared_negrisk (negrisk_adapter ^ negrisk_uma): {len(shared_negrisk):,}")
 
-    # F) Bridge Sets (clob vs ctf) - MODIFIED
+    # E.2) Oracle Cross-Reference (NEW SECTION)
+    print("\n--- [E.2] Oracle Cross-Reference (Moo vs NegRisk) ---")
+    moo_vs_neg_adapt = moo_uma_questions.intersection(negrisk_adapter_questions)
+    moo_vs_neg_uma = moo_uma_questions.intersection(negrisk_uma_questions)
+    print(f"1) Shared Questions (Moo Oracle ^ NegRisk UMA Adapter): {len(moo_vs_neg_adapt):,}")
+    print(f"2) Shared Questions (Moo Oracle ^ NegRisk UMA Oracle):  {len(moo_vs_neg_uma):,}")
+
+    # F) Bridge Sets (clob vs ctf)
     shared_condition_bridges = clob_conditions.intersection(ctf_conditions)
     shared_question_bridges = clob_questions.intersection(ctf_questions)
     shared_pairs = clob_pairs.intersection(ctf_pairs)
@@ -173,38 +245,36 @@ async def main():
     print("--- CONDITIONS ---")
     print(f"4) shared (clob ^ ctf): {len(shared_condition_bridges):,}")
     print(f"5) only in orderbook (clob \\ ctf): {len(clob_conditions - ctf_conditions):,}")
-    print(f"6) only on-chain (ctf \\ clob): {len(ctf_conditions - clob_conditions):,}")
+    print(f"6) only on-chain (ctf \\ clob): {len(ctf_conditions - ctf_conditions):,}")
     print("--- QUESTIONS ---")
     print(f"7) shared (clob ^ ctf): {len(shared_question_bridges):,}")
     print(f"8) only in orderbook (clob \\ ctf): {len(clob_questions - ctf_questions):,}")
-    print(f"9) only on-chain (ctf \\ clob): {len(ctf_questions - clob_questions):,}")
+    print(f"9) only on-chain (ctf \\ clob): {len(ctf_questions - ctf_questions):,}")
 
     # G) No Bridge
-    combined_condition_bridges = clob_conditions.union(ctf_conditions)
-    combined_question_bridges = clob_questions.union(ctf_questions)
     print("\n--- [G] Items Not Found in Bridges ---")
     print("--- base_ctfe (conditions) ---")
-    print(f"  \\ combined_condition_bridges: {len(base_ctfe_conditions - combined_condition_bridges):,}")
+    print(f"  \\ shared_condition_bridges: {len(base_ctfe_conditions - shared_condition_bridges):,}")
     print(f"  \\ clob_conditions: {len(base_ctfe_conditions - clob_conditions):,}")
     print(f"  \\ ctf_conditions: {len(base_ctfe_conditions - ctf_conditions):,}")
     print("--- negrisk_ctfe (conditions) ---")
-    print(f"  \\ combined_condition_bridges: {len(negrisk_ctfe_conditions - combined_condition_bridges):,}")
+    print(f"  \\ shared_condition_bridges: {len(negrisk_ctfe_conditions - shared_condition_bridges):,}")
     print(f"  \\ clob_conditions: {len(negrisk_ctfe_conditions - clob_conditions):,}")
     print(f"  \\ ctf_conditions: {len(negrisk_ctfe_conditions - ctf_conditions):,}")
     print("--- negrisk_uma (questions) ---")
-    print(f"  \\ combined_question_bridges: {len(negrisk_uma_questions - combined_question_bridges):,}")
+    print(f"  \\ shared_question_bridges: {len(negrisk_uma_questions - shared_question_bridges):,}")
     print(f"  \\ clob_questions: {len(negrisk_uma_questions - clob_questions):,}")
     print(f"  \\ ctf_questions: {len(negrisk_uma_questions - ctf_questions):,}")
     print("--- negrisk_adapter (questions) ---")
-    print(f"  \\ combined_question_bridges: {len(negrisk_adapter_questions - combined_question_bridges):,}")
+    print(f"  \\ shared_question_bridges: {len(negrisk_adapter_questions - shared_question_bridges):,}")
     print(f"  \\ clob_questions: {len(negrisk_adapter_questions - clob_questions):,}")
     print(f"  \\ ctf_questions: {len(negrisk_adapter_questions - ctf_questions):,}")
     print("--- moo_uma (questions) ---")
-    print(f"  \\ combined_question_bridges: {len(moo_uma_questions - combined_question_bridges):,}")
+    print(f"  \\ shared_question_bridges: {len(moo_uma_questions - shared_question_bridges):,}")
     print(f"  \\ clob_questions: {len(moo_uma_questions - clob_questions):,}")
     print(f"  \\ ctf_questions: {len(moo_uma_questions - ctf_questions):,}")
 
-    # H) Unregistered / Missing - MODIFIED
+    # H) Unregistered / Missing
     ctf_only_conditions = ctf_conditions - clob_conditions
     clob_only_conditions = clob_conditions - ctf_conditions
     ctf_only_questions = ctf_questions - clob_questions
@@ -219,35 +289,23 @@ async def main():
     print(f"5) From only on-chain (ctf \\ clob): {len(ctf_only_questions - combined_main_oracles):,}")
     print(f"6) From only orderbook (clob \\ ctf): {len(clob_only_questions - combined_main_oracles):,}")
 
-    # I) Off-chain vs On-chain - MODIFIED
+    # I) Off-chain vs On-chain
     print("\n--- [I] Off-chain vs On-chain Analysis ---")
-    # 1. Orderbooks for registered tokens not prepared on-chain
     base_tokens_not_in_ctf = base_ctfe_conditions - ctf_conditions
     negrisk_tokens_not_in_ctf = negrisk_ctfe_conditions - ctf_conditions
     print(f"1) Orderbooks for 'base_ctfe' tokens not prepared on-chain: {len(clob_conditions.intersection(base_tokens_not_in_ctf)):,}")
     print(f"2) Orderbooks for 'negrisk_ctfe' tokens not prepared on-chain: {len(clob_conditions.intersection(negrisk_tokens_not_in_ctf)):,}")
-
-    # 2. Conditions prepared on-chain but not registered
     conditions_not_in_tokens = ctf_conditions - combined_ctfe
     print(f"3) Conditions prepared on-chain but not registered as tokens: {len(conditions_not_in_tokens):,}")
-
-    # 3. Orderbooks for oracle questions not prepared on-chain
     oracles_not_in_ctf = combined_main_oracles - ctf_questions
     print(f"4) Orderbooks for questions from oracles but not prepared on-chain: {len(clob_questions.intersection(oracles_not_in_ctf)):,}")
-
-    # 4. Conditions prepared for questions not from main oracles
     ctf_not_in_oracles = ctf_questions - combined_main_oracles
     print(f"5) Conditions prepared on-chain for questions not from main oracles: {len(ctf_not_in_oracles):,}")
-
-    # 5. NEW: For conditions prepared on-chain but NOT in orderbooks, how many have a matching oracle?
     onchain_not_in_clob = ctf_conditions - clob_conditions
-    # Filter these by registration type
     onchain_not_in_clob_base = onchain_not_in_clob.intersection(base_ctfe_conditions)
     onchain_not_in_clob_negrisk = onchain_not_in_clob.intersection(negrisk_ctfe_conditions)
-    # Get the question IDs for these subsets from the original ctf dataframe
     questions_for_base_subset = set(ctf_df[ctf_df['condition_id'].isin(onchain_not_in_clob_base)]['question_id'])
     questions_for_negrisk_subset = set(ctf_df[ctf_df['condition_id'].isin(onchain_not_in_clob_negrisk)]['question_id'])
-    # Check how many of those question IDs are in the main oracle set
     base_with_matching_oracle = len(questions_for_base_subset.intersection(combined_main_oracles))
     negrisk_with_matching_oracle = len(questions_for_negrisk_subset.intersection(combined_main_oracles))
     print(f"6) Conditions on-chain but not in orderbook ('base_ctfe' tokens): {len(onchain_not_in_clob_base):,}")
@@ -255,11 +313,17 @@ async def main():
     print(f"7) Conditions on-chain but not in orderbook ('negrisk_ctfe' tokens): {len(onchain_not_in_clob_negrisk):,}")
     print(f"   - Of these, count with a matching oracle entry: {negrisk_with_matching_oracle:,}")
 
-    print("\n" + "="*60)
+    # --- [J] NEW: Semantic Analysis Section ---
+    labels = load_labels(LABELS_FILE)
+    if labels:
+        await analyze_semantics(pool, labels)
+
+    await pool.close()
+    logger.info("Database connection closed.")
 
 
 if __name__ == "__main__":
     if not all([PG_HOST, DB_NAME, DB_USER, DB_PASS]):
-        logger.error("Database credentials are not set. Please set PG_SOCKET, POLY_PG_PORT, POLY_DB, POLY_DB_CLI, and POLY_DB_CLI_PASS environment variables.")
+        logger.error("Database credentials are not set.")
     else:
         asyncio.run(main())

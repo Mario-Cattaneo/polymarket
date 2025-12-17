@@ -1,145 +1,129 @@
-import os
 import asyncio
-import logging
-import aiohttp
-import asyncpg
-import time
 import json
-from web3 import Web3
+import os
+import logging
+import asyncpg
+import heapq
+from typing import Optional, Tuple, List, Dict, Any
+from collections import deque
+from Crypto.Hash import keccak
+import httpx
 
-# --- LOGGING SETUP ---
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
-logger = logging.getLogger()
+# Import the provided CLI tools
+from http_cli import HttpManager, HttpTaskConfig, HttpTaskCallbacks, Method
 
+# --- Configuration & Constants ---
+INFURA_MAX_LOGS = 10_000
+ALPHA = 0.2  # Exponential Moving Average smoothing factor
+TOLERANCE = 0.1  # Safety margin (10%)
 CONFIG_FILE = "collect_events_config.json"
+BLOCK_TIME_MS = 2000  # 2 seconds per block
 
-class RateLimitController:
-    """
-    A robust, asyncio-compatible rate limiter that enforces a minimum delay
-    between calls from any number of concurrent workers. This is based on the
-    original, proven implementation.
-    """
-    def __init__(self, delay: float):
-        self.delay = delay
-        self.lock = asyncio.Lock()
-        self.last_request_time = 0
+# --- Logging Setup ---
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
-    async def acquire_permission(self):
-        """
-        Acquires the lock and waits if necessary to enforce the global delay.
-        This guarantees that calls are spaced out by at least `self.delay`.
-        """
-        async with self.lock:
-            now = time.monotonic()
-            elapsed = now - self.last_request_time
-            
-            if elapsed < self.delay:
-                wait_for = self.delay - elapsed
-                await asyncio.sleep(wait_for)
-            
-            # Update the last request time *after* the wait
-            self.last_request_time = time.monotonic()
+# Silence noisy libraries
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-class ConfigManager:
-    """Manages loading, parsing, and saving the configuration file."""
-    def __init__(self, config_path):
-        self.path = config_path
-        with open(config_path, 'r') as f:
-            self.raw = json.load(f)
+# --- Helper Functions ---
+
+def get_keccak_hash(signature: str) -> str:
+    k = keccak.new(digest_bits=256)
+    k.update(signature.encode('utf-8'))
+    return '0x' + k.hexdigest()
+
+async def get_db_pool(db_config: dict, pool_size: int):
+    try:
+        pool = await asyncpg.create_pool(
+            host=os.environ.get(db_config['socket_env'], 'localhost'),
+            port=os.environ.get(db_config['port_env'], '5432'),
+            database=os.environ.get(db_config['name_env']),
+            user=os.environ.get(db_config['user_env']),
+            password=os.environ.get(db_config['pass_env']),
+            min_size=pool_size,
+            max_size=pool_size
+        )
+        return pool
+    except Exception as e:
+        logger.error(f"Failed to connect to database: {e}")
+        raise e
+
+async def get_latest_block(rpc_url: str) -> int:
+    async with httpx.AsyncClient() as client:
+        payload = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
+        resp = await client.post(rpc_url, json=payload)
+        return int(resp.json()['result'], 16)
+
+async def get_block_timestamp(rpc_url: str, block_number: int) -> int:
+    async with httpx.AsyncClient() as client:
+        payload = {"jsonrpc": "2.0", "method": "eth_getBlockByNumber", "params": [hex(block_number), False], "id": 1}
+        resp = await client.post(rpc_url, json=payload)
+        data = resp.json()
+        if "result" in data and data["result"] and "timestamp" in data["result"]:
+            return int(data["result"]["timestamp"], 16) * 1000
+        return 0
+
+# --- Main Logic ---
+
+class EventCollector:
+    def __init__(self, config: dict):
+        self.config = config
+        self.general = config['general']
+        self.api_key = os.environ.get(self.general['rpc_env_var'])
+        self.rpc_url = f"{self.general['rpc_base_url']}{self.api_key}"
         
-        self.gen = self.raw['general']
-        self.w3 = Web3()
-        self.lock = asyncio.Lock()
+        self.min_batch = self.general['batch_size']['min']
+        self.max_batch = self.general['batch_size']['max']
         
-        infura_key = os.getenv(self.gen['rpc_env_var'])
-        if not infura_key:
-            raise ValueError(f"Environment variable {self.gen['rpc_env_var']} not set")
-        self.rpc_url = f"{self.gen['rpc_base_url']}{infura_key}"
+        self.db_pool = None
         
-        self.all_events = []
-        self.topic_map = {}
+        # State
+        self.current_contract_address: str = ""
+        self.current_event_signature: str = ""
+        self.current_event_name: str = ""
+        self.current_topic: str = ""
+        self.current_table: str = ""
         
-        for contract_cfg in self.raw['contracts']:
-            contract_addr = self.w3.to_checksum_address(contract_cfg['address'])
-            for event_cfg in contract_cfg['events']:
-                sig = event_cfg['signature']
-                topic_hash = self.w3.keccak(text=sig).hex()
-                if not topic_hash.startswith("0x"):
-                    topic_hash = "0x" + topic_hash
-                
-                event_obj = {
-                    "signature": sig, "name": sig.split('(')[0], "topic_hash": topic_hash,
-                    "config_entry": event_cfg, # Direct reference for state updates
-                    "contract": {
-                        "id": contract_cfg['id'], "address": contract_addr,
-                        "table": contract_cfg['table_name']
-                    }
-                }
-                self.all_events.append(event_obj)
-                self.topic_map[topic_hash] = event_obj
+        self.current_event_config: Optional[dict] = None
+        self.current_run_start_block: int = 0
+        
+        self.global_start_block: int = 0
+        self.global_end_block: int = 0
+        self.start_block_timestamp_ms: int = 0
+        
+        self.next_start_block: int = 0
+        self.avg_logs_per_block: float = 0.0
+        self.current_batch_size: int = self.max_batch
+        
+        self.retry_queue: deque[Tuple[int, int]] = deque()
+        
+        # Logic Flags
+        self.initial_estimation_done = False
+        self.estimation_in_flight = False
+        self.active_requests: int = 0
+        self.processing_complete = False
 
-    def get_db_params(self):
-        d = self.gen['db']
-        return {
-            "host": os.getenv(d['socket_env']), "port": os.getenv(d['port_env']),
-            "database": os.getenv(d['name_env']), "user": os.getenv(d['user_env']),
-            "password": os.getenv(d['pass_env']),
-        }
+        # Contiguous Progress Tracking
+        self.last_contiguous_block: int = 0
+        self.completed_ranges_heap: List[Tuple[int, int]] = []
+        
+        # Gap Filling State
+        self.skip_range: Optional[Tuple[int, int]] = None
 
-    async def merge_range(self, event, new_start, new_end):
-        """Directly modifies the collected_range in the raw config object."""
-        async with self.lock:
-            config_entry = event['config_entry']
-            start, end = config_entry['collected_range']
-            
-            if start is None:
-                config_entry['collected_range'] = [new_start, new_end]
-                return
-
-            config_entry['collected_range'][0] = min(start, new_start)
-            config_entry['collected_range'][1] = max(end, new_end)
-
-    async def save_to_disk_async(self):
-        """Asynchronously saves the current state to disk without blocking the event loop."""
-        def blocking_save():
-            with open(self.path, 'w') as f:
-                json.dump(self.raw, f, indent=2)
-
-        async with self.lock:
-            logger.info(f"Saving configuration state to {self.path}...")
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, blocking_save)
-
-
-class LogHarvester:
-    def __init__(self, config_manager):
-        self.cfg = config_manager
-        self.pool = None
-        self.current_batch_size = self.cfg.gen['batch_size']['initial']
-        self.total_logs_found = 0
-        self.latest_chain_block = 0
-        self.global_start_block = 0
-        self.global_end_block = 0
-        self.start_block_timestamp_ms = 0
-        self.rate_limit_active = asyncio.Event(); self.rate_limit_active.set()
-        self.backoff_time = 10
-        self.rpc_id_counter = 0
-        self.counter_lock = asyncio.Lock()
-        self.rate_controller = RateLimitController(delay=self.cfg.gen['global_request_delay'])
-
-    async def init_db(self):
-        logger.info("Initializing database schema...")
-        async with self.pool.acquire() as conn:
-            for contract_cfg in self.cfg.raw['contracts']:
-                table_name = contract_cfg['table_name']
-                should_drop = contract_cfg.get('drop_on_start', False)
-                if should_drop:
-                    logger.warning(f"Dropping table '{table_name}' as requested by configuration.")
+    async def init_db_schema(self):
+        async with self.db_pool.acquire() as conn:
+            for contract in self.config['contracts']:
+                table_name = contract['table_name']
+                if contract.get('drop_on_start', False):
+                    logger.warning(f"Dropping table {table_name}")
                     await conn.execute(f"DROP TABLE IF EXISTS {table_name} CASCADE;")
+
                 await conn.execute(f"""
                     CREATE TABLE IF NOT EXISTS {table_name} (
                         transaction_hash TEXT, log_index BIGINT, block_number BIGINT,
@@ -149,252 +133,354 @@ class LogHarvester:
                         PRIMARY KEY (transaction_hash, log_index)
                     );
                 """)
-                timestamp_idx_name = f"idx_{table_name}_timestamp"
-                block_idx_name = f"idx_{table_name}_block_number"
-                await conn.execute(f"CREATE INDEX IF NOT EXISTS {timestamp_idx_name} ON {table_name}(timestamp_ms);")
-                await conn.execute(f"CREATE INDEX IF NOT EXISTS {block_idx_name} ON {table_name}(block_number);")
-        logger.info("Database schema initialization complete.")
+                await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table_name}_timestamp ON {table_name}(timestamp_ms);")
+                await conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table_name}_block_number ON {table_name}(block_number);")
 
-    async def get_latest_block(self, session):
-        try:
-            async with self.counter_lock: self.rpc_id_counter += 1; request_id = self.rpc_id_counter
-            payload = {"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":request_id}
-            async with session.post(self.cfg.rpc_url, json=payload, timeout=10) as resp:
-                data = await resp.json()
-                return int(data['result'], 16)
-        except Exception as e:
-            logger.error(f"Could not fetch latest block: {e}")
-            return 0
+    def _mark_range_complete(self, start: int, end: int):
+        heapq.heappush(self.completed_ranges_heap, (start, end))
 
-    async def get_block_timestamp(self, session, block_number):
-        try:
-            async with self.counter_lock: self.rpc_id_counter += 1; request_id = self.rpc_id_counter
-            payload = {"jsonrpc": "2.0", "method": "eth_getBlockByNumber", "params": [hex(block_number), False], "id": request_id}
-            async with session.post(self.cfg.rpc_url, json=payload, timeout=15) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
-                if "result" in data and data["result"] and "timestamp" in data["result"]:
-                    return int(data["result"]["timestamp"], 16) * 1000
-                logger.error(f"Failed to get timestamp for block {block_number}. Response: {data}")
-                return 0
-        except Exception as e:
-            logger.error(f"Could not fetch timestamp for block {block_number}: {e}")
-            return 0
-
-    def get_work_for_chunk(self, chunk_start, chunk_end):
-        # --- FIX #2: Corrected logic to find uncollected ranges ---
-        events_in_query = []
-        for event in self.cfg.all_events:
-            collected_range = event['config_entry']['collected_range']
+        while self.completed_ranges_heap:
+            next_range = self.completed_ranges_heap[0]
+            r_start, r_end = next_range
             
-            # If the event has never been collected, it needs work.
-            if collected_range is None or collected_range[0] is None:
-                events_in_query.append(event)
-                continue
-
-            collected_start, collected_end = collected_range
-            
-            # If the current chunk is NOT fully contained within what we've already collected, it needs work.
-            is_fully_contained = (chunk_start >= collected_start and chunk_end <= collected_end)
-            if not is_fully_contained:
-                events_in_query.append(event)
-
-        if not events_in_query: return None, None
-        addresses = list(set(e['contract']['address'] for e in events_in_query))
-        topics = list(set(e['topic_hash'] for e in events_in_query))
-        return addresses, topics
-    
-    async def fetch_chunk(self, session, start, end, addresses, topics):
-        async with self.counter_lock: self.rpc_id_counter += 1; request_id = self.rpc_id_counter
-        params = [{"fromBlock": hex(start), "toBlock": hex(end), "address": addresses, "topics": [topics]}]
-        payload = {"jsonrpc":"2.0", "method":"eth_getLogs", "params":params, "id": request_id}
-        try:
-            await self.rate_controller.acquire_permission()
-            await self.rate_limit_active.wait()
-            async with session.post(self.cfg.rpc_url, json=payload, timeout=45) as resp:
-                if resp.status == 429: return {"status": "RATE_LIMIT"}
-                if resp.status != 200: return {"status": "HTTP_ERROR", "code": resp.status}
-                data = await resp.json()
-                if "error" in data:
-                    msg = data['error'].get('message', '').lower()
-                    if "limit" in msg or "10000" in msg: return {"status": "LIMIT_EXCEEDED"}
-                    logger.error(f"RPC Error for payload {json.dumps(payload)}: {json.dumps(data['error'])}")
-                    return {"status": "RPC_ERROR", "msg": msg}
-                return {"status": "OK", "result": data.get("result", [])}
-        except Exception as e:
-            return {"status": "EXCEPTION", "msg": str(e)}
-
-    async def worker(self, name, queue, session):
-        while True:
-            priority, start, end = await queue.get()
-            addresses, topics = self.get_work_for_chunk(start, end)
-            if not addresses:
-                queue.task_done()
-                continue
-            resp = await self.fetch_chunk(session, start, end, addresses, topics)
-            status = resp.get("status")
-            await asyncio.sleep(self.cfg.gen['worker_cooldown'])
-            if status == "OK":
-                logs = resp["result"]
-                self.total_logs_found += len(logs)
-                if self.current_batch_size < self.cfg.gen['batch_size']['max']:
-                    self.current_batch_size = min(self.cfg.gen['batch_size']['max'], self.current_batch_size + 2)
-                progress = (start - self.global_start_block) / (self.global_end_block - self.global_start_block) * 100
-                logger.info(f"[{progress:.2f}%] Worker {name} | {start}-{end} | Found: {len(logs)} | Batch: {self.current_batch_size}")
-                if logs: await self.insert_logs(logs)
-                for event in self.cfg.all_events:
-                    if event['topic_hash'] in topics:
-                        await self.cfg.merge_range(event, start, end)
-                queue.task_done()
-            elif status == "LIMIT_EXCEEDED":
-                old_size = self.current_batch_size
-                self.current_batch_size = max(self.cfg.gen['batch_size']['min'], self.current_batch_size // 2)
-                logger.warning(f"Worker {name} | {start}-{end} | Range too large | Batch: {old_size} -> {self.current_batch_size}")
-                mid = (start + end) // 2
-                if start >= end: logger.error(f"Cannot split single block {start}, skipping.")
-                else:
-                    queue.put_nowait((0, start, mid))
-                    queue.put_nowait((0, mid + 1, end))
-                queue.task_done()
-            elif status == "RATE_LIMIT":
-                logger.warning(f"Global rate limit hit. Pausing all workers for {self.backoff_time}s...")
-                self.rate_limit_active.clear()
-                await asyncio.sleep(self.backoff_time)
-                self.backoff_time = min(self.backoff_time * 1.5, 60)
-                self.rate_limit_active.set()
-                logger.info("Resuming workers...")
-                queue.put_nowait((priority, start, end))
-                queue.task_done()
+            if r_start == self.last_contiguous_block + 1:
+                heapq.heappop(self.completed_ranges_heap)
+                self.last_contiguous_block = max(self.last_contiguous_block, r_end)
+            elif r_start <= self.last_contiguous_block:
+                heapq.heappop(self.completed_ranges_heap)
+                self.last_contiguous_block = max(self.last_contiguous_block, r_end)
             else:
-                msg = resp.get('msg', 'Unknown Error')
-                logger.error(f"Worker {name} | {start}-{end} | {status}: {msg} | Retrying in 5s...")
-                await asyncio.sleep(5)
-                queue.put_nowait((priority, start, end))
-                queue.task_done()
-
-    async def producer(self, queue):
-        current_block = self.global_start_block
-        while current_block <= self.global_end_block:
-            if queue.qsize() > self.cfg.gen['concurrency'] * 3:
-                await asyncio.sleep(0.5)
-                continue
-            end_block = min(current_block + self.current_batch_size - 1, self.global_end_block)
-            queue.put_nowait((1, current_block, end_block))
-            current_block = end_block + 1
-        logger.info("Producer has generated all required block ranges.")
-
-    async def insert_logs(self, logs):
-        inserts = {}
-        for log in logs:
-            topic0 = log['topics'][0]
-            event = self.cfg.topic_map.get(topic0)
-            if not event: continue
-            table = event['contract']['table']
-            if table not in inserts: inserts[table] = []
-            log_block_number = int(log['blockNumber'], 16)
-            block_delta = log_block_number - self.global_start_block
-            interpolated_timestamp_ms = self.start_block_timestamp_ms + (block_delta * 2000)
-            inserts[table].append((
-                log['transactionHash'], int(log['logIndex'], 16), log_block_number,
-                log['address'].lower(), event['name'], log['topics'], log['data'],
-                interpolated_timestamp_ms
-            ))
-        async with self.pool.acquire() as conn:
-            for table, rows in inserts.items():
-                try:
-                    await conn.executemany(f"""
-                        INSERT INTO {table} 
-                        (transaction_hash, log_index, block_number, contract_address, event_name, topics, data, timestamp_ms)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                        ON CONFLICT (transaction_hash, log_index) DO NOTHING
-                    """, rows)
-                except Exception as e:
-                    logger.error(f"DB Insert Error ({table}): {e}")
-
-    async def background_saver(self):
-        save_interval = self.cfg.gen.get('save_interval_seconds', 15)
-        logger.info(f"State will be saved to disk every {save_interval} seconds.")
-        while True:
-            try:
-                await asyncio.sleep(save_interval)
-                await self.cfg.save_to_disk_async()
-            except asyncio.CancelledError:
-                logger.info("Background saver task is shutting down.")
                 break
-            except Exception as e:
-                logger.error(f"Error in background saver: {e}")
+
+    def save_config(self, force_end_block: Optional[int] = None):
+        if not self.current_event_config: return
+
+        if force_end_block is not None:
+            run_end = force_end_block
+        else:
+            run_end = self.last_contiguous_block
+
+        run_start = self.current_run_start_block
+        
+        if run_end < run_start: return
+
+        existing_range = self.current_event_config.get('collected_range')
+        new_start = run_start
+        new_end = run_end
+
+        if existing_range and len(existing_range) == 2 and existing_range[0] is not None:
+            new_start = min(existing_range[0], run_start)
+            new_end = max(existing_range[1], run_end)
+        
+        self.current_event_config['collected_range'] = [new_start, new_end]
+
+        try:
+            with open(CONFIG_FILE, 'w') as f:
+                json.dump(self.config, f, indent=2)
+            logger.info(f"Config saved. Range: [{new_start}, {new_end}]")
+        except Exception as e:
+            logger.error(f"Failed to save config: {e}")
 
     async def run(self):
-        self.pool = await asyncpg.create_pool(**self.cfg.get_db_params())
-        await self.init_db()
-        async with aiohttp.ClientSession() as session:
-            self.latest_chain_block = await self.get_latest_block(session)
-            if self.latest_chain_block == 0: return
+        pool_size = self.general['max_concurrent'] + 2
+        logger.info(f"Initializing DB pool with size: {pool_size}")
+        self.db_pool = await get_db_pool(self.general['db'], pool_size)
+        
+        await self.init_db_schema()
 
-            # --- FIX #1: Dynamically determine the starting block ---
-            resume_from_block = None
-            all_ranges_found = True
-            for event in self.cfg.all_events:
-                collected_range = event['config_entry'].get('collected_range')
-                if collected_range and collected_range[1] is not None:
-                    if resume_from_block is None:
-                        resume_from_block = collected_range[1]
-                    else:
-                        resume_from_block = min(resume_from_block, collected_range[1])
-                else:
-                    # If any event has no collected range, we must start from the beginning.
-                    all_ranges_found = False
-                    break
+        self.global_start_block = self.config['collection_range']['start_block']
+        conf_end = self.config['collection_range']['end_block']
+        
+        if conf_end is None:
+            logger.info("Global end block is null, fetching latest...")
+            self.global_end_block = await get_latest_block(self.rpc_url)
+        else:
+            self.global_end_block = conf_end
+        
+        logger.info(f"Fetching timestamp for start block {self.global_start_block}...")
+        self.start_block_timestamp_ms = await get_block_timestamp(self.rpc_url, self.global_start_block)
+        if self.start_block_timestamp_ms == 0:
+            logger.error("Could not fetch start block timestamp. Aborting.")
+            return
+
+        logger.info(f"Global Collection Range: {self.global_start_block} -> {self.global_end_block}")
+
+        http_manager = HttpManager(
+            max_connections=self.general['max_concurrent'],
+            max_keepalive_connections=self.general['max_concurrent']
+        )
+        task_config = HttpTaskConfig(request_break_s=1.0 / self.general['global_rate_limit'])
+
+        for contract in self.config['contracts']:
+            self.current_contract_address = contract['address']
+            self.current_table = contract['table_name']
             
-            if all_ranges_found and resume_from_block is not None:
-                self.global_start_block = resume_from_block + 1
-            else:
-                self.global_start_block = self.cfg.raw['collection_range']['start_block']
-            
-            self.global_end_block = self.cfg.raw['collection_range']['end_block'] or self.latest_chain_block
-
-            if self.global_start_block > self.global_end_block:
-                logger.info("Collection is up to date. Nothing to do.")
-                return
-
-            self.start_block_timestamp_ms = await self.get_block_timestamp(session, self.global_start_block)
-            if self.start_block_timestamp_ms == 0:
-                logger.error("Could not get initial block timestamp. Aborting.")
-                return
+            for event in contract['events']:
+                self.current_event_config = event 
+                self.current_event_signature = event['signature']
+                self.current_event_name = self.current_event_signature.split('(')[0]
+                self.current_topic = get_keccak_hash(self.current_event_signature)
                 
-            logger.info(f"Starting Harvester")
-            logger.info(f"Global Range: {self.global_start_block} -> {self.global_end_block}")
-            logger.info(f"Base Timestamp for Block {self.global_start_block}: {self.start_block_timestamp_ms} ms")
+                # --- GAP DETECTION LOGIC ---
+                collected = event.get('collected_range')
+                self.skip_range = None
+                
+                if collected and len(collected) == 2 and collected[0] is not None:
+                    prev_start, prev_end = collected
+                    if self.global_start_block < prev_start:
+                        # Gap detected at the start. Start from global, but skip the already collected middle.
+                        start_block = self.global_start_block
+                        self.skip_range = (prev_start, prev_end)
+                        logger.info(f"Gap detected! Fetching {start_block}->{prev_start-1}, then skipping to {prev_end+1}")
+                    else:
+                        start_block = max(prev_end + 1, self.global_start_block)
+                else:
+                    start_block = self.global_start_block
+                
+                if start_block > self.global_end_block:
+                    logger.info(f"Skipping {self.current_event_name}: Up to date.")
+                    continue
+
+                logger.info(f"Starting {self.current_event_name} from {start_block}")
+                
+                self.current_run_start_block = start_block
+                self.next_start_block = start_block
+                self.avg_logs_per_block = 0.0 
+                
+                init_batch = event.get('init_batch_size')
+                if init_batch and isinstance(init_batch, int) and init_batch > 0:
+                    self.current_batch_size = max(self.min_batch, min(init_batch, self.max_batch))
+                    logger.info(f"Using custom initial batch size: {self.current_batch_size}")
+                else:
+                    self.current_batch_size = self.max_batch
+                
+                self.retry_queue.clear()
+                self.active_requests = 0
+                self.processing_complete = False
+                self.initial_estimation_done = False
+                self.estimation_in_flight = False
+                
+                self.last_contiguous_block = start_block - 1
+                self.completed_ranges_heap = []
+                
+                callbacks = HttpTaskCallbacks(
+                    next_request=self.next_request,
+                    on_response=self.on_response,
+                    on_exception=self.on_exception
+                )
+                
+                producer = http_manager.get_request_producer(
+                    config=task_config,
+                    callbacks=callbacks,
+                    max_concurrent_requests=self.general['max_concurrent']
+                )
+                
+                producer.start()
+                
+                while not self.processing_complete:
+                    await asyncio.sleep(1)
+                    if (self.next_start_block > self.global_end_block and 
+                        len(self.retry_queue) == 0 and 
+                        self.active_requests == 0 and
+                        self.initial_estimation_done):
+                        self.processing_complete = True
+                
+                producer.stop()
+                self.save_config()
+                logger.info(f"Finished {self.current_event_name}")
+
+        await http_manager.shutdown()
+        await self.db_pool.close()
+        logger.info("All events collected.")
+
+    def next_request(self) -> Tuple[Any, str, Method, Optional[dict], Optional[bytes]]:
+        # 1. Retry Queue
+        if self.retry_queue:
+            start, end = self.retry_queue.popleft()
+            self.active_requests += 1
+            return self._build_request((start, end, "retry"), start, end)
+
+        # 2. Probe
+        if not self.initial_estimation_done:
+            if self.estimation_in_flight:
+                return self._build_dummy_request()
+            else:
+                start = self.next_start_block
+                end = min(start + self.current_batch_size - 1, self.global_end_block)
+                self.estimation_in_flight = True
+                self.active_requests += 1
+                return self._build_request((start, end, "probe"), start, end)
+
+        # 3. New Requests
+        if self.next_start_block <= self.global_end_block:
             
-            queue = asyncio.PriorityQueue()
-            saver_task = asyncio.create_task(self.background_saver())
-            producer_task = asyncio.create_task(self.producer(queue))
-            workers = [asyncio.create_task(self.worker(i, queue, session)) for i in range(self.cfg.gen['concurrency'])]
+            # --- GAP JUMPING LOGIC ---
+            if self.skip_range:
+                skip_start, skip_end = self.skip_range
+                # If we are about to request a block inside the skip range
+                if self.next_start_block >= skip_start and self.next_start_block <= skip_end:
+                    logger.info(f"Skipping already collected range: {skip_start} -> {skip_end}")
+                    # Fast forward
+                    self.next_start_block = skip_end + 1
+                    # Mark the skipped range as 'done' for contiguous tracking
+                    self.last_contiguous_block = max(self.last_contiguous_block, skip_end)
+                    
+                    # If we jumped past the end, we are done
+                    if self.next_start_block > self.global_end_block:
+                        return self._build_dummy_request()
+
+            if self.avg_logs_per_block > 0:
+                target_logs = INFURA_MAX_LOGS * (1 - TOLERANCE)
+                calculated_batch = int(target_logs / self.avg_logs_per_block)
+                self.current_batch_size = min(self.max_batch, max(self.min_batch, calculated_batch))
+            else:
+                self.current_batch_size = self.max_batch
             
-            await producer_task
-            await queue.join()
+            start = self.next_start_block
+            end = min(start + self.current_batch_size - 1, self.global_end_block)
+            self.next_start_block = end + 1
+            self.active_requests += 1
+            return self._build_request((start, end, "new"), start, end)
+        
+        # 4. Idle
+        return self._build_dummy_request()
+
+    def _build_request(self, req_id, start, end):
+        payload = {
+            "jsonrpc": "2.0", "method": "eth_getLogs", "id": 1,
+            "params": [{"address": self.current_contract_address, "fromBlock": hex(start), "toBlock": hex(end), "topics": [self.current_topic]}]
+        }
+        return req_id, self.rpc_url, Method.POST, {"Content-Type": "application/json"}, json.dumps(payload).encode()
+
+    def _build_dummy_request(self):
+        return (0, 0, "ignore"), self.rpc_url, Method.POST, None, None
+
+    async def on_response(self, req_id: Any, content: bytes, status: int, headers: Any, rtt: float) -> bool:
+        start, end, req_type = req_id
+        if req_type == "ignore": return True
+
+        try:
+            response = json.loads(content)
+        except json.JSONDecodeError:
+            logger.error(f"JSON Error {start}-{end}")
+            self._handle_failure(start, end, req_type)
+            return True
+
+        if 'error' in response:
+            code = response['error'].get('code')
+            if code == -32005: # Limit exceeded
+                self._handle_limit_exceeded(start, end, req_type)
+            else:
+                logger.error(f"RPC Error {code}: {response['error'].get('message')}")
+                self._handle_failure(start, end, req_type)
+            return True
+
+        if 'result' in response:
+            logs = response['result']
             
-            for w in workers: w.cancel()
-            saver_task.cancel()
-            try: await saver_task
-            except asyncio.CancelledError: pass
+            if len(logs) > 0:
+                try:
+                    await self.save_logs_to_db(logs)
+                except Exception as e:
+                    logger.error(f"DB Write Failed {start}-{end}: {e}")
+                    self._handle_failure(start, end, req_type)
+                    return True
             
-            logger.info(f"Sync Complete. Total Logs Found: {self.total_logs_found}")
+            self._update_metrics(start, end, len(logs), req_type)
+            self._mark_range_complete(start, end)
+            
+            total_blocks = self.global_end_block - self.current_run_start_block
+            progress = 0.0
+            if total_blocks > 0:
+                progress = ((self.last_contiguous_block - self.current_run_start_block + 1) / total_blocks) * 100
+            
+            status_tag = "Probe" if req_type == "probe" else "Retry" if req_type == "retry" else "OK"
+            logger.info(f"[{self.current_event_name}] Block {end} ({progress:5.1f}%) | Found {len(logs):4} logs | Batch {end-start+1:6} | {status_tag}")
+
+            if req_type == "probe":
+                logger.info(f"Estimation done. Avg: {self.avg_logs_per_block:.4f} logs/blk")
+                self.initial_estimation_done = True
+                self.estimation_in_flight = False
+                self.next_start_block = end + 1
+
+        self.active_requests -= 1
+        return True
+
+    def _handle_limit_exceeded(self, start, end, req_type):
+        failed_len = end - start + 1
+        new_batch = failed_len // 2
+        
+        logger.warning(f"Limit Hit | Range: {start}-{end} ({failed_len}) | Splitting -> {new_batch}")
+        
+        if new_batch < self.min_batch:
+            logger.critical(f"Batch size too small at {start}. Aborting.")
+            self.processing_complete = True
+            self.active_requests -= 1
+            return
+
+        self.current_batch_size = new_batch
+
+        if req_type == "probe":
+            self.estimation_in_flight = False
+        else:
+            mid = start + new_batch - 1
+            self.retry_queue.appendleft((mid + 1, end))
+            self.retry_queue.appendleft((start, mid))
+        
+        self.active_requests -= 1
+
+    def _handle_failure(self, start, end, req_type):
+        if req_type == "probe":
+            self.estimation_in_flight = False
+        else:
+            self.retry_queue.append((start, end))
+        self.active_requests -= 1
+
+    def _update_metrics(self, start, end, log_count, req_type):
+        range_len = end - start + 1
+        logs_per_block = log_count / range_len
+        if self.avg_logs_per_block == 0:
+            self.avg_logs_per_block = logs_per_block
+        else:
+            self.avg_logs_per_block = (ALPHA * logs_per_block) + ((1 - ALPHA) * self.avg_logs_per_block)
+
+    async def on_exception(self, req_id: Any, e: Exception) -> bool:
+        start, end, req_type = req_id
+        if req_type == "ignore": return True
+        logger.error(f"Exception {start}-{end}: {e}")
+        self._handle_failure(start, end, req_type)
+        return True
+
+    async def save_logs_to_db(self, logs: List[dict]):
+        rows = []
+        for log in logs:
+            block_number = int(log.get('blockNumber'), 16)
+            block_delta = block_number - self.global_start_block
+            timestamp_ms = self.start_block_timestamp_ms + (block_delta * BLOCK_TIME_MS)
+            rows.append((
+                log.get('transactionHash'), int(log.get('logIndex'), 16), block_number,
+                log.get('address').lower(), self.current_event_name, log.get('topics'),
+                log.get('data'), timestamp_ms
+            ))
+
+        sql = f"""
+            INSERT INTO {self.current_table} 
+            (transaction_hash, log_index, block_number, contract_address, event_name, topics, data, timestamp_ms)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (transaction_hash, log_index) DO NOTHING
+        """
+        
+        async with self.db_pool.acquire() as conn:
+            await conn.executemany(sql, rows)
 
 if __name__ == "__main__":
-    cfg_manager = None
+    with open(CONFIG_FILE, 'r') as f:
+        config_data = json.load(f)
+    
+    collector = EventCollector(config_data)
     try:
-        cfg_manager = ConfigManager(CONFIG_FILE)
-        harvester = LogHarvester(cfg_manager)
-        asyncio.run(harvester.run())
+        asyncio.run(collector.run())
     except KeyboardInterrupt:
-        logger.info("Stopped by user.")
-    except Exception as e:
-        logger.error(f"A fatal error occurred: {e}", exc_info=True)
-    finally:
-        # --- Reverted to original, safe final save logic ---
-        if cfg_manager:
-            logger.info("Performing final state save...")
-            with open(cfg_manager.path, 'w') as f:
-                json.dump(cfg_manager.raw, f, indent=2)
-            logger.info("Final save complete.")
+        logger.info("Aborting... Saving progress.")
+        collector.save_config(force_end_block=collector.last_contiguous_block)
+        logger.info("Progress saved. Exiting.")

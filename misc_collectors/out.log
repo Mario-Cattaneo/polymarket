@@ -1,0 +1,219 @@
+
+================================================================================
+Fetching 1 receipt(s) from Polygon (https://polygon-mainnet.infura.io/v3/67bdc60b61b4421095369ac16655e7e3)...
+================================================================================
+
+--- TX HASH: 0x90e1f6602c31571443801462eefd225de3690b87a6aaa59564a4c675303aba2c ---
+
+  -> Log Index: 10 | Contract: 0x2791bca1f2de4661ed88a30c99a7a9449aa84174
+    Event: Transfer
+    - from: 0x6855361D01392928950eD84D784c651bF2466187
+    - to: 0x2C0367a9DB231dDeBd88a94b4f6461a6e47C58B1
+    - value: 750000000 (750.000000 USDC)
+----------------------------------------
+  -> Log Index: 11 | Contract: 0x2791bca1f2de4661ed88a30c99a7a9449aa84174
+    Event: Approval
+    - owner: 0x6855361D01392928950eD84D784c651bF2466187
+    - spender: 0x2C0367a9DB231dDeBd88a94b4f6461a6e47C58B1
+    - value: 0 (0.000000 USDC)
+----------------------------------------
+  -> Log Index: 12 | Contract: 0x2791bca1f2de4661ed88a30c99a7a9449aa84174
+    Event: Approval
+    - owner: 0x2C0367a9DB231dDeBd88a94b4f6461a6e47C58B1
+    - spender: 0xE58480CA74f1A819faFd777BEDED4E2D5629943d
+    - value: 500000000 (500.000000 USDC)
+----------------------------------------
+  -> Log Index: 13 | Contract: 0x2791bca1f2de4661ed88a30c99a7a9449aa84174
+    Event: Transfer
+    - from: 0x2C0367a9DB231dDeBd88a94b4f6461a6e47C58B1
+    - to: 0xE58480CA74f1A819faFd777BEDED4E2D5629943d
+    - value: 500000000 (500.000000 USDC)
+----------------------------------------
+  -> Log Index: 14 | Contract: 0x2791bca1f2de4661ed88a30c99a7a9449aa84174
+    Event: Approval
+    - owner: 0x2C0367a9DB231dDeBd88a94b4f6461a6e47C58B1
+    - spender: 0xE58480CA74f1A819faFd777BEDED4E2D5629943d
+    - value: 0 (0.000000 USDC)
+----------------------------------------
+  -> Log Index: 15 | Contract: 0xac60353a54873c446101216829a6a98cdbbc3f3d
+    Event: PriceRequestBridged
+    - requester: 0x2C0367a9DB231dDeBd88a94b4f6461a6e47C58B1
+    - childRequestId: e244a115639bbd1ec2eccd03b52a0a1a9644c7a6c72be82815383ef5fb4b819f
+    - parentRequestId: 435d0d611e5557c44e7c0f8421ede91d653e0f7c64977dacd1b45a14e549ec48
+    - identifier: YES_OR_NO_QUERY
+    - time: 1763483901 (2025-11-18T16:38:21+00:00)
+    - ancillaryData: 
+      - q: title: Will Trump establish a Gaza “Board of Peace” in 2025?
+      - description: This market will resolve to “Yes” if the Trump Administration formally announces the establishment of the “Board of Peace” (or a clearly equivalent oversight board fulfilling the same role) by December 31 2025
+      - 11: 59 PM ET. Otherwise resolve “No.”
+
+Only official policy announcements will qualify.
+
+Informal statements plans contingent on future conditions statements of intent without a formal policy directive or any other statements that do not constitute a formal policy announcement will not be considered.
+
+A consensus of credible reporting confirming that the “Board of Peace” or equivalent Gaza oversight board has been established
+      - includes U.S. participation and is operational will also qualify.  
+
+The resolution source will be official announcements from the Trump administration however a consensus for credible reporting may also be used. market_id: 627831 res_data: p1: 0
+      - p2: 1
+      - p3: 0.5. Where p1 corresponds to No p2 to Yes
+      - p3 to unknown/50-50. Updates made by the question creator via the bulletin board at 0x65070BE91477460D8A7AeEb94ef92fe056C2f2A7 as described by https: //polygonscan.com/tx/0xa14f01b115c4913624fc3f508f960f4dea252758e73c28f5f07f8e19d7bca066 should be considered.
+      - initializer: 91430cad2d3975766499717fa0d66a78d814e5c5
+      - ooRequester: 65070be91477460d8a7aeeb94ef92fe056c2f2a7
+----------------------------------------
+  -> Log Index: 16 | Contract: 0xac60353a54873c446101216829a6a98cdbbc3f3d
+    Event: PriceRequestAdded
+    - identifier: YES_OR_NO_QUERY
+    - requestHash: 435d0d611e5557c44e7c0f8421ede91d653e0f7c64977dacd1b45a14e549ec48
+    - time: 1763483901 (2025-11-18T16:38:21+00:00)
+    - ancillaryData: 
+      - ancillaryDataHash: 498e7392a48523c360d37fc00c3c09e8d4672ede90f50977b801b852c3693560
+      - childBlockNumber: 79192914
+      - childOracle: ac60353a54873c446101216829a6a98cdbbc3f3d
+      - childRequester: 2c0367a9db231ddebd88a94b4f6461a6e47c58b1
+      - childChainId: 137
+----------------------------------------
+  -> Log Index: 17 | Contract: 0xac60353a54873c446101216829a6a98cdbbc3f3d
+    Event: MessageSent
+    - message: 5945535f4f525f4e4f5f5155455259000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000691ca0fd000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000ea616e63696c6c61727944617461486173683a343938653733393261343835323363333630643337666330306333633039653864343637326564653930663530393737623830316238353263333639333536302c6368696c64426c6f636b4e756d6265723a37393139323931342c6368696c644f7261636c653a616336303335336135343837336334343631303132313638323961366139386364626263336633642c6368696c645265717565737465723a326330333637613964623233316464656264383861393462346636343631613665343763353862312c6368696c64436861696e49643a31333700000000000000000000000000000000000000000000
+----------------------------------------
+  -> Log Index: 18 | Contract: 0x2791bca1f2de4661ed88a30c99a7a9449aa84174
+    Event: Transfer
+    - from: 0x2C0367a9DB231dDeBd88a94b4f6461a6e47C58B1
+    - to: 0x65070BE91477460D8A7AeEb94ef92fe056C2f2A7
+    - value: 5000000 (5.000000 USDC)
+----------------------------------------
+  -> Log Index: 19 | Contract: 0x2c0367a9db231ddebd88a94b4f6461a6e47c58b1
+    Event: DisputePrice
+    - requester: 0x65070BE91477460D8A7AeEb94ef92fe056C2f2A7
+    - proposer: 0x86CC5e1e8fb20102Fa7A0fa4afeAf1Cbe1BE273D
+    - disputer: 0x6855361D01392928950eD84D784c651bF2466187
+    - identifier: YES_OR_NO_QUERY
+    - timestamp: 1759960804 (2025-10-08T22:00:04+00:00)
+    - ancillaryData: 
+      - q: title: Will Trump establish a Gaza “Board of Peace” in 2025?
+      - description: This market will resolve to “Yes” if the Trump Administration formally announces the establishment of the “Board of Peace” (or a clearly equivalent oversight board fulfilling the same role) by December 31 2025
+      - 11: 59 PM ET. Otherwise resolve “No.”
+
+Only official policy announcements will qualify.
+
+Informal statements plans contingent on future conditions statements of intent without a formal policy directive or any other statements that do not constitute a formal policy announcement will not be considered.
+
+A consensus of credible reporting confirming that the “Board of Peace” or equivalent Gaza oversight board has been established
+      - includes U.S. participation and is operational will also qualify.  
+
+The resolution source will be official announcements from the Trump administration however a consensus for credible reporting may also be used. market_id: 627831 res_data: p1: 0
+      - p2: 1
+      - p3: 0.5. Where p1 corresponds to No p2 to Yes
+      - p3 to unknown/50-50. Updates made by the question creator via the bulletin board at 0x65070BE91477460D8A7AeEb94ef92fe056C2f2A7 as described by https: //polygonscan.com/tx/0xa14f01b115c4913624fc3f508f960f4dea252758e73c28f5f07f8e19d7bca066 should be considered.
+      - initializer: 91430cad2d3975766499717fa0d66a78d814e5c5
+    - proposedPrice: 1000000000000000000 (Scaled by 1e18: 1.0)
+----------------------------------------
+  -> Log Index: 20 | Contract: 0x2791bca1f2de4661ed88a30c99a7a9449aa84174
+    Event: Transfer
+    - from: 0x65070BE91477460D8A7AeEb94ef92fe056C2f2A7
+    - to: 0x2C0367a9DB231dDeBd88a94b4f6461a6e47C58B1
+    - value: 5000000 (5.000000 USDC)
+----------------------------------------
+  -> Log Index: 21 | Contract: 0x2791bca1f2de4661ed88a30c99a7a9449aa84174
+    Event: Approval
+    - owner: 0x65070BE91477460D8A7AeEb94ef92fe056C2f2A7
+    - spender: 0x2C0367a9DB231dDeBd88a94b4f6461a6e47C58B1
+    - value: 115792089237316195423570985008687907853269984665640564039457584007782299639935 (115792089237316190183760311394656140241344763643041023198016376741560320.000000 USDC)
+----------------------------------------
+  -> Log Index: 22 | Contract: 0x2c0367a9db231ddebd88a94b4f6461a6e47c58b1
+    Event: RequestPrice
+    - requester: 0x65070BE91477460D8A7AeEb94ef92fe056C2f2A7
+    - identifier: YES_OR_NO_QUERY
+    - timestamp: 1763490859 (2025-11-18T18:34:19+00:00)
+    - ancillaryData: 
+      - q: title: Will Trump establish a Gaza “Board of Peace” in 2025?
+      - description: This market will resolve to “Yes” if the Trump Administration formally announces the establishment of the “Board of Peace” (or a clearly equivalent oversight board fulfilling the same role) by December 31 2025
+      - 11: 59 PM ET. Otherwise resolve “No.”
+
+Only official policy announcements will qualify.
+
+Informal statements plans contingent on future conditions statements of intent without a formal policy directive or any other statements that do not constitute a formal policy announcement will not be considered.
+
+A consensus of credible reporting confirming that the “Board of Peace” or equivalent Gaza oversight board has been established
+      - includes U.S. participation and is operational will also qualify.  
+
+The resolution source will be official announcements from the Trump administration however a consensus for credible reporting may also be used. market_id: 627831 res_data: p1: 0
+      - p2: 1
+      - p3: 0.5. Where p1 corresponds to No p2 to Yes
+      - p3 to unknown/50-50. Updates made by the question creator via the bulletin board at 0x65070BE91477460D8A7AeEb94ef92fe056C2f2A7 as described by https: //polygonscan.com/tx/0xa14f01b115c4913624fc3f508f960f4dea252758e73c28f5f07f8e19d7bca066 should be considered.
+      - initializer: 91430cad2d3975766499717fa0d66a78d814e5c5
+    - currency: 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
+    - reward: 5000000
+    - finalFee: 250000000
+----------------------------------------
+  -> Log Index: 23 | Contract: 0x65070be91477460d8a7aeeb94ef92fe056c2f2a7
+    Event: QuestionReset
+    - questionID: a29e54c9936051a79a176737b330ace301405f1e58f71b3a8d1f20c4aba5a193
+----------------------------------------
+  -> Log Index: 24 | Contract: 0x0000000000000000000000000000000000001010
+    Event: LogFeeTransfer
+    - token: 0x0000000000000000000000000000000000001010
+    - from: 0x6855361D01392928950eD84D784c651bF2466187
+    - to: 0x7Ee41D8A25641000661B1EF5E6AE8A00400466B0
+    - amount: 262294000000000000 (0.262294000000000027 MATIC)
+    - input1: 10975605037127881850
+    - input2: 2947262402512967057520780
+    - output1: 10713311037127881850
+    - output2: 2947262664806967057520780
+----------------------------------------
+
+================================================================================
+Fetching 2 receipt(s) from Mainnet (https://mainnet.infura.io/v3/67bdc60b61b4421095369ac16655e7e3)...
+================================================================================
+
+--- TX HASH: 0x8e94098a2d0d4d2f7d8e2d17380af53235cda94c7d93d4973710716422283d6e ---
+
+  -> Log Index: 175 | Contract: 0x9b40e25ddd4518f36c50ce8aef53ee527419d55d
+    Event: PushedPrice
+    - identifier: YES_OR_NO_QUERY
+    - requestHash: 93a87c398b7bdcede5971558e959b6e9be66dcb23b541eccfa3872ce9d64433e
+    - time: 1765457379 (2025-12-11T12:49:39+00:00)
+    - ancillaryData: 
+      - ancillaryDataHash: 6d95d64db587be454e574c50a9093aef042fc7274e5dfeb5b861df36df0b367d
+      - childBlockNumber: 80178203
+      - childOracle: ac60353a54873c446101216829a6a98cdbbc3f3d
+      - childRequester: 2c0367a9db231ddebd88a94b4f6461a6e47c58b1
+      - childChainId: 137
+    - price: -57896044618658097711785492504343953926634992332820282019728792003956564819968 (Scaled by 1e18: -5.78960446186581e+58)
+----------------------------------------
+  -> Log Index: 176 | Contract: 0x28e4f3a7f651294b9564800b2d01f35189a5bfbe
+    Event: StateSynced
+    - id: 3122653
+    - contractAddress: 0x8397259c983751DAf40400790063935a11afa28a
+    - data: 0000000000000000000000009b40e25ddd4518f36c50ce8aef53ee527419d55d000000000000000000000000ac60353a54873c446101216829a6a98cdbbc3f3d000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001a05945535f4f525f4e4f5f5155455259000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000693abde30000000000000000000000000000000000000000000000000000000000000080800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000ea616e63696c6c61727944617461486173683a366439356436346462353837626534353465353734633530613930393361656630343266633732373465356466656235623836316466333664663062333637642c6368696c64426c6f636b4e756d6265723a38303137383230332c6368696c644f7261636c653a616336303335336135343837336334343631303132313638323961366139386364626263336633642c6368696c645265717565737465723a326330333637613964623233316464656264383861393462346636343631613665343763353862312c6368696c64436861696e49643a31333700000000000000000000000000000000000000000000
+----------------------------------------
+
+--- TX HASH: 0xfe5b325cb60a9efb40cd11fa021e6f291cd63e87b35c1455229a3d465c4dc830 ---
+
+  -> Log Index: 0 | Contract: 0x9b40e25ddd4518f36c50ce8aef53ee527419d55d
+    Event: PriceRequestAdded
+    - identifier: YES_OR_NO_QUERY
+    - requestHash: c5c23db0fbe965c39693fe199fbb2df467611673e71bfe7614ece51a42b3bd78
+    - time: 1765774803 (2025-12-15T05:00:03+00:00)
+    - ancillaryData: 
+      - ancillaryDataHash: 6c4847336fb2d199713a8927ff0d411b6cc0c00b85b4bf62f98f0ef4bab39b50
+      - childBlockNumber: 80338098
+      - childOracle: ac60353a54873c446101216829a6a98cdbbc3f3d
+      - childRequester: 2c0367a9db231ddebd88a94b4f6461a6e47c58b1
+      - childChainId: 137
+----------------------------------------
+  -> Log Index: 1 | Contract: 0x004395edb43efca9885cedad51ec9faf93bd34ac
+    Event: RequestAdded
+    - requester: 0x9B40E25dDd4518F36c50ce8AEf53Ee527419D55d
+    - roundId: 10219
+    - identifier: YES_OR_NO_QUERY
+    - time: 1765774803 (2025-12-15T05:00:03+00:00)
+    - ancillaryData: 
+      - ancillaryDataHash: 6c4847336fb2d199713a8927ff0d411b6cc0c00b85b4bf62f98f0ef4bab39b50
+      - childBlockNumber: 80338098
+      - childOracle: ac60353a54873c446101216829a6a98cdbbc3f3d
+      - childRequester: 2c0367a9db231ddebd88a94b4f6461a6e47c58b1
+      - childChainId: 137
+    - isGovernance: False
+----------------------------------------
