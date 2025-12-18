@@ -12,12 +12,15 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 logger = logging.getLogger()
-
-# Set precision for Decimal calculations
 getcontext().prec = 10
 
+# --- CONFIGURATION ---
+COLLECTOR_CONFIG_FILE = "../polygon_collection/collect_events_config.json"
+SCHEMA_FILE = "event_args.json"
+SEMANTIC_SCHEMA_FILE = "semantic_event_args.json" # New file for semantic names
+
 async def get_db_connection(config):
-    """Establishes an async connection to the PostgreSQL database."""
+    """Establishes a connection to the PostgreSQL database."""
     db_config = config['general']['db']
     try:
         conn = await asyncpg.connect(
@@ -32,10 +35,41 @@ async def get_db_connection(config):
         logger.error(f"Database connection failed: {e}")
         return None
 
-async def calculate_event_distribution(config, conn):
+async def get_top_addresses_for_arg(conn, table_name, event_name, contract_address, sql_extraction_logic):
+    """Queries the database for the top 10 most frequent addresses for a specific event argument."""
+    if not sql_extraction_logic:
+        return []
+    
+    query = f"""
+        SELECT {sql_extraction_logic} as address, COUNT(*) as address_count
+        FROM {table_name}
+        WHERE event_name = $1 AND contract_address = $2
+        GROUP BY address
+        ORDER BY address_count DESC
+        LIMIT 10;
     """
-    Calculates and prints a compact probability distribution of events for each contract,
-    correctly filtering by contract address.
+    try:
+        return await conn.fetch(query, event_name, contract_address)
+    except Exception as e:
+        logger.error(f"Could not query top addresses for {table_name}.{event_name}: {e}")
+        return []
+
+def print_top_addresses_table(arg_name, records):
+    """Prints a formatted table of the top addresses."""
+    if not records:
+        return
+        
+    print(f"    └── Top 10 '{arg_name}':")
+    print(f"        {'Address':<42} | {'Count':<10}")
+    print(f"        {'-'*42} | {'-'*10}")
+    for record in records:
+        address = record['address'] if record['address'] else 'N/A'
+        count = record['address_count']
+        print(f"        {address:<42} | {count:<10}")
+
+async def calculate_event_distribution(config, conn, schema, semantic_schema):
+    """
+    Calculates event distribution and analyzes address arguments using semantic names.
     """
     for contract in config['contracts']:
         contract_id = contract['id']
@@ -43,7 +77,6 @@ async def calculate_event_distribution(config, conn):
         contract_address = contract['address'].lower()
 
         try:
-            # Get total events, scoped to the specific contract address
             total_events_query = f"SELECT COUNT(*) FROM {table_name} WHERE contract_address = $1;"
             total_events = await conn.fetchval(total_events_query, contract_address)
 
@@ -51,63 +84,112 @@ async def calculate_event_distribution(config, conn):
                 logger.warning(f"No events found for contract '{contract_id}'. Skipping.")
                 continue
 
-            # Get event counts, also scoped to the specific contract address
             event_counts_query = f"""
                 SELECT event_name, COUNT(*) as event_count
-                FROM {table_name}
-                WHERE contract_address = $1
-                GROUP BY event_name
-                ORDER BY event_count DESC;
+                FROM {table_name} WHERE contract_address = $1
+                GROUP BY event_name ORDER BY event_count DESC;
             """
             event_counts_records = await conn.fetch(event_counts_query, contract_address)
 
-            if not event_counts_records:
-                continue
+            if not event_counts_records: continue
 
-            # --- COMPACT OUTPUT FORMATTING ---
-            # 1. Find the longest event name to use for alignment padding
             max_name_len = max(len(r['event_name']) for r in event_counts_records)
-
-            # 2. Print a compact, single-line header
             print(f"\n--- {contract_id} (Total Events: {total_events}) ---")
 
-            # 3. Print each event's data in an aligned format
             for record in event_counts_records:
                 event_name = record['event_name']
                 count = record['event_count']
                 probability = (Decimal(count) / Decimal(total_events))
-                
-                # Left-justify the event name for clean alignment
                 aligned_name = event_name.ljust(max_name_len)
                 
-                # Format probability to 6 decimal places and include the count
-                print(f"  {aligned_name} | P={probability:<.6f} ({count})")
-            
+                base_output = f"  {aligned_name} | P={probability:<.6f} ({count})"
+                
+                distinct_addr_stats = []
+                top_addresses_tables_data = []
+                
+                # Get schemas for the current event
+                event_schema = schema.get(table_name, {}).get(event_name, {})
+                semantic_event_schema = semantic_schema.get(table_name, {}).get(event_name, {})
+
+                for arg_index, mapping in event_schema.items():
+                    # Get semantic name, fall back to generic name if not found
+                    arg_name_info = semantic_event_schema.get(arg_index, {})
+                    arg_name = arg_name_info.get('name', f"arg{arg_index}")
+
+                    location = mapping['location']
+                    slot = mapping['slot']
+                    sql_extraction_logic = ""
+
+                    if location == 'topics':
+                        sql_extraction_logic = f"'0x' || substring(topics[{slot}] from 27 for 40)"
+                    elif location == 'data':
+                        start_char = 3 + (slot * 64) + 24
+                        sql_extraction_logic = f"'0x' || substring(data from {start_char} for 40)"
+                    
+                    if not sql_extraction_logic: continue
+
+                    try:
+                        distinct_query = f"""
+                            SELECT COUNT(DISTINCT({sql_extraction_logic}))
+                            FROM {table_name}
+                            WHERE event_name = $1 AND contract_address = $2;
+                        """
+                        distinct_count = await conn.fetchval(distinct_query, event_name, contract_address)
+                        distinct_addr_stats.append(f"{arg_name}: {distinct_count}")
+
+                        # Fetch top addresses for this argument
+                        top_addresses_records = await get_top_addresses_for_arg(
+                            conn, table_name, event_name, contract_address, sql_extraction_logic
+                        )
+                        top_addresses_tables_data.append({"arg_name": arg_name, "records": top_addresses_records})
+
+                    except Exception as e:
+                        logger.error(f"Could not query distinct addresses for {contract_id}.{event_name}.{arg_name}: {e}")
+                        distinct_addr_stats.append(f"{arg_name}: Error")
+
+                # Print the main event summary line
+                if distinct_addr_stats:
+                    print(f"{base_output} | Distinct Addresses ({', '.join(distinct_addr_stats)})")
+                else:
+                    print(base_output)
+
+                # Print all the top 10 tables for the current event
+                for table_data in top_addresses_tables_data:
+                    print_top_addresses_table(table_data["arg_name"], table_data["records"])
+
         except asyncpg.exceptions.UndefinedTableError:
-             logger.error(f"Table '{table_name}' does not exist. Skipping contract '{contract_id}'.")
+            logger.error(f"Table '{table_name}' does not exist. Skipping contract '{contract_id}'.")
         except Exception as e:
             logger.error(f"An error occurred while querying for contract '{contract_id}': {e}")
 
 async def main():
-    """
-    Main async function to load config, connect to DB, and run calculations.
-    """
-    config_file = "../polygon_collection/collect_events_config.json"
-    
     try:
-        with open(config_file, 'r') as f:
+        with open(COLLECTOR_CONFIG_FILE, 'r') as f:
             config = json.load(f)
     except FileNotFoundError:
-        logger.error(f"Configuration file '{config_file}' not found.")
-        return
-    except json.JSONDecodeError:
-        logger.error(f"Error decoding JSON from '{config_file}'.")
+        logger.error(f"Collector config file '{COLLECTOR_CONFIG_FILE}' not found.")
         return
 
+    try:
+        with open(SCHEMA_FILE, 'r') as f:
+            schema = json.load(f)
+        logger.info(f"Successfully loaded argument schema from '{SCHEMA_FILE}'")
+    except FileNotFoundError:
+        logger.error(f"Schema file '{SCHEMA_FILE}' not found. Please run generate_event_schema.py first.")
+        return
+    
+    try:
+        with open(SEMANTIC_SCHEMA_FILE, 'r') as f:
+            semantic_schema = json.load(f)
+        logger.info(f"Successfully loaded semantic schema from '{SEMANTIC_SCHEMA_FILE}'")
+    except FileNotFoundError:
+        logger.warning(f"Semantic schema file '{SEMANTIC_SCHEMA_FILE}' not found. Argument names will be generic.")
+        semantic_schema = {} # Use an empty dict to handle the null case
+    
     conn = await get_db_connection(config)
     if conn:
         try:
-            await calculate_event_distribution(config, conn)
+            await calculate_event_distribution(config, conn, schema, semantic_schema)
         finally:
             await conn.close()
             logger.info("Database connection closed.")

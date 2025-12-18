@@ -1,0 +1,344 @@
+2025-12-17 09:46:39 | Successfully connected to the database.
+2025-12-17 09:46:40 | Time range for Fork 2 established: 2025-11-24 22:53:16.065000+00:00 to 2025-12-17 09:33:27.229000+00:00
+2025-12-17 09:47:16 | All data fetched. Starting analysis...
+2025-12-17 09:47:17 | Loaded 12 labels for semantic analysis.
+
+============================================================
+CLEAN ANALYTICAL RESULTS
+============================================================
+
+--- [A] Unique and Duplicate Counts ---
+--- Bridge Sets ---
+clob (orderbook): 41,235 unique conditions (41,235 duplicates)
+clob (orderbook): 41,235 unique questions (41,235 duplicates)
+ctf (on-chain):   43,005 unique conditions (0 duplicates)
+ctf (on-chain):   43,003 unique questions (2 duplicates)
+--- Non-Bridge Sets ---
+base_ctfe:        30,891 unique conditions (30,891 duplicates)
+negrisk_ctfe:     11,980 unique conditions (11,980 duplicates)
+negrisk_uma:      12,031 unique questions (0 duplicates)
+negrisk_adapter:  12,031 unique questions (0 duplicates)
+moo_uma:          22,417 unique questions (0 duplicates)
+
+--- [B] Oracles in 'ctf' (ConditionPreparation) ---
+Found 7 unique oracles. Counts per address:
+- 0x65070be91477460d8a7aeeb94ef92fe056c2f2a7: 22,417 events
+- 0xd91e80cf2e7be2e162c6513ced06f1dd0da35296: 12,031 events
+- 0x58e1745bedda7312c4cddb72618923da1b90efde: 8,525 events
+- 0xf76e193920b6bcba3c49b529652c75966605b597: 15 events
+- 0x3c8f8a83de3b1fddd898d3fac04063a7e7d415f4: 7 events
+- 0xcdfba8870175aa3244bb56342f6917aee344e9d9: 6 events
+- 0xb223c102751e437a554c80b79cb114ac04416a89: 4 events
+
+--- [C] CTFE Token Sets (by condition_id) ---
+1) base_ctfe (TokenRegistered): 30,891
+2) negrisk_ctfe (TokenRegistered): 11,980
+3) shared_ctfe (negrisk_ctfe ^ base_ctfe): 0
+
+--- [D] Main Oracle Question Sets ---
+1) combined_oracles (moo_uma U negrisk_adapter): 34,448
+2) shared_oracles (moo_uma ^ negrisk_adapter): 0
+
+--- [E] NegRisk Question Sets ---
+1) combined_negrisk (negrisk_adapter U negrisk_uma): 24,062
+2) shared_negrisk (negrisk_adapter ^ negrisk_uma): 0
+
+--- [E.2] Oracle Cross-Reference (Moo vs NegRisk) ---
+1) Shared Questions (Moo Oracle ^ NegRisk UMA Adapter): 0
+2) Shared Questions (Moo Oracle ^ NegRisk UMA Oracle):  0
+
+--- [F] Bridge Sets (clob vs ctf) ---
+--- (condition, question) PAIRS ---
+1) shared (clob ^ ctf): 38,298
+2) only in orderbook (clob \ ctf): 2,937
+3) only on-chain (ctf \ clob): 4,707
+--- CONDITIONS ---
+4) shared (clob ^ ctf): 38,298
+5) only in orderbook (clob \ ctf): 2,937
+6) only on-chain (ctf \ clob): 0
+--- QUESTIONS ---
+7) shared (clob ^ ctf): 38,298
+8) only in orderbook (clob \ ctf): 2,937
+9) only on-chain (ctf \ clob): 0
+
+--- [G] Items Not Found in Bridges ---
+--- base_ctfe (conditions) ---
+  \ shared_condition_bridges: 17
+  \ clob_conditions: 17
+  \ ctf_conditions: 0
+--- negrisk_ctfe (conditions) ---
+  \ shared_condition_bridges: 4,560
+  \ clob_conditions: 4,560
+  \ ctf_conditions: 0
+--- negrisk_uma (questions) ---
+  \ shared_question_bridges: 12,031
+  \ clob_questions: 12,031
+  \ ctf_questions: 12,031
+--- negrisk_adapter (questions) ---
+  \ shared_question_bridges: 4,611
+  \ clob_questions: 4,611
+  \ ctf_questions: 0
+--- moo_uma (questions) ---
+  \ shared_question_bridges: 29
+  \ clob_questions: 29
+  \ ctf_questions: 0
+
+--- [H] Unregistered Conditions / Missing Oracles ---
+--- Unregistered Conditions (Bridge conditions not in any token registration) ---
+1) From intersection (ctf ^ clob): 4
+2) From only on-chain (ctf \ clob): 130
+3) From only orderbook (clob \ ctf): 2,937
+--- Missing Oracles (Bridge questions not from a main oracle) ---
+4) From intersection (ctf ^ clob): 8,490
+5) From only on-chain (ctf \ clob): 65
+6) From only orderbook (clob \ ctf): 2,937
+
+--- [I] Off-chain vs On-chain Analysis ---
+1) Orderbooks for 'base_ctfe' tokens not prepared on-chain: 0
+2) Orderbooks for 'negrisk_ctfe' tokens not prepared on-chain: 0
+3) Conditions prepared on-chain but not registered as tokens: 134
+4) Orderbooks for questions from oracles but not prepared on-chain: 0
+5) Conditions prepared on-chain for questions not from main oracles: 8,555
+6) Conditions on-chain but not in orderbook ('base_ctfe' tokens): 17
+   - Of these, count with a matching oracle entry: 3
+7) Conditions on-chain but not in orderbook ('negrisk_ctfe' tokens): 4,560
+   - Of these, count with a matching oracle entry: 4,560
+
+============================================================
+SEMANTIC ANALYSIS SUMMARY
+============================================================
+
+--- Analysis for 'CLOB but not CTF Questions' (13,529 questions) ---
+
+Mean Label Vector:
+  - Sports      : 0.0977
+  - Recurring   : 0.0991
+  - Politics    : 0.0507
+  - Culture     : 0.0391
+  - Finance     : 0.0883
+  - Esports     : 0.1057
+  - Crypto      : 0.1028
+  - Tech        : 0.0815
+  - World       : 0.0627
+  - Economy     : 0.0887
+  - Weather     : 0.0866
+  - Business    : 0.0685
+
+Label Percentiles:
+  Sports:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0387
+    - 60th percentile: 0.1220
+    - 99th percentile: 0.3096
+  Recurring:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0727
+    - 60th percentile: 0.1101
+    - 99th percentile: 0.2205
+  Politics:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0038
+    - 60th percentile: 0.0513
+    - 99th percentile: 0.2047
+  Culture:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0043
+    - 60th percentile: 0.0423
+    - 99th percentile: 0.1541
+  Finance:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0510
+    - 60th percentile: 0.0914
+    - 99th percentile: 0.2632
+  Esports:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0534
+    - 60th percentile: 0.1260
+    - 99th percentile: 0.3007
+  Crypto:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0650
+    - 60th percentile: 0.1073
+    - 99th percentile: 0.3380
+  Tech:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0505
+    - 60th percentile: 0.0941
+    - 99th percentile: 0.2179
+  World:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0220
+    - 60th percentile: 0.0727
+    - 99th percentile: 0.1931
+  Economy:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0528
+    - 60th percentile: 0.0924
+    - 99th percentile: 0.2830
+  Weather:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0471
+    - 60th percentile: 0.0880
+    - 99th percentile: 0.3296
+  Business:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0371
+    - 60th percentile: 0.0729
+    - 99th percentile: 0.2185
+
+--- Analysis for 'Oracles but not CLOB Questions' (6,678 questions) ---
+
+Mean Label Vector:
+  - Sports      : 0.1105
+  - Recurring   : 0.0947
+  - Politics    : 0.0908
+  - Culture     : 0.0498
+  - Finance     : 0.0955
+  - Esports     : 0.1246
+  - Crypto      : 0.1085
+  - Tech        : 0.0951
+  - World       : 0.0792
+  - Economy     : 0.0907
+  - Weather     : 0.1150
+  - Business    : 0.0789
+
+Label Percentiles:
+  Sports:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0282
+    - 60th percentile: 0.1373
+    - 99th percentile: 0.3169
+  Recurring:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0676
+    - 60th percentile: 0.1034
+    - 99th percentile: 0.1993
+  Politics:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0442
+    - 60th percentile: 0.0996
+    - 99th percentile: 0.2316
+  Culture:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0092
+    - 60th percentile: 0.0594
+    - 99th percentile: 0.1968
+  Finance:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0619
+    - 60th percentile: 0.1011
+    - 99th percentile: 0.2609
+  Esports:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0536
+    - 60th percentile: 0.1453
+    - 99th percentile: 0.4664
+  Crypto:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0729
+    - 60th percentile: 0.1109
+    - 99th percentile: 0.3209
+  Tech:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0508
+    - 60th percentile: 0.1096
+    - 99th percentile: 0.2530
+  World:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0365
+    - 60th percentile: 0.0979
+    - 99th percentile: 0.2181
+  Economy:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0594
+    - 60th percentile: 0.1061
+    - 99th percentile: 0.2227
+  Weather:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0644
+    - 60th percentile: 0.1178
+    - 99th percentile: 0.3592
+  Business:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0376
+    - 60th percentile: 0.0856
+    - 99th percentile: 0.2352
+2025-12-17 09:47:18 | Database connection closed.
+
+--- Analysis for 'Shared Bridge (CLOB and CTF) Questions' (29,470 questions) ---
+
+Mean Label Vector:
+  - Sports      : 0.1319
+  - Recurring   : 0.1046
+  - Politics    : 0.0617
+  - Culture     : 0.0585
+  - Finance     : 0.1253
+  - Esports     : 0.1371
+  - Crypto      : 0.1447
+  - Tech        : 0.0974
+  - World       : 0.0933
+  - Economy     : 0.1032
+  - Weather     : 0.1583
+  - Business    : 0.0992
+
+Label Percentiles:
+  Sports:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0960
+    - 60th percentile: 0.1476
+    - 99th percentile: 0.3149
+  Recurring:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0789
+    - 60th percentile: 0.1159
+    - 99th percentile: 0.2095
+  Politics:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0313
+    - 60th percentile: 0.0783
+    - 99th percentile: 0.1822
+  Culture:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0315
+    - 60th percentile: 0.0723
+    - 99th percentile: 0.1732
+  Finance:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0922
+    - 60th percentile: 0.1381
+    - 99th percentile: 0.2675
+  Esports:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.1059
+    - 60th percentile: 0.1544
+    - 99th percentile: 0.3406
+  Crypto:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0968
+    - 60th percentile: 0.1458
+    - 99th percentile: 0.3508
+  Tech:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0625
+    - 60th percentile: 0.1141
+    - 99th percentile: 0.2440
+  World:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0615
+    - 60th percentile: 0.1146
+    - 99th percentile: 0.1936
+  Economy:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0734
+    - 60th percentile: 0.1164
+    - 99th percentile: 0.2419
+  Weather:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0982
+    - 60th percentile: 0.1767
+    - 99th percentile: 0.3968
+  Business:
+    - 1st percentile:  0.0000
+    - 30th percentile: 0.0636
+    - 60th percentile: 0.1065
+    - 99th percentile: 0.2213

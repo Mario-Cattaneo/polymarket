@@ -1,0 +1,130 @@
+{
+    "events_ctf_exchange": {
+        "OrderFilled": {
+            "1": { "name": "maker" },
+            "2": { "name": "taker" }
+        },
+        "OrdersMatched": {
+            "1": { "name": "maker" }
+        },
+        "FeeCharged": {
+            "0": { "name": "receiver" }
+        }
+    },
+    "events_neg_risk_exchange": {
+        "OrderFilled": {
+            "1": { "name": "maker" },
+            "2": { "name": "taker" }
+        },
+        "OrdersMatched": {
+            "1": { "name": "maker" }
+        },
+        "FeeCharged": {
+            "0": { "name": "receiver" }
+        }
+    },
+    "events_conditional_tokens": {
+        "ConditionPreparation": {
+            "1": { "name": "oracle" }
+        },
+        "ConditionResolution": {
+            "1": { "name": "oracle" }
+        },
+        "PositionSplit": {
+            "0": { "name": "stakeholder" },
+            "1": { "name": "collateralToken" }
+        },
+        "PositionsMerge": {
+            "0": { "name": "stakeholder" },
+            "1": { "name": "collateralToken" }
+        },
+        "PayoutRedemption": {
+            "0": { "name": "redeemer" },
+            "1": { "name": "collateralToken" }
+        }
+    },
+    "events_neg_risk_adapter": {
+        "MarketPrepared": {
+            "1": { "name": "oracle" }
+        },
+        "PayoutRedemption": {
+            "0": { "name": "redeemer" }
+        },
+        "PositionSplit": {
+            "0": { "name": "stakeholder" }
+        },
+        "PositionsConverted": {
+            "0": { "name": "stakeholder" }
+        },
+        "PositionsMerge": {
+            "0": { "name": "stakeholder" }
+        }
+    },
+    "events_uma_adapter": {
+        "AncillaryDataUpdated": {
+            "1": { "name": "updater" }
+        },
+        "QuestionInitialized": {
+            "2": { "name": "creator" },
+            "4": { "name": "rewardToken" }
+        }
+    },
+    "events_managed_oracle": {
+        "DisputePrice": {
+            "0": { "name": "requester" },
+            "1": { "name": "proposer" },
+            "2": { "name": "disputer" }
+        },
+        "ProposePrice": {
+            "0": { "name": "requester" },
+            "1": { "name": "proposer" },
+            "7": { "name": "currency" }
+        },
+        "RequestPrice": {
+            "0": { "name": "requester" },
+            "4": { "name": "currency" }
+        },
+        "Settle": {
+            "0": { "name": "requester" },
+            "1": { "name": "proposer" },
+            "2": { "name": "disputer" }
+        },
+        "RequestManagerAdded": { "0": { "name": "requestManager" }},
+        "RequestManagerRemoved": { "0": { "name": "requestManager" }},
+        "DefaultProposerWhitelistUpdated": { "0": { "name": "whitelist" }},
+        "RequesterWhitelistUpdated": { "0": { "name": "whitelist" }},
+        "CustomProposerWhitelistSet": { "4": { "name": "whitelist" }}
+    },
+    "oracle_tunnel_child": {
+        "PriceRequestBridged": {
+            "0": { "name": "requester" }
+        }
+    },
+    "fx_tunnel": {
+        "NewFxMessage": {
+            "0": { "name": "rootMessageSender" },
+            "1": { "name": "receiver" }
+        }
+    },
+    "OOV2": {
+        "RequestPrice": {
+            "0": { "name": "requester" },
+            "4": { "name": "currency" }
+        },
+        "ProposePrice": {
+            "0": { "name": "requester" },
+            "1": { "name": "proposer" },
+            "7": { "name": "currency" }
+        },
+        "DisputePrice": {
+            "0": { "name": "requester" },
+            "1": { "name": "proposer" },
+            "2": { "name": "disputer" }
+        },
+        "Settle": {
+            "0": { "name": "requester" },
+            "1": { "name": "proposer" },
+            "2": { "name": "disputer" }
+        }
+    }
+}

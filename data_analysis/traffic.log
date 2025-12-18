@@ -1,63 +1,549 @@
+2025-12-18 13:46:50 | INFO | Successfully loaded argument schema from 'event_args.json'
+2025-12-18 13:46:50 | INFO | Successfully loaded semantic schema from 'semantic_event_args.json'
 
---- ctf_exchange (Total Events: 58029349) ---
-  OrderFilled     | P=0.715913 (41543956)
-  OrdersMatched   | P=0.282693 (16404483)
-  TokenRegistered | P=0.001394 (80910)
+--- ctf_exchange (Total Events: 65158114) ---
+  OrderFilled     | P=0.716592 (46691807) | Distinct Addresses (maker: 408968, taker: 381580)
+    └── Top 10 'maker':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x6031b6eed1c97e853c6e0f03ad3ce3529351f96d | 2453103   
+        0xd44e29936409019f93993de8bd603ef6cb1bb15e | 1605575   
+        0x23cb796cf58bfa12352f0164f479deedbd50658e | 957817    
+        0x557bed924a1bb6f62842c5742d1dc789b8d480d4 | 653584    
+        0x5248313731287b61d714ab9df655442d6ed28aa2 | 637344    
+        0xa20b482f97063f4f88ef621c9203e60814399940 | 561697    
+        0xe00740bce98a594e26861838885ab310ec3b548c | 526440    
+        0xd2b51d9accca5ec0a853eb0d94eeb0dce9a82889 | 466061    
+        0x818f214c7f3e479cce1d964d53fe3db7297558cb | 452277    
+        0x203f6f1fa096197f735434c7000758964beb521e | 436240    
+    └── Top 10 'taker':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e | 18378133  
+        0xe00740bce98a594e26861838885ab310ec3b548c | 820965    
+        0x6031b6eed1c97e853c6e0f03ad3ce3529351f96d | 597426    
+        0x5248313731287b61d714ab9df655442d6ed28aa2 | 409241    
+        0xd44e29936409019f93993de8bd603ef6cb1bb15e | 406335    
+        0xfdb826a0fb4a90b4cc9049e408ea3ef1b73ae4c9 | 396593    
+        0xf247584e41117bbbe4cc06e4d2c95741792a5216 | 358417    
+        0x080a53ccb5caf5949d2e67074e8629fe1f249da4 | 345375    
+        0x589222a5124a96765443b97a3498d89ffd824ad2 | 344825    
+        0x1ff49fdcb6685c94059b65620f43a683be0ce7a5 | 283060    
+  OrdersMatched   | P=0.282054 (18378133) | Distinct Addresses (maker: 381579)
+    └── Top 10 'maker':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0xe00740bce98a594e26861838885ab310ec3b548c | 515022    
+        0x6031b6eed1c97e853c6e0f03ad3ce3529351f96d | 497719    
+        0xd44e29936409019f93993de8bd603ef6cb1bb15e | 304512    
+        0xf247584e41117bbbe4cc06e4d2c95741792a5216 | 225494    
+        0xa20b482f97063f4f88ef621c9203e60814399940 | 224607    
+        0x5248313731287b61d714ab9df655442d6ed28aa2 | 202159    
+        0xfdb826a0fb4a90b4cc9049e408ea3ef1b73ae4c9 | 184846    
+        0xd2b51d9accca5ec0a853eb0d94eeb0dce9a82889 | 179175    
+        0x0540f430df85c770e0a4fb79d8499d71ebc298eb | 177120    
+        0xe60a9b0be459d9849bc2339dac20517639ae6a47 | 171260    
+  TokenRegistered | P=0.001353 (88174)
 
---- neg_risk_exchange (Total Events: 16506122) ---
-  OrderFilled     | P=0.702876 (11601759)
-  OrdersMatched   | P=0.295302 (4874289)
-  TokenRegistered | P=0.001822 (30074)
+--- neg_risk_exchange (Total Events: 17863575) ---
+  OrderFilled     | P=0.703146 (12560698) | Distinct Addresses (maker: 281210, taker: 269756)
+    └── Top 10 'maker':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0xe8dd7741ccb12350957ec71e9ee332e0d1e6ec86 | 430757    
+        0xd218e474776403a330142299f7796e8ba32eb5c9 | 233037    
+        0x204f72f35326db932158cba6adff0b9a1da95e14 | 157953    
+        0x30cecdf29f069563ea21b8ae94492e41e53a6b2b | 155600    
+        0xe3726a1b9c6ba2f06585d1c9e01d00afaedaeb38 | 148747    
+        0x63d43bbb87f85af03b8f2f9e2fad7b54334fa2f1 | 133644    
+        0x4133bcbad1d9c41de776646696f41c34d0a65e70 | 107282    
+        0x4ffe49ba2a4cae123536a8af4fda48faeb609f71 | 102008    
+        0x8e9eedf20dfa70956d49f608a205e402d9df38e4 | 98824     
+        0x5f390e4b7d6f06d6756a6c92afdbf7b3176aa78c | 97806     
+    └── Top 10 'taker':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0xc5d563a36ae78145c45a50134d48a1215220f80a | 5267759   
+        0xe8dd7741ccb12350957ec71e9ee332e0d1e6ec86 | 430003    
+        0xd218e474776403a330142299f7796e8ba32eb5c9 | 202555    
+        0x30cecdf29f069563ea21b8ae94492e41e53a6b2b | 161684    
+        0xe3726a1b9c6ba2f06585d1c9e01d00afaedaeb38 | 135594    
+        0x63d43bbb87f85af03b8f2f9e2fad7b54334fa2f1 | 129739    
+        0x204f72f35326db932158cba6adff0b9a1da95e14 | 113426    
+        0x5f390e4b7d6f06d6756a6c92afdbf7b3176aa78c | 104521    
+        0x8e9eedf20dfa70956d49f608a205e402d9df38e4 | 89616     
+        0xb6fa57039ea79185895500dbd0067c288594abcf | 71567     
+  OrdersMatched   | P=0.294888 (5267759) | Distinct Addresses (maker: 269755)
+    └── Top 10 'maker':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0xe8dd7741ccb12350957ec71e9ee332e0d1e6ec86 | 374158    
+        0xd218e474776403a330142299f7796e8ba32eb5c9 | 175623    
+        0x30cecdf29f069563ea21b8ae94492e41e53a6b2b | 155599    
+        0xe3726a1b9c6ba2f06585d1c9e01d00afaedaeb38 | 121890    
+        0x63d43bbb87f85af03b8f2f9e2fad7b54334fa2f1 | 118484    
+        0x5f390e4b7d6f06d6756a6c92afdbf7b3176aa78c | 97765     
+        0x204f72f35326db932158cba6adff0b9a1da95e14 | 85382     
+        0x8e9eedf20dfa70956d49f608a205e402d9df38e4 | 82854     
+        0xb6fa57039ea79185895500dbd0067c288594abcf | 66385     
+        0xe60a9b0be459d9849bc2339dac20517639ae6a47 | 50842     
+  TokenRegistered | P=0.001966 (35118)
 
---- conditional_tokens (Total Events: 31285447) ---
-  PositionSplit        | P=0.728211 (22782417)
-  PayoutRedemption     | P=0.197920 (6192001)
-  PositionsMerge       | P=0.070469 (2204669)
-  ConditionPreparation | P=0.001777 (55608)
-  ConditionResolution  | P=0.001622 (50752)
+--- conditional_tokens (Total Events: 34788204) ---
+  PositionSplit        | P=0.729992 (25395108) | Distinct Addresses (stakeholder: 19009, collateralToken: 1)
+    └── Top 10 'stakeholder':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e | 18468548  
+        0xd91e80cf2e7be2e162c6513ced06f1dd0da35296 | 6191651   
+        0x9e5d98c61c88b83057c9da63923e9eee754e214b | 3752      
+        0xad9883080207987b90e50d64e240726421dfe8b6 | 1939      
+        0x84509d545ec48fa901711208705f9caa57190ce4 | 1900      
+        0x1e7747db8ff6623dbf505fc8b8e72081fe397ff8 | 1644      
+        0x71200c030935cae95022d8e8ad727f379725526f | 1630      
+        0x368f13b3b796477060443e3190ac5db981306666 | 1623      
+        0xde80ff45599c4f39db826e67b7c5eb3a47c62612 | 1317      
+        0x719d1bb147e7dbebb8223255fa685de86a53df0e | 1229      
+    └── Top 10 'collateralToken':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x0000000000000000000000000000000000000000 | 25395108  
+  PayoutRedemption     | P=0.196528 (6836854) | Distinct Addresses (redeemer: 296200, collateralToken: 14)
+    └── Top 10 'redeemer':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0xd91e80cf2e7be2e162c6513ced06f1dd0da35296 | 851381    
+        0x645ed094f64a3ae1b5a3efb41d49f072321dd6fb | 83957     
+        0x51373c6b56e4a38bf97c301efbff840fc8451556 | 80407     
+        0x4e023e8644b4f92307fdbfe1d7329a8dfbb959ae | 69555     
+        0x23cb796cf58bfa12352f0164f479deedbd50658e | 17399     
+        0xe4ff4e777489d9e4e0220a53faf9279f04c0e658 | 15605     
+        0x6031b6eed1c97e853c6e0f03ad3ce3529351f96d | 13940     
+        0x72406aaa0a5272c167c842e285568169097242f7 | 13034     
+        0x1ff49fdcb6685c94059b65620f43a683be0ce7a5 | 11865     
+        0xea5ff76a4fd2cddfd312f995434b30b59bc64b09 | 11114     
+    └── Top 10 'collateralToken':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x2791bca1f2de4661ed88a30c99a7a9449aa84174 | 5973669   
+        0x3a3bd7bb9528e159577f7c2e685cc81a765002e2 | 862514    
+        0x3c499c542cef5e3811e1192ce70d8cc03d5c3359 | 650       
+        0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48 | 5         
+        0x693f91d6fb1bafb02563b2d5c510f8675e263747 | 4         
+        0xc5d563a36ae78145c45a50134d48a1215220f80a | 2         
+        0xea77ea672344987868f9f425e4ceaba6bbe3ed25 | 2         
+        0x4d97dcd97ec945f40cf65f87097ace5ea0476045 | 2         
+        0xff970a61a04b1ca14834a43f5de4533ebddb5cc8 | 1         
+        0x3c499c542ce5e3811e1192ceeba0b8bc521bf9ff | 1         
+  PositionsMerge       | P=0.069979 (2434429) | Distinct Addresses (stakeholder: 4293, collateralToken: 1)
+    └── Top 10 'stakeholder':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e | 1216515   
+        0xd91e80cf2e7be2e162c6513ced06f1dd0da35296 | 869085    
+        0x6031b6eed1c97e853c6e0f03ad3ce3529351f96d | 9137      
+        0xddd757c8798761e39009e227548252c4dc3b1596 | 9114      
+        0xca3f77cb090cf7cbcf48bcf865e8f27364418078 | 7936      
+        0x91585a40132f7056d6986e146f6d45c0b56dba55 | 7424      
+        0x0eb32f4c1a8672b61b48d9f1493b6dd5a6b1f766 | 7174      
+        0x6a2491e7275cd3d32559bda63a1859feb6cd3845 | 6888      
+        0x566e47c6889d98bba7c30c5307baa1a07b6e1340 | 5460      
+        0x154b5c3edb212bf855f77402385a94b81fab4917 | 5239      
+    └── Top 10 'collateralToken':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x0000000000000000000000000000000000000000 | 2434429   
+  ConditionPreparation | P=0.001897 (65996) | Distinct Addresses (oracle: 9)
+    └── Top 10 'oracle':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x65070be91477460d8a7aeeb94ef92fe056c2f2a7 | 31910     
+        0xd91e80cf2e7be2e162c6513ced06f1dd0da35296 | 17728     
+        0x58e1745bedda7312c4cddb72618923da1b90efde | 16279     
+        0x1765f45d99a9f7a8c69b79f666d9fba64a296ef1 | 34        
+        0xf76e193920b6bcba3c49b529652c75966605b597 | 16        
+        0x48b88fe2cdc32deeb5a56e5069e2a586ff5d3d91 | 12        
+        0x3c8f8a83de3b1fddd898d3fac04063a7e7d415f4 | 7         
+        0xcdfba8870175aa3244bb56342f6917aee344e9d9 | 6         
+        0xb223c102751e437a554c80b79cb114ac04416a89 | 4         
+  ConditionResolution  | P=0.001604 (55817) | Distinct Addresses (oracle: 7)
+    └── Top 10 'oracle':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x65070be91477460d8a7aeeb94ef92fe056c2f2a7 | 29606     
+        0x58e1745bedda7312c4cddb72618923da1b90efde | 13971     
+        0xd91e80cf2e7be2e162c6513ced06f1dd0da35296 | 12109     
+        0x6a9d222616c90fca5754cd1333cfd9b7fb6a4f74 | 82        
+        0x157ce2d672854c848c9b79c49a8cc6cc89176a49 | 41        
+        0x48b88fe2cdc32deeb5a56e5069e2a586ff5d3d91 | 4         
+        0xf76e193920b6bcba3c49b529652c75966605b597 | 4         
 
---- neg_risk_operator (Total Events: 39578) ---
-  QuestionPrepared | P=0.380767 (15070)
-  QuestionReported | P=0.288974 (11437)
-  QuestionResolved | P=0.288241 (11408)
-  MarketPrepared   | P=0.042018 (1663)
+--- neg_risk_operator (Total Events: 43830) ---
+  QuestionPrepared | P=0.404472 (17728)
+  QuestionReported | P=0.276318 (12111)
+  QuestionResolved | P=0.276272 (12109)
+  MarketPrepared   | P=0.042939 (1882)
 
---- neg_risk_adapter (Total Events: 5434719) ---
-  PositionSplit      | P=0.675929 (3673483)
-  PayoutRedemption   | P=0.145955 (793224)
-  PositionsMerge     | P=0.145284 (789576)
-  PositionsConverted | P=0.027655 (150295)
-  QuestionPrepared   | P=0.002773 (15070)
-  OutcomeReported    | P=0.002099 (11408)
-  MarketPrepared     | P=0.000306 (1663)
+--- neg_risk_adapter (Total Events: 5868018) ---
+  PositionSplit      | P=0.673448 (3951807) | Distinct Addresses (stakeholder: 5119)
+    └── Top 10 'stakeholder':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0xc5d563a36ae78145c45a50134d48a1215220f80a | 3919944   
+        0x8e9eedf20dfa70956d49f608a205e402d9df38e4 | 4258      
+        0xe3726a1b9c6ba2f06585d1c9e01d00afaedaeb38 | 4242      
+        0x36f9b0d0db05b7ffe5ff69774d70eb3f78607e3b | 1638      
+        0x2a315a8d15cfde768bcd47ba5cacf3ef5894f2f0 | 1345      
+        0xcb3143ee858e14d0b3fe40ffeaea78416e646b02 | 1281      
+        0xde80ff45599c4f39db826e67b7c5eb3a47c62612 | 736       
+        0xea8ee311382139d952087a669252252625663de0 | 461       
+        0xd4ac2809973a814150b92931442d62ca0f2b4839 | 435       
+        0xdf53873a3c563fe5b08634d4827571b8ae6b2e02 | 374       
+  PositionsMerge     | P=0.148105 (869085) | Distinct Addresses (stakeholder: 2852)
+    └── Top 10 'stakeholder':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0xc5d563a36ae78145c45a50134d48a1215220f80a | 685306    
+        0xd218e474776403a330142299f7796e8ba32eb5c9 | 28180     
+        0xe8dd7741ccb12350957ec71e9ee332e0d1e6ec86 | 19579     
+        0xc4d5a24a240ec9f52669e3251e0473fd0c5687cf | 16290     
+        0x63d43bbb87f85af03b8f2f9e2fad7b54334fa2f1 | 6657      
+        0xad5353afe30c2da57709e2704ef3ccdcf67eef24 | 3382      
+        0x972bf37cae72a169e17ae0e6179821d5778b78ba | 3200      
+        0xf0b0ef1d6320c6be896b4c9c54dd74407e7f8cab | 3153      
+        0x6a2491e7275cd3d32559bda63a1859feb6cd3845 | 3071      
+        0x4133bcbad1d9c41de776646696f41c34d0a65e70 | 2823      
+  PayoutRedemption   | P=0.145088 (851381) | Distinct Addresses (redeemer: 158279)
+    └── Top 10 'redeemer':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x30cecdf29f069563ea21b8ae94492e41e53a6b2b | 10906     
+        0xc4d5a24a240ec9f52669e3251e0473fd0c5687cf | 9286      
+        0x5f390e4b7d6f06d6756a6c92afdbf7b3176aa78c | 5623      
+        0x72406aaa0a5272c167c842e285568169097242f7 | 5566      
+        0x204f72f35326db932158cba6adff0b9a1da95e14 | 5288      
+        0xd218e474776403a330142299f7796e8ba32eb5c9 | 4850      
+        0xe3726a1b9c6ba2f06585d1c9e01d00afaedaeb38 | 4804      
+        0xebc0df15e665da95bf819105b723ae90042ffa41 | 4640      
+        0x507e52ef684ca2dd91f90a9d26d149dd3288beae | 3259      
+        0x4ffe49ba2a4cae123536a8af4fda48faeb609f71 | 2984      
+  PositionsConverted | P=0.027953 (164026) | Distinct Addresses (stakeholder: 1069)
+    └── Top 10 'stakeholder':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0xe8dd7741ccb12350957ec71e9ee332e0d1e6ec86 | 47295     
+        0x63d43bbb87f85af03b8f2f9e2fad7b54334fa2f1 | 18624     
+        0x30cecdf29f069563ea21b8ae94492e41e53a6b2b | 10480     
+        0xd218e474776403a330142299f7796e8ba32eb5c9 | 9390      
+        0x5f390e4b7d6f06d6756a6c92afdbf7b3176aa78c | 7111      
+        0x1d8c256b15d3cd1f5db221e70c77f552eb8d757a | 5738      
+        0x8e9eedf20dfa70956d49f608a205e402d9df38e4 | 4323      
+        0xe3726a1b9c6ba2f06585d1c9e01d00afaedaeb38 | 4242      
+        0xceae15533f441b29685bb41dd8d25835760c7a2d | 3746      
+        0xcd91a549956854fdc38efad7e80ff5da8f5432b8 | 3723      
+  QuestionPrepared   | P=0.003021 (17728)
+  OutcomeReported    | P=0.002064 (12109)
+  MarketPrepared     | P=0.000321 (1882) | Distinct Addresses (oracle: 1)
+    └── Top 10 'oracle':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x71523d0f655b41e805cec45b17163f528b59b820 | 1882      
 
---- neg_uma_adapter (Total Events: 26825) ---
-  QuestionInitialized  | P=0.562684 (15094)
-  QuestionResolved     | P=0.426356 (11437)
-  AncillaryDataUpdated | P=0.008984 (241)
-  QuestionReset        | P=0.001976 (53)
+--- neg_uma_adapter (Total Events: 30236) ---
+  QuestionInitialized  | P=0.587115 (17752) | Distinct Addresses (creator: 1, rewardToken: 1)
+    └── Top 10 'creator':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x91430cad2d3975766499717fa0d66a78d814e5c5 | 17752     
+    └── Top 10 'rewardToken':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x2791bca1f2de4661ed88a30c99a7a9449aa84174 | 17752     
+  QuestionResolved     | P=0.400549 (12111)
+  AncillaryDataUpdated | P=0.010286 (311) | Distinct Addresses (updater: 1)
+    └── Top 10 'updater':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x91430cad2d3975766499717fa0d66a78d814e5c5 | 311       
+  QuestionReset        | P=0.002051 (62)
 
---- ctfe_uma_adapter (Total Events: 81) ---
-  QuestionResolved | P=0.987654 (80)
-  QuestionReset    | P=0.012346 (1)
+--- ctfe_uma_adapter (Total Events: 83) ---
+  QuestionResolved | P=0.987952 (82)
+  QuestionReset    | P=0.012048 (1)
 
---- moo_uma_adapter (Total Events: 57577) ---
-  QuestionInitialized  | P=0.508206 (29261)
-  QuestionResolved     | P=0.485941 (27979)
-  AncillaryDataUpdated | P=0.004377 (252)
-  QuestionReset        | P=0.001476 (85)
+--- moo_uma_adapter (Total Events: 61872) ---
+  QuestionInitialized  | P=0.515742 (31910) | Distinct Addresses (creator: 1, rewardToken: 1)
+    └── Top 10 'creator':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x91430cad2d3975766499717fa0d66a78d814e5c5 | 31910     
+    └── Top 10 'rewardToken':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x2791bca1f2de4661ed88a30c99a7a9449aa84174 | 31910     
+  QuestionResolved     | P=0.478504 (29606)
+  AncillaryDataUpdated | P=0.004348 (269) | Distinct Addresses (updater: 2)
+    └── Top 10 'updater':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x91430cad2d3975766499717fa0d66a78d814e5c5 | 268       
+        0xe7be68844e869015ee298e9f7a3e4e99079d58c8 | 1         
+  QuestionReset        | P=0.001406 (87)
 
---- managed_oracle (Total Events: 85914) ---
-  RequestPrice | P=0.341574 (29346)
-  Settle       | P=0.328631 (28234)
-  ProposePrice | P=0.328631 (28234)
-  DisputePrice | P=0.001164 (100)
+--- managed_oracle (Total Events: 91875) ---
+  RequestPrice | P=0.348267 (31997) | Distinct Addresses (requester: 1, currency: 1)
+    └── Top 10 'requester':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x65070be91477460d8a7aeeb94ef92fe056c2f2a7 | 31997     
+    └── Top 10 'currency':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x2791bca1f2de4661ed88a30c99a7a9449aa84174 | 31997     
+  ProposePrice | P=0.325464 (29902) | Distinct Addresses (requester: 1, proposer: 101, currency: 1)
+    └── Top 10 'requester':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x65070be91477460d8a7aeeb94ef92fe056c2f2a7 | 29902     
+    └── Top 10 'proposer':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x176a56a10b952c4ab1acb234384e97c5574bbdf9 | 15863     
+        0x6f8a1513a37a9f2b867973c90cdf9648142064d7 | 2572      
+        0x674eefeb269e880f75dd545c56ff4d05a2c96ec5 | 1172      
+        0xc816f934fab8179997a05e4b71f405b9e2f69eb8 | 1150      
+        0x8d04011b823ab2122f98e71f2f140f7c408804bd | 1084      
+        0x5f416b27f0d7e46db9bab00be379b3ddfe3cd5da | 877       
+        0xd0fc984ef483d75d5fad895ef4abc3665e09914b | 576       
+        0xf25b2ae925ca17a88890df35c716c49904ce49ab | 498       
+        0x57ffe2ef82a9360bf5024e6a41e4883e9f647977 | 455       
+        0x7e6dc8cc674678291fe1c5ddf54e5cc6e82ffabc | 393       
+    └── Top 10 'currency':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x2791bca1f2de4661ed88a30c99a7a9449aa84174 | 29902     
+  Settle       | P=0.325159 (29874) | Distinct Addresses (requester: 1, proposer: 102, disputer: 54)
+    └── Top 10 'requester':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x65070be91477460d8a7aeeb94ef92fe056c2f2a7 | 29874     
+    └── Top 10 'proposer':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x176a56a10b952c4ab1acb234384e97c5574bbdf9 | 15861     
+        0x6f8a1513a37a9f2b867973c90cdf9648142064d7 | 2572      
+        0x674eefeb269e880f75dd545c56ff4d05a2c96ec5 | 1172      
+        0xc816f934fab8179997a05e4b71f405b9e2f69eb8 | 1150      
+        0x8d04011b823ab2122f98e71f2f140f7c408804bd | 1086      
+        0x5f416b27f0d7e46db9bab00be379b3ddfe3cd5da | 879       
+        0xd0fc984ef483d75d5fad895ef4abc3665e09914b | 576       
+        0xf25b2ae925ca17a88890df35c716c49904ce49ab | 494       
+        0x57ffe2ef82a9360bf5024e6a41e4883e9f647977 | 445       
+        0x7e6dc8cc674678291fe1c5ddf54e5cc6e82ffabc | 393       
+    └── Top 10 'disputer':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x0000000000000000000000000000000000000000 | 29761     
+        0x6b33716d771cf8e1a7b80e05a5ed25b75d863e3e | 11        
+        0x0bfd7ae78ed2b89f7e7d85938e9317b5d494047b | 7         
+        0x86cc5e1e8fb20102fa7a0fa4afeaf1cbe1be273d | 7         
+        0xdd42ffb8aabe818f7538d93c175a9f9e2da9990d | 5         
+        0x0db5aea9f41ce8398104e9d4694cfb18f146c493 | 5         
+        0xeff2f0b1568d87b8a55cf2d56021a45cea1a1662 | 4         
+        0xc816f934fab8179997a05e4b71f405b9e2f69eb8 | 4         
+        0xd7f6ebdf0235f587154e2d7d38f9d80568494993 | 4         
+        0x8c3afdea0332a4d3ac9885eeff338cd100418d9f | 4         
+  DisputePrice | P=0.001110 (102) | Distinct Addresses (requester: 1, proposer: 27, disputer: 51)
+    └── Top 10 'requester':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x65070be91477460d8a7aeeb94ef92fe056c2f2a7 | 102       
+    └── Top 10 'proposer':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0xc25427ea224b8f9fa2df801233f944006ed33f73 | 30        
+        0x86cc5e1e8fb20102fa7a0fa4afeaf1cbe1be273d | 17        
+        0x176a56a10b952c4ab1acb234384e97c5574bbdf9 | 15        
+        0x189f27f55a1801007349351d22603009b1f79d3d | 5         
+        0x7e6dc8cc674678291fe1c5ddf54e5cc6e82ffabc | 4         
+        0xbbcab5377bbca9cccbc48d0a7afbeaf78c741f90 | 3         
+        0xd7f6ebdf0235f587154e2d7d38f9d80568494993 | 3         
+        0xa556d8d0673943b9bcc26926484fdfa6eea62586 | 2         
+        0x9c863051f8762d3c789a118b4701750b675ceb01 | 2         
+        0x5cc69810accef4589d475de7099a5aeeae3dcbb2 | 2         
+    └── Top 10 'disputer':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x6b33716d771cf8e1a7b80e05a5ed25b75d863e3e | 11        
+        0x0bfd7ae78ed2b89f7e7d85938e9317b5d494047b | 7         
+        0xdd42ffb8aabe818f7538d93c175a9f9e2da9990d | 5         
+        0x0db5aea9f41ce8398104e9d4694cfb18f146c493 | 5         
+        0xeff2f0b1568d87b8a55cf2d56021a45cea1a1662 | 4         
+        0xe142f7eedb3f50bb2c47cddf7a2fd347f3c97674 | 3         
+        0xd7f6ebdf0235f587154e2d7d38f9d80568494993 | 3         
+        0x86cc5e1e8fb20102fa7a0fa4afeaf1cbe1be273d | 3         
+        0xc816f934fab8179997a05e4b71f405b9e2f69eb8 | 3         
+        0xdcfe1241639ad73d5d0d992320de6958cc9168da | 3         
 
---- oracle_tunnel_child (Total Events: 663) ---
-  PushedPrice         | P=0.257919 (171)
-  MessageSent         | P=0.247360 (164)
-  PriceRequestAdded   | P=0.247360 (164)
-  PriceRequestBridged | P=0.247360 (164)
+--- oracle_tunnel_child (Total Events: 707) ---
+  PushedPrice         | P=0.253182 (179)
+  MessageSent         | P=0.248939 (176)
+  PriceRequestAdded   | P=0.248939 (176)
+  PriceRequestBridged | P=0.248939 (176) | Distinct Addresses (requester: 2)
+    └── Top 10 'requester':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x2c0367a9db231ddebd88a94b4f6461a6e47c58b1 | 102       
+        0xee3afe347d5c74317041e2618c49534daf887c24 | 74        
 
---- fx_tunnel (Total Events: 1597) ---
-  NewFxMessage | P=1.000000 (1597)
+--- fx_tunnel (Total Events: 1713) ---
+  NewFxMessage | P=1.000000 (1713) | Distinct Addresses (rootMessageSender: 26, receiver: 23)
+    └── Top 10 'rootMessageSender':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0xc186fa914353c44b2e33ebe05f21846f1048beda | 1278      
+        0x9b40e25ddd4518f36c50ce8aef53ee527419d55d | 180       
+        0x40fb804cc07302b89ec16a9f8d040506f64dfe29 | 52        
+        0xc7dd5c30dca04f487c9ede0c5ac580c91587fc66 | 31        
+        0x76db75dc752305e2debd44c479680352f3bb766f | 30        
+        0xb1029ac2be4e08516697093e2afec435057f3511 | 30        
+        0x0cc2caed31490b546c741bd93dbba8ab387f7f2c | 27        
+        0x4b697c8c3220fcbdd02dffa46db5a896ae7a0843 | 22        
+        0xa86e412109f77c45a3bc1c5870b880492fb86a14 | 10        
+        0x8858a739ea1dd3d80fe577ef4e0d03e88561faa3 | 8         
+    └── Top 10 'receiver':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x9295ee1d8c5b022be115a2ad3c30c72e34e7f096 | 1278      
+        0xac60353a54873c446101216829a6a98cdbbc3f3d | 180       
+        0x97e58a6950d86d751082d5e1d350e74c19047570 | 52        
+        0x0833f5bd45803e05ef54e119a77e463ce6b1a963 | 31        
+        0xa6d85f3b3be6ff6dc52c3aabe9a35d0ce252b79f | 30        
+        0x594fb75d3dc2dfa0150ad03f99f97817747dd4e1 | 30        
+        0x7f4fb56b9c85bab8b89c8879a660f7eaaa95a3a8 | 27        
+        0xd531cf2142d9b9dc8b077df3c4e93b46e7cf879a | 27        
+        0x4b697c8c3220fcbdd02dffa46db5a896ae7a0843 | 22        
+        0x1f5c5fd6a66723fa22a778cc53263dd3fa6851e5 | 6         
+
+--- OOV2 (Total Events: 43156) ---
+  RequestPrice | P=0.419918 (18122) | Distinct Addresses (requester: 9, currency: 2)
+    └── Top 10 'requester':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x2f5e3684cb1f318ec51b00edba38d79ac2c0aa9d | 17814     
+        0xa68f6b97f605f22ba6a8420460dafb5b5bc35a20 | 240       
+        0xd6b2f7da46b501e8f352b63dbe3039b2dd3b5334 | 39        
+        0xe0ae725f700b9f789ff8c1631743c42f7abf6ebb | 12        
+        0xc295e7173f195b3d0c362a0fc18e51957c2a7358 | 5         
+        0x7dbb803aeb717ae9b0420c30669e128d6aa2e304 | 5         
+        0x157ce2d672854c848c9b79c49a8cc6cc89176a49 | 3         
+        0xad481b7f5ceae50c71669e23b9e853013282c5f4 | 3         
+        0x6a9d222616c90fca5754cd1333cfd9b7fb6a4f74 | 1         
+    └── Top 10 'currency':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x2791bca1f2de4661ed88a30c99a7a9449aa84174 | 17839     
+        0x3c499c542cef5e3811e1192ce70d8cc03d5c3359 | 283       
+  Settle       | P=0.289207 (12481) | Distinct Addresses (requester: 8, proposer: 208, disputer: 34)
+    └── Top 10 'requester':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x2f5e3684cb1f318ec51b00edba38d79ac2c0aa9d | 12300     
+        0x6a9d222616c90fca5754cd1333cfd9b7fb6a4f74 | 83        
+        0x157ce2d672854c848c9b79c49a8cc6cc89176a49 | 45        
+        0xe0ae725f700b9f789ff8c1631743c42f7abf6ebb | 27        
+        0xa68f6b97f605f22ba6a8420460dafb5b5bc35a20 | 21        
+        0xd6b2f7da46b501e8f352b63dbe3039b2dd3b5334 | 3         
+        0xc295e7173f195b3d0c362a0fc18e51957c2a7358 | 1         
+        0xad481b7f5ceae50c71669e23b9e853013282c5f4 | 1         
+    └── Top 10 'proposer':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x53692dbf47fce6fb3d54fded6a4834be981f557c | 5180      
+        0xc25427ea224b8f9fa2df801233f944006ed33f73 | 943       
+        0x0db5aea9f41ce8398104e9d4694cfb18f146c493 | 633       
+        0x7e6dc8cc674678291fe1c5ddf54e5cc6e82ffabc | 604       
+        0xc816f934fab8179997a05e4b71f405b9e2f69eb8 | 585       
+        0x674eefeb269e880f75dd545c56ff4d05a2c96ec5 | 494       
+        0xcf12f5b99605cb299fb11d5eff4fb304de008d02 | 465       
+        0x57ffe2ef82a9360bf5024e6a41e4883e9f647977 | 253       
+        0x5ecde7348ea5100af4360dd7a6e0a3fb1d420787 | 249       
+        0xc9ffd41c7500d34606606246d8fb6242bfb6b04e | 240       
+    └── Top 10 'disputer':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x0000000000000000000000000000000000000000 | 12415     
+        0xb7ad15ad3457d8b4a3f9c5007bbf27c1f80092bd | 9         
+        0x0db5aea9f41ce8398104e9d4694cfb18f146c493 | 5         
+        0xdcfe1241639ad73d5d0d992320de6958cc9168da | 3         
+        0x674eefeb269e880f75dd545c56ff4d05a2c96ec5 | 3         
+        0xc25427ea224b8f9fa2df801233f944006ed33f73 | 3         
+        0x6e202bc17e6f17383b78ab683576615a8296b052 | 3         
+        0xc816f934fab8179997a05e4b71f405b9e2f69eb8 | 3         
+        0xafbc204c19933f6b9bc78f42eb309fb059098975 | 3         
+        0x40c23c8cd5b04dfad655afbccac8277da4778a84 | 2         
+  ProposePrice | P=0.289160 (12479) | Distinct Addresses (requester: 8, proposer: 209, currency: 2)
+    └── Top 10 'requester':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x2f5e3684cb1f318ec51b00edba38d79ac2c0aa9d | 12297     
+        0x6a9d222616c90fca5754cd1333cfd9b7fb6a4f74 | 83        
+        0x157ce2d672854c848c9b79c49a8cc6cc89176a49 | 45        
+        0xe0ae725f700b9f789ff8c1631743c42f7abf6ebb | 27        
+        0xa68f6b97f605f22ba6a8420460dafb5b5bc35a20 | 22        
+        0xd6b2f7da46b501e8f352b63dbe3039b2dd3b5334 | 3         
+        0xc295e7173f195b3d0c362a0fc18e51957c2a7358 | 1         
+        0xad481b7f5ceae50c71669e23b9e853013282c5f4 | 1         
+    └── Top 10 'proposer':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x53692dbf47fce6fb3d54fded6a4834be981f557c | 5176      
+        0xc25427ea224b8f9fa2df801233f944006ed33f73 | 943       
+        0x0db5aea9f41ce8398104e9d4694cfb18f146c493 | 633       
+        0x7e6dc8cc674678291fe1c5ddf54e5cc6e82ffabc | 604       
+        0xc816f934fab8179997a05e4b71f405b9e2f69eb8 | 585       
+        0x674eefeb269e880f75dd545c56ff4d05a2c96ec5 | 494       
+        0xcf12f5b99605cb299fb11d5eff4fb304de008d02 | 465       
+        0x57ffe2ef82a9360bf5024e6a41e4883e9f647977 | 252       
+        0x5ecde7348ea5100af4360dd7a6e0a3fb1d420787 | 249       
+        0xc9ffd41c7500d34606606246d8fb6242bfb6b04e | 242       
+    └── Top 10 'currency':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x2791bca1f2de4661ed88a30c99a7a9449aa84174 | 12453     
+        0x3c499c542cef5e3811e1192ce70d8cc03d5c3359 | 26        
+  DisputePrice | P=0.001715 (74) | Distinct Addresses (requester: 4, proposer: 45, disputer: 33)
+    └── Top 10 'requester':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x2f5e3684cb1f318ec51b00edba38d79ac2c0aa9d | 67        
+        0x157ce2d672854c848c9b79c49a8cc6cc89176a49 | 4         
+        0x6a9d222616c90fca5754cd1333cfd9b7fb6a4f74 | 2         
+        0xa68f6b97f605f22ba6a8420460dafb5b5bc35a20 | 1         
+    └── Top 10 'proposer':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0x53692dbf47fce6fb3d54fded6a4834be981f557c | 9         
+        0xb4896fdbd22d5c3f7c275b2277cb7028cfcf74d0 | 5         
+        0x5269c5df970e3b1799ad76b576e983e2b84b1f8d | 4         
+        0xafb8192e8ef0dfe3f164dec3926c8ccb0d26cde9 | 4         
+        0xd7f6ebdf0235f587154e2d7d38f9d80568494993 | 3         
+        0x7defc6d32606f42ec7cefb65773a61ecd786b5dd | 2         
+        0x09afcb85258072c640110569002f5a1c44b7ed38 | 2         
+        0x86cc5e1e8fb20102fa7a0fa4afeaf1cbe1be273d | 2         
+        0x57ffe2ef82a9360bf5024e6a41e4883e9f647977 | 2         
+        0x5cc69810accef4589d475de7099a5aeeae3dcbb2 | 2         
+    └── Top 10 'disputer':
+        Address                                    | Count     
+        ------------------------------------------ | ----------
+        0xb7ad15ad3457d8b4a3f9c5007bbf27c1f80092bd | 12        
+        0x0db5aea9f41ce8398104e9d4694cfb18f146c493 | 5         
+        0x6e202bc17e6f17383b78ab683576615a8296b052 | 5         
+        0xbbe9609b9e66f76ecf87ef27f60815ce9096ae72 | 4         
+        0xafbc204c19933f6b9bc78f42eb309fb059098975 | 4         
+        0xc816f934fab8179997a05e4b71f405b9e2f69eb8 | 3         
+        0xc25427ea224b8f9fa2df801233f944006ed33f73 | 3         
+        0xdcfe1241639ad73d5d0d992320de6958cc9168da | 3         
+2025-12-18 14:00:42 | INFO | Database connection closed.
+        0x674eefeb269e880f75dd545c56ff4d05a2c96ec5 | 3         
+        0x40c23c8cd5b04dfad655afbccac8277da4778a84 | 2         

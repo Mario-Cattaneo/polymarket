@@ -1,0 +1,261 @@
+{
+    "events_ctf_exchange": {
+        "OrderFilled": {
+            "1": {
+                "location": "topics",
+                "slot": 3
+            },
+            "2": {
+                "location": "topics",
+                "slot": 4
+            }
+        },
+        "OrdersMatched": {
+            "1": {
+                "location": "topics",
+                "slot": 3
+            }
+        }
+    },
+    "events_neg_risk_exchange": {
+        "OrderFilled": {
+            "1": {
+                "location": "topics",
+                "slot": 3
+            },
+            "2": {
+                "location": "topics",
+                "slot": 4
+            }
+        },
+        "OrdersMatched": {
+            "1": {
+                "location": "topics",
+                "slot": 3
+            }
+        }
+    },
+    "events_conditional_tokens": {
+        "ConditionPreparation": {
+            "1": {
+                "location": "topics",
+                "slot": 3
+            }
+        },
+        "ConditionResolution": {
+            "1": {
+                "location": "topics",
+                "slot": 3
+            }
+        },
+        "PositionSplit": {
+            "0": {
+                "location": "topics",
+                "slot": 2
+            },
+            "1": {
+                "location": "topics",
+                "slot": 3
+            }
+        },
+        "PositionsMerge": {
+            "0": {
+                "location": "topics",
+                "slot": 2
+            },
+            "1": {
+                "location": "topics",
+                "slot": 3
+            }
+        },
+        "PayoutRedemption": {
+            "0": {
+                "location": "topics",
+                "slot": 2
+            },
+            "1": {
+                "location": "topics",
+                "slot": 3
+            }
+        }
+    },
+    "events_neg_risk_operator": {},
+    "events_neg_risk_adapter": {
+        "MarketPrepared": {
+            "1": {
+                "location": "topics",
+                "slot": 3
+            }
+        },
+        "PayoutRedemption": {
+            "0": {
+                "location": "topics",
+                "slot": 2
+            }
+        },
+        "PositionSplit": {
+            "0": {
+                "location": "topics",
+                "slot": 2
+            }
+        },
+        "PositionsConverted": {
+            "0": {
+                "location": "topics",
+                "slot": 2
+            }
+        },
+        "PositionsMerge": {
+            "0": {
+                "location": "topics",
+                "slot": 2
+            }
+        }
+    },
+    "events_uma_adapter": {
+        "AncillaryDataUpdated": {
+            "1": {
+                "location": "topics",
+                "slot": 3
+            }
+        },
+        "QuestionInitialized": {
+            "2": {
+                "location": "topics",
+                "slot": 4
+            },
+            "4": {
+                "location": "data",
+                "slot": 1
+            }
+        }
+    },
+    "events_managed_oracle": {
+        "DisputePrice": {
+            "0": {
+                "location": "topics",
+                "slot": 2
+            },
+            "1": {
+                "location": "topics",
+                "slot": 3
+            },
+            "2": {
+                "location": "topics",
+                "slot": 4
+            }
+        },
+        "ProposePrice": {
+            "0": {
+                "location": "topics",
+                "slot": 2
+            },
+            "1": {
+                "location": "topics",
+                "slot": 3
+            },
+            "7": {
+                "location": "data",
+                "slot": 5
+            }
+        },
+        "RequestPrice": {
+            "0": {
+                "location": "topics",
+                "slot": 2
+            },
+            "4": {
+                "location": "data",
+                "slot": 3
+            }
+        },
+        "Settle": {
+            "0": {
+                "location": "topics",
+                "slot": 2
+            },
+            "1": {
+                "location": "topics",
+                "slot": 3
+            },
+            "2": {
+                "location": "topics",
+                "slot": 4
+            }
+        }
+    },
+    "oracle_tunnel_child": {
+        "PriceRequestBridged": {
+            "0": {
+                "location": "topics",
+                "slot": 2
+            }
+        }
+    },
+    "fx_tunnel": {
+        "NewFxMessage": {
+            "0": {
+                "location": "data",
+                "slot": 0
+            },
+            "1": {
+                "location": "data",
+                "slot": 1
+            }
+        }
+    },
+    "OOV2": {
+        "RequestPrice": {
+            "0": {
+                "location": "topics",
+                "slot": 2
+            },
+            "4": {
+                "location": "data",
+                "slot": 3
+            }
+        },
+        "ProposePrice": {
+            "0": {
+                "location": "topics",
+                "slot": 2
+            },
+            "1": {
+                "location": "topics",
+                "slot": 3
+            },
+            "7": {
+                "location": "data",
+                "slot": 5
+            }
+        },
+        "DisputePrice": {
+            "0": {
+                "location": "topics",
+                "slot": 2
+            },
+            "1": {
+                "location": "topics",
+                "slot": 3
+            },
+            "2": {
+                "location": "topics",
+                "slot": 4
+            }
+        },
+        "Settle": {
+            "0": {
+                "location": "topics",
+                "slot": 2
+            },
+            "1": {
+                "location": "topics",
+                "slot": 3
+            },
+            "2": {
+                "location": "topics",
+                "slot": 4
+            }
+        }
+    }
+}

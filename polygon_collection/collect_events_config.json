@@ -1,6 +1,6 @@
 {
   "general": {
-    "rpc_env_var": "INFURA_KEY_2",
+    "rpc_env_var": "INFURA_KEY_3",
     "rpc_base_url": "https://polygon-mainnet.infura.io/v3/",
     "max_concurrent": 30,
     "global_rate_limit": 1,
@@ -32,28 +32,28 @@
           "signature": "FeeCharged(address,uint256,uint256)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "NewAdmin(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "NewOperator(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "OrderCancelled(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
@@ -61,7 +61,7 @@
           "init_batch_size": 350,
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
@@ -69,35 +69,35 @@
           "init_batch_size": 1200,
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "ProxyFactoryUpdated(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "RemovedAdmin(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "RemovedOperator(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "SafeFactoryUpdated(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
@@ -105,21 +105,21 @@
           "init_batch_size": 180000,
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "TradingPaused(address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "TradingUnpaused(address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         }
       ]
@@ -134,28 +134,28 @@
           "signature": "FeeCharged(address,uint256,uint256)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "NewAdmin(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "NewOperator(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "OrderCancelled(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
@@ -163,7 +163,7 @@
           "init_batch_size": 350,
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
@@ -171,35 +171,35 @@
           "init_batch_size": 1200,
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "ProxyFactoryUpdated(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "RemovedAdmin(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "RemovedOperator(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "SafeFactoryUpdated(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
@@ -207,21 +207,21 @@
           "init_batch_size": 180000,
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "TradingPaused(address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "TradingUnpaused(address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         }
       ]
@@ -237,7 +237,7 @@
           "init_batch_size": 200000,
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
@@ -245,7 +245,7 @@
           "init_batch_size": 200000,
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
@@ -253,7 +253,7 @@
           "init_batch_size": 450,
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
@@ -261,7 +261,7 @@
           "init_batch_size": 4500,
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
@@ -269,14 +269,14 @@
           "init_batch_size": 1200,
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "URI(string,uint256)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         }
       ]
@@ -291,63 +291,63 @@
           "signature": "MarketPrepared(bytes32,uint256,bytes)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "NewAdmin(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionEmergencyResolved(bytes32,bool)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionFlagged(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionPrepared(bytes32,bytes32,bytes32,uint256,bytes)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionReported(bytes32,bytes32,bool)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionResolved(bytes32,bool)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionUnflagged(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "RemovedAdmin(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         }
       ]
@@ -362,21 +362,21 @@
           "signature": "MarketPrepared(bytes32,address,uint256,bytes)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "NewAdmin(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "OutcomeReported(bytes32,bytes32,bool)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
@@ -384,7 +384,7 @@
           "init_batch_size": 30000,
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
@@ -392,7 +392,7 @@
           "init_batch_size": 30000,
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
@@ -400,7 +400,7 @@
           "init_batch_size": 150000,
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
@@ -408,21 +408,21 @@
           "init_batch_size": 30000,
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionPrepared(bytes32,bytes32,uint256,bytes)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "RemovedAdmin(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         }
       ]
@@ -437,77 +437,77 @@
           "signature": "AncillaryDataUpdated(bytes32,address,bytes)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "NewAdmin(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionFlagged(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionInitialized(bytes32,uint256,address,bytes,address,uint256,uint256)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionManuallyResolved(bytes32,uint256[])",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionPaused(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionReset(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionResolved(bytes32,int256,uint256[])",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionUnflagged(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionUnpaused(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "RemovedAdmin(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         }
       ]
@@ -522,77 +522,77 @@
           "signature": "AncillaryDataUpdated(bytes32,address,bytes)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "NewAdmin(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionFlagged(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionInitialized(bytes32,uint256,address,bytes,address,uint256,uint256)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionManuallyResolved(bytes32,uint256[])",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionPaused(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionReset(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionResolved(bytes32,int256,uint256[])",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionUnflagged(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionUnpaused(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "RemovedAdmin(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         }
       ]
@@ -607,77 +607,77 @@
           "signature": "AncillaryDataUpdated(bytes32,address,bytes)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "NewAdmin(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionFlagged(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionInitialized(bytes32,uint256,address,bytes,address,uint256,uint256)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionManuallyResolved(bytes32,uint256[])",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionPaused(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionReset(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionResolved(bytes32,int256,uint256[])",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionUnflagged(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "QuestionUnpaused(bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "RemovedAdmin(address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         }
       ]
@@ -692,189 +692,189 @@
           "signature": "MessageSent(bytes)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "PriceRequestAdded(bytes32,uint256,bytes,bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "PriceRequestBridged(address,bytes32,uint256,bytes,bytes32,bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "PushedPrice(bytes32,uint256,bytes,int256,bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "ResolvedLegacyRequest(bytes32,uint256,bytes,int256,bytes32,bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "AllowedBondRangeUpdated(address,uint256,uint256)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "CustomBondSet(bytes32,address,bytes32,bytes,address,uint256)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "CustomLivenessSet(bytes32,address,bytes32,bytes,uint256)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "CustomProposerWhitelistSet(bytes32,address,bytes32,bytes,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "DefaultAdminDelayChangeCanceled()",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "DefaultAdminDelayChangeScheduled(uint48,uint48)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "DefaultAdminTransferCanceled()",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "DefaultAdminTransferScheduled(address,uint48)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "DefaultProposerWhitelistUpdated(address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "DisputePrice(address,address,address,bytes32,uint256,bytes,int256)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "Initialized(uint64)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "MinimumLivenessUpdated(uint256)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "ProposePrice(address,address,bytes32,uint256,bytes,int256,uint256,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "RequestManagerAdded(address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "RequestManagerRemoved(address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "RequestPrice(address,bytes32,uint256,bytes,address,uint256,uint256)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "RequesterWhitelistUpdated(address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "RoleAdminChanged(bytes32,bytes32,bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "RoleGranted(bytes32,address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "RoleRevoked(bytes32,address,address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "Settle(address,address,address,bytes32,uint256,bytes,int256,uint256)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "Upgraded(address)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         }
       ]
@@ -889,35 +889,35 @@
           "signature": "PriceRequestBridged(address,bytes32,uint256,bytes,bytes32,bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "ResolvedLegacyRequest(bytes32,uint256,bytes,int256,bytes32,bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "PriceRequestAdded(bytes32,uint256,bytes,bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "PushedPrice(bytes32,uint256,bytes,int256,bytes32)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         },
         {
           "signature": "MessageSent(bytes)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
           ]
         }
       ]
@@ -932,7 +932,43 @@
           "signature": "NewFxMessage(address,address,bytes)",
           "collected_range": [
             79172085,
-            80362296
+            80464719
+          ]
+        }
+      ]
+    },
+    {
+      "id": "OOV2",
+      "address": "0xeE3Afe347D5C74317041E2618C49534dAf887c24",
+      "table_name": "OOV2",
+      "drop_on_start": false,
+      "events": [
+        {
+          "signature": "RequestPrice(address,bytes32,uint256,bytes,address,uint256,uint256)",
+          "collected_range": [
+            79172085,
+            80464719
+          ]
+        },
+        {
+          "signature": "ProposePrice(address,address,bytes32,uint256,bytes,int256,uint256,address)",
+          "collected_range": [
+            79172085,
+            80464719
+          ]
+        },
+        {
+          "signature": "DisputePrice(address,address,address,bytes32,uint256,bytes,int256)",
+          "collected_range": [
+            79172085,
+            80464719
+          ]
+        },
+        {
+          "signature": "Settle(address,address,address,bytes32,uint256,bytes,int256,uint256)",
+          "collected_range": [
+            79172085,
+            80464719
           ]
         }
       ]
