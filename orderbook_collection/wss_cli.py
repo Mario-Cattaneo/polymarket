@@ -167,12 +167,13 @@ class WebSocketManager:
                         ack = await managed_task.wss_cli.recv()
                         state.last_activity_time = time.monotonic()
 
+                        # FIX: Set state to CONNECTED *before* callbacks so send_message works immediately
+                        managed_task.connection_state = "CONNECTED"
+
                         if self.callbacks.on_acknowledgement and not self.callbacks.on_acknowledgement(offset, ack):
                             return
                         if self.callbacks.on_connect and not self.callbacks.on_connect(offset):
                             return
-
-                    managed_task.connection_state = "CONNECTED"
 
                     if old_task_to_cancel:
                         if old_task_to_cancel.main_task and not old_task_to_cancel.main_task.done():
@@ -194,11 +195,9 @@ class WebSocketManager:
                 state.current_back_off_s = min(state.current_back_off_s * self.config.back_off_rate, self.config.max_back_off_s)
         finally:
             managed_task.connection_state = "DISCONNECTED"
-            # FIX: Just call close(). It handles the state check internally.
             if managed_task.wss_cli:
                 await managed_task.wss_cli.close()
             
-            # ** NEW: Ensure old task is cancelled on any exit path **
             if old_task_to_cancel:
                 if old_task_to_cancel.main_task and not old_task_to_cancel.main_task.done():
                     old_task_to_cancel.main_task.cancel()
@@ -224,6 +223,20 @@ class WebSocketManager:
     def purge_tasks(self):
         for offset in list(self._managed_tasks.keys()):
             self.terminate_task(offset)
+
+    async def send_message(self, offset: TaskOffset, message: Message) -> bool:
+        """
+        Sends a message to the active WebSocket connection of the specified task.
+        Returns True if sent successfully, False if the task is not connected or doesn't exist.
+        """
+        managed_task = self._managed_tasks.get(offset)
+        if not managed_task or not managed_task.wss_cli or managed_task.connection_state != "CONNECTED":
+            return False
+        try:
+            await managed_task.wss_cli.send(message)
+            return True
+        except Exception:
+            return False
 
     def get_stats(self, offset: TaskOffset) -> Optional[Dict[str, Any]]:
         managed_task = self._managed_tasks.get(offset)

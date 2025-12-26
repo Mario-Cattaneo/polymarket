@@ -27,141 +27,200 @@ class Events:
             on_read=self._on_read, on_acknowledgement=self._on_ack, on_read_failure=self._on_read_failure,
             on_connect=self._on_connect, on_connect_failure=self._on_connect_failure
         )
-        self._wss_config = WebSocketTaskConfig(timeout=10, ping_interval=15)
-        self._wss_cli = WebSocketManager(callbacks=self._wss_callbacks, config=self._wss_config, request_break_s=0.15, max_concurrent_subscriptions=40)
+        # Increased max_msg_size to 2MB to safely accommodate 10k asset ID batches
+        self._wss_config = WebSocketTaskConfig(timeout=10, ping_interval=15, max_msg_size=2_097_152)
+        
+        # Single connection manager
+        self._wss_cli = WebSocketManager(callbacks=self._wss_callbacks, config=self._wss_config, request_break_s=0.15, max_concurrent_subscriptions=1)
 
-        self._limit_per_subscription = 10_000
-        self._reserialize_threshold = 1.5
-        self._loss_guard_s = 3
-        self._last_subscription_time_ns = 0
-        self._subscriptions: List[str] = []
-        self._new_batch: List[str] = []
-        self._deleted_count_since_reserialize = 0
-
+        self._limit_per_subscription = 10000
+        
+        self._active_tokens: Set[str] = set()
+        self._initial_batch_tokens: Set[str] = set() # Track tokens handled by the persistent initial_payload
+        self._pending_unsubscribes: Set[str] = set()
+        
         self._started = False
+        self._connection_started = False
         self._running_db_tasks: Dict[str, asyncio.Task] = {}
         self._running_internal_tasks: Dict[str, asyncio.Task] = {}
-        self._serializer_signal = asyncio.Event()
-        self._markets_exhausted: asyncio.Event = asyncio.Event()
         
-        self._bootstrap_callback_handle: Optional[int] = None
-        self._token_insert_callback_handle: Optional[int] = None
+        # Signals
+        self._markets_exhausted: asyncio.Event = asyncio.Event()
+        self._reconnected_event: asyncio.Event = asyncio.Event()
+        self._cleanup_event: asyncio.Event = asyncio.Event()
+        
         self._token_delete_callback_handle: Optional[int] = None
 
-        self._book_idx = 0
-        self._book_rows: List[Tuple] = []
-        self._book_flag = asyncio.Event()
+        self._book_idx, self._price_change_idx, self._last_trade_price_idx, self._tick_change_idx = 0, 0, 0, 0
+        self._book_rows, self._price_change_rows, self._last_trade_price_rows, self._tick_change_rows, self._connection_rows = [], [], [], [], []
+        self._book_flag, self._price_change_flag, self._last_trade_price_flag, self._tick_change_flag, self._connection_flag = asyncio.Event(), asyncio.Event(), asyncio.Event(), asyncio.Event(), asyncio.Event()
 
-        self._price_change_idx = 0
-        self._price_change_rows: List[Tuple] = []
-        self._price_change_flag = asyncio.Event()
-
-        self._last_trade_price_idx = 0
-        self._last_trade_price_rows: List[Tuple] = []
-        self._last_trade_price_flag = asyncio.Event()
-
-        self._tick_change_idx = 0
-        self._tick_change_rows: List[Tuple] = []
-        self._tick_change_flag = asyncio.Event()
-
-        self._connection_rows: List[Tuple] = []
-        self._connection_flag = asyncio.Event()
-
-    def get_buffer_sizes(self) -> Dict[str, int]:
-        """
-        Returns the current sizes of the internal database buffers.
-        """
-        return {
-            "book_rows": len(self._book_rows),
-            "price_change_rows": len(self._price_change_rows),
-            "last_trade_price_rows": len(self._last_trade_price_rows),
-            "tick_change_rows": len(self._tick_change_rows),
-            "connection_rows": len(self._connection_rows),
-        }
-
-    def task_summary(self) -> dict:
-        """
-        Provides a summary of the current state and running tasks of the Events module.
-        """
-        db_tasks_running = len(self._running_db_tasks)
-        internal_tasks_running = len(self._running_internal_tasks)
-
-        wss_stats = self._wss_cli.get_all_stats()
-        
-        connection_summary = wss_stats.get("connection_summary", {})
-        active_wss_tasks = connection_summary.get("connected", 0) + connection_summary.get("connecting", 0)
-
-        total_running_tasks = db_tasks_running + internal_tasks_running + active_wss_tasks
-        
-        return {
-            "total_running_tasks": total_running_tasks,
-            "db_tasks": {
-                "count": db_tasks_running,
-                "tasks": list(self._running_db_tasks.keys())
-            },
-            "internal_tasks": {
-                "count": internal_tasks_running,
-                "tasks": list(self._running_internal_tasks.keys())
-            },
-            "websocket_client": wss_stats
-        }
-        
-    async def start(self, markets_exhausted: asyncio.Event, restore = False):
+    async def start(self, markets_exhausted: asyncio.Event):
         if self._started: 
             self._log("start: Events module is already running.", "WARNING")
             return
-        if restore: 
-            await self._restore_subscriptions_from_db()
-        if self._orderbook_registry.get_token_count() == 0:
-            self._log("start: No tokens in registry, setting up bootstrap callback.", "INFO")
-            self._markets_exhausted = markets_exhausted
-            if self._bootstrap_callback_handle is None: 
-                self._bootstrap_callback_handle = self._orderbook_registry.register_insert_callback(self._bootstrap)
-            return
+        
+        self._markets_exhausted = markets_exhausted
+            
         try:
-            self._markets_exhausted = markets_exhausted; 
             self._start_db_inserters()
             
-            self._orderbook_registry.iterate_over_tokens(self._token_insert_callback)
+            # NOTE: We do NOT start the WS task here. 
+            # We wait for the first batch of tokens in the manager to ensure we send a valid initial payload.
 
-            if self._new_batch:
-                offset = len(self._subscriptions)
-                self._log(f"start: Creating final batch for remaining {len(self._new_batch)} tokens at offset {offset}", "INFO")
-                payload = orjson.dumps({"type": "market", "initial_dump": True, "assets_ids": self._new_batch}).decode('utf-8')
-                self._wss_cli.start_task(offset, self._url, payload)
-                self._new_batch.clear()
-
-            if self._token_insert_callback_handle is None: self._token_insert_callback_handle = self._orderbook_registry.register_insert_callback(self._token_insert_callback)
-            if self._token_delete_callback_handle is None: self._token_delete_callback_handle = self._orderbook_registry.register_delete_callback(self._token_delete_callback)
-            
-            serializer_task = asyncio.create_task(self._serializer())
-            self._running_internal_tasks["serializer"] = serializer_task
-            serializer_task.add_done_callback(lambda t: self._running_internal_tasks.pop("serializer", None))
+            manager_task = asyncio.create_task(self._subscription_manager())
+            self._running_internal_tasks["subscription_manager"] = manager_task
+            manager_task.add_done_callback(lambda t: self._running_internal_tasks.pop("subscription_manager", None))
             
             self._started = True
-            self._log("start: Events module started successfully.", "INFO")
+            self._log("start: Events module started.", "INFO")
 
-        except Exception as e: self._log(f"start: Failed with an unhandled exception: '{e}'", "FATAL"); traceback.print_exc(); self.stop()
+        except Exception as e: 
+            self._log(f"start: Failed with an unhandled exception: '{e}'", "FATAL")
+            traceback.print_exc()
+            self.stop()
+
+    async def _subscription_manager(self):
+        """
+        Manages dynamic subscriptions, unsubscriptions, and re-subscriptions.
+        """
         
-
-    async def _restore_subscriptions_from_db(self):
-        self._log("restore_subscriptions_from_db: starting", "INFO")
-        # UPDATED: markets_2
-        stmt = "SELECT DISTINCT asset_id FROM markets_2 WHERE closed_time IS NULL;"
-        try:
-            results = await self._db_cli.fetch(task_id="get_all_active_asset_ids", stmt=stmt)
-            if not results:
-                self._log("No existing active tokens found in database to restore.", "INFO")
-                return
+        # --- PHASE 1: BOOTSTRAP ---
+        # Wait for the first signal of markets to create the connection with a valid payload
+        if not self._connection_started:
+            self._log("subscription_manager: Waiting for initial market tokens to bootstrap connection...", "INFO")
+            await self._markets_exhausted.wait()
             
-            self._log(f"Found {len(results)} active tokens in database to restore.", "INFO")
-            for record in results:
-                asset_id = record.get("asset_id")
-                if isinstance(asset_id, str):
-                    self._orderbook_registry.insert_token(asset_id)
-            self._log("Finished inserting restored tokens into registry.", "INFO")
-        except Exception as e:
-            self._log(f"Failed to restore subscriptions from database: {e!r}", "ERROR")
+            new_tokens = self._orderbook_registry.consume_exhaustion_cycle_batch()
+            if not new_tokens:
+                self._log("subscription_manager: Exhaustion signal received but no tokens found. Retrying...", "WARNING")
+            
+            # Prepare initial batch (max 10k)
+            initial_batch = new_tokens[:self._limit_per_subscription]
+            self._active_tokens.update(initial_batch)
+            self._initial_batch_tokens = set(initial_batch)
+            
+            self._log(f"subscription_manager: Bootstrapping connection with {len(initial_batch)} tokens.", "INFO")
+            
+            # Start the connection with a real subscribe payload.
+            initial_payload = orjson.dumps({"operation": "subscribe", "assets_ids": initial_batch}).decode('utf-8')
+            self._wss_cli.start_task(0, self._url, initial_payload)
+            self._connection_started = True
+
+            # Wait for connection to be established with timeout
+            try:
+                await asyncio.wait_for(self._reconnected_event.wait(), timeout=20.0)
+                self._log("subscription_manager: Bootstrap connection established.", "INFO")
+            except asyncio.TimeoutError:
+                self._log("subscription_manager: Timeout waiting for bootstrap connection. The server might be unreachable or rejecting the payload.", "ERROR")
+            
+            # Handle any remaining tokens from the first exhaustion cycle
+            remaining_tokens = new_tokens[self._limit_per_subscription:]
+            if remaining_tokens:
+                self._log(f"subscription_manager: Subscribing to remaining {len(remaining_tokens)} tokens from bootstrap batch.", "INFO")
+                self._active_tokens.update(remaining_tokens)
+                
+                for i in range(0, len(remaining_tokens), self._limit_per_subscription):
+                    batch = remaining_tokens[i:i + self._limit_per_subscription]
+                    payload = orjson.dumps({"operation": "subscribe", "assets_ids": batch}).decode('utf-8')
+                    
+                    # Send and Log
+                    success = await self._wss_cli.send_message(0, payload)
+                    batch_num = (i // self._limit_per_subscription) + 1
+                    total_batches = (len(remaining_tokens) + self._limit_per_subscription - 1) // self._limit_per_subscription
+                    
+                    if success:
+                        self._log(f"subscription_manager: Successfully sent bootstrap batch {batch_num}/{total_batches} ({len(batch)} tokens).", "INFO")
+                    else:
+                        self._log(f"subscription_manager: Failed to send bootstrap batch {batch_num}/{total_batches}. Will be handled by reconnection logic.", "WARNING")
+            
+            self._log("subscription_manager: Bootstrap phase complete. Entering main event loop.", "INFO")
+            
+            self._markets_exhausted.clear()
+            self._reconnected_event.clear()
+
+            if self._token_delete_callback_handle is None: 
+                self._token_delete_callback_handle = self._orderbook_registry.register_delete_callback(self._token_delete_callback)
+
+        # --- PHASE 2: EVENT LOOP ---
+        while True:
+            try:
+                wait_tasks = [
+                    asyncio.create_task(self._markets_exhausted.wait()),
+                    asyncio.create_task(self._reconnected_event.wait()),
+                    asyncio.create_task(self._cleanup_event.wait())
+                ]
+
+                done, pending = await asyncio.wait(
+                    wait_tasks,
+                    return_when=asyncio.FIRST_COMPLETED
+                )
+
+                for t in pending: t.cancel()
+
+                # --- PRIORITY 1: Reconnection ---
+                if self._reconnected_event.is_set():
+                    self._reconnected_event.clear()
+                    self._markets_exhausted.clear()
+                    self._cleanup_event.clear()
+                    
+                    # wss_cli automatically resends the 'initial_payload' (the bootstrap batch).
+                    # We only need to resubscribe to tokens that were NOT in that bootstrap batch.
+                    tokens_to_resub = [t for t in self._active_tokens if t not in self._initial_batch_tokens]
+                    
+                    if tokens_to_resub:
+                        self._log(f"subscription_manager: Reconnected. Resubscribing to {len(tokens_to_resub)} additional tokens...", "INFO")
+                        for i in range(0, len(tokens_to_resub), self._limit_per_subscription):
+                            batch = tokens_to_resub[i:i + self._limit_per_subscription]
+                            payload = orjson.dumps({"operation": "subscribe", "assets_ids": batch}).decode('utf-8')
+                            success = await self._wss_cli.send_message(0, payload)
+                            if not success:
+                                self._log("subscription_manager: Failed to send resubscribe batch. Connection dropped.", "WARNING")
+                                break 
+
+                # --- PRIORITY 2: New Markets ---
+                elif self._markets_exhausted.is_set():
+                    self._markets_exhausted.clear()
+                    
+                    new_tokens = self._orderbook_registry.consume_exhaustion_cycle_batch()
+                    if not new_tokens: continue
+
+                    unique_new_tokens = [t for t in new_tokens if t not in self._active_tokens]
+                    
+                    if unique_new_tokens:
+                        self._log(f"subscription_manager: Found {len(unique_new_tokens)} new tokens to subscribe.", "INFO")
+                        self._active_tokens.update(unique_new_tokens)
+                        
+                        for i in range(0, len(unique_new_tokens), self._limit_per_subscription):
+                            batch = unique_new_tokens[i:i + self._limit_per_subscription]
+                            payload = orjson.dumps({"operation": "subscribe", "assets_ids": batch}).decode('utf-8')
+                            success = await self._wss_cli.send_message(0, payload)
+                            if success:
+                                self._log(f"subscription_manager: Sent subscribe batch {i//self._limit_per_subscription + 1} ({len(batch)} tokens).", "INFO")
+                            else:
+                                self._log("subscription_manager: Failed to send subscribe batch (socket not ready).", "WARNING")
+
+                # --- PRIORITY 3: Unsubscriptions ---
+                elif self._cleanup_event.is_set():
+                    self._cleanup_event.clear()
+                    
+                    tokens_to_remove = list(self._pending_unsubscribes)
+                    self._pending_unsubscribes.clear()
+                    
+                    if tokens_to_remove:
+                        self._log(f"subscription_manager: Unsubscribing from {len(tokens_to_remove)} tokens.", "INFO")
+                        for i in range(0, len(tokens_to_remove), self._limit_per_subscription):
+                            batch = tokens_to_remove[i:i + self._limit_per_subscription]
+                            payload = orjson.dumps({"operation": "unsubscribe", "assets_ids": batch}).decode('utf-8')
+                            await self._wss_cli.send_message(0, payload)
+
+            except asyncio.CancelledError:
+                self._log("subscription_manager: Task cancelled.", "INFO")
+                break
+            except Exception as e:
+                self._log(f"subscription_manager: Task failed with an unhandled exception: '{e}'", "ERROR")
+                traceback.print_exc()
+                await asyncio.sleep(5)
 
     def stop(self):
         self._log("stop: Stopping Events module...", "INFO")
@@ -170,12 +229,6 @@ class Events:
         self._log("stop: Events module stopped.", "INFO")
 
     def _clean_up(self):
-        if self._bootstrap_callback_handle is not None:
-            self._orderbook_registry.unregister_insert_callback(self._bootstrap_callback_handle)
-            self._bootstrap_callback_handle = None
-        if self._token_insert_callback_handle is not None:
-            self._orderbook_registry.unregister_insert_callback(self._token_insert_callback_handle)
-            self._token_insert_callback_handle = None
         if self._token_delete_callback_handle is not None:
             self._orderbook_registry.unregister_delete_callback(self._token_delete_callback_handle)
             self._token_delete_callback_handle = None
@@ -190,126 +243,66 @@ class Events:
             if not task.done(): task.cancel()
         self._running_internal_tasks.clear()
 
-    def _bootstrap(self, token: str):
-        if self._bootstrap_callback_handle is not None:
-            self._log(f"bootstrap: First token '{token}' received, starting main module.", "INFO")
-            self._orderbook_registry.unregister_insert_callback(self._bootstrap_callback_handle)
-            self._bootstrap_callback_handle = None
-            task = asyncio.create_task(self.start(self._markets_exhausted, False))
-            self._running_internal_tasks["bootstrap_starter"] = task
-            task.add_done_callback(lambda t: self._running_internal_tasks.pop("bootstrap_starter", None))
+    def _on_connect(self, task_offset: int) -> bool:
+        self._log(f"on_connect: Task {task_offset}: Successfully connected.", "INFO")
+        self._connection_rows.append((time.time_ns() // 1_000_000, True, None))
+        self._connection_flag.set()
+        self._reconnected_event.set()
+        return True
+
+    def _on_connect_failure(self, task_offset: int, exception: Exception, url: str, payload: str) -> bool:
+        reason = f"{type(exception).__name__}: {exception}"
+        payload_size = len(payload.encode('utf-8'))
+        self._log(f"on_connect_failure: Task {task_offset} to URL '{url}' failed: {reason}. Payload size: {payload_size} bytes.", "WARNING")
+        self._connection_rows.append((time.time_ns() // 1_000_000, False, reason[:250]))
+        self._connection_flag.set()
+        return True
+
+    def _token_delete_callback(self, token: str) -> bool:
+        if token in self._active_tokens:
+            self._active_tokens.remove(token)
+            self._pending_unsubscribes.add(token)
+            self._cleanup_event.set()
+            self._log(f"token_delete_callback: Scheduled unsubscription for {token}", "INFO")
+        
+        if self._orderbook_registry.get_token_count() == 0:
+            self._log("token_delete_callback: All tokens removed. Stopping module.", "WARNING")
+            self.stop()
+            return False
+        return True
+
+    def get_buffer_sizes(self) -> Dict[str, int]:
+        return {
+            "book_rows": len(self._book_rows),
+            "price_change_rows": len(self._price_change_rows),
+            "last_trade_price_rows": len(self._last_trade_price_rows),
+            "tick_change_rows": len(self._tick_change_rows),
+            "connection_rows": len(self._connection_rows),
+        }
+
+    def task_summary(self) -> dict:
+        db_tasks_running = len(self._running_db_tasks)
+        internal_tasks_running = len(self._running_internal_tasks)
+        wss_stats = self._wss_cli.get_all_stats()
+        connection_summary = wss_stats.get("connection_summary", {})
+        active_wss_tasks = connection_summary.get("connected", 0) + connection_summary.get("connecting", 0)
+        total_running_tasks = db_tasks_running + internal_tasks_running + active_wss_tasks
+        
+        return {
+            "total_running_tasks": total_running_tasks,
+            "db_tasks": {"count": db_tasks_running, "tasks": list(self._running_db_tasks.keys())},
+            "internal_tasks": {"count": internal_tasks_running, "tasks": list(self._running_internal_tasks.keys())},
+            "websocket_client": wss_stats,
+            "active_subscriptions": len(self._active_tokens)
+        }
 
     def _start_db_inserters(self):
         self._log("start: Starting database inserters...", "INFO")
-
-        # UPDATED: buffer_books_2
-        self._running_db_tasks[BOOKS_INSERTER_ID] = self._db_cli.copy_persistent(
-            task_id=BOOKS_INSERTER_ID, table_name="buffer_books_2", params_buffer=self._book_rows,
-            signal=self._book_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
-        )
-        # UPDATED: buffer_price_changes_2
-        self._running_db_tasks[PRICE_CHANGES_INSERTER_ID] = self._db_cli.copy_persistent(
-            task_id=PRICE_CHANGES_INSERTER_ID, table_name="buffer_price_changes_2", params_buffer=self._price_change_rows,
-            signal=self._price_change_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
-        )
-        # UPDATED: buffer_last_trade_prices_2
-        self._running_db_tasks[LAST_TRADE_PRICES_INSERTER_ID] = self._db_cli.copy_persistent(
-            task_id=LAST_TRADE_PRICES_INSERTER_ID, table_name="buffer_last_trade_prices_2", params_buffer=self._last_trade_price_rows,
-            signal=self._last_trade_price_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
-        )
-        # UPDATED: buffer_tick_changes_2
-        self._running_db_tasks[TICK_CHANGES_INSERTER_ID] = self._db_cli.copy_persistent(
-            task_id=TICK_CHANGES_INSERTER_ID, table_name="buffer_tick_changes_2", params_buffer=self._tick_change_rows,
-            signal=self._tick_change_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
-        )
-        # UPDATED: buffer_events_connections_2
-        self._running_db_tasks[CONNECTIONS_INSERTER_ID] = self._db_cli.copy_persistent(
-            task_id=CONNECTIONS_INSERTER_ID, table_name="buffer_events_connections_2", params_buffer=self._connection_rows,
-            signal=self._connection_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
-        )
-
-    def _token_insert_callback(self, token: str) -> bool:
-        offset = len(self._subscriptions)
-        if len(self._new_batch) >= self._limit_per_subscription:
-            self._log(f"token_insert_callback: new full batch at offset {offset}")
-            payload = orjson.dumps({"type": "market", "initial_dump": True, "assets_ids": self._new_batch}).decode('utf-8')
-            self._wss_cli.start_task(offset, self._url, payload)
-            self._subscriptions.append(payload)
-            self._new_batch.clear()
-            self._markets_exhausted.clear()
-
-        self._new_batch.append(token)
-        if self._markets_exhausted.is_set():
-            self._log(f"token_insert_callback: markets exhausted")
-            payload = orjson.dumps({"type": "market", "initial_dump": True, "assets_ids": self._new_batch}).decode('utf-8')
-            self._wss_cli.start_task(offset, self._url, payload)
-            self._markets_exhausted.clear()
-        return True
-
-
-    def _token_delete_callback(self, token: str)->bool:
-        self._deleted_count_since_reserialize += 1
-        
-        if self._orderbook_registry.get_token_count() == 0:
-            self._log("token_delete_callback: All tokens removed. Stopping and resetting to bootstrap.", "WARNING")
-            self.stop()
-            if self._bootstrap_callback_handle is None:
-                self._bootstrap_callback_handle = self._orderbook_registry.register_insert_callback(self._bootstrap)
-            return False
-
-        if self._deleted_count_since_reserialize > self._limit_per_subscription * self._reserialize_threshold:
-            self._log("token_delete_callback: Deletion threshold met, triggering serializer.", "INFO")
-            self._deleted_count_since_reserialize = 0
-            self._serializer_signal.set()
-        
-        return True
-
-    def _serialize(self, token: str)->bool:
-        if len(self._new_batch) >= self._limit_per_subscription:
-            self._subscriptions.append(orjson.dumps({"type": "market", "initial_dump": True, "assets_ids": self._new_batch}).decode('utf-8'))
-            self._new_batch.clear()
-            self._markets_exhausted.clear()
-        self._new_batch.append(token)
-        return True
-
-    async def _serializer(self):
-        while True:
-            try:
-                await self._serializer_signal.wait()
-                self._serializer_signal.clear()
-
-                old_subscription_count = len(self._subscriptions)
-                if self._new_batch:
-                    old_subscription_count += 1
-                    
-                self._log(f"serializer: Re-serializing subscriptions.")
-                self._new_batch.clear()
-                self._subscriptions.clear()
-                self._orderbook_registry.iterate_over_tokens(self._serialize)
-                
-                new_subscription_count = len(self._subscriptions)
-                for offset in range(new_subscription_count):
-                    self._wss_cli.start_task(offset, self._url, self._subscriptions[offset])
-                
-                if self._new_batch:
-                    final_payload = orjson.dumps({"type": "market", "initial_dump": True, "assets_ids": self._new_batch}).decode('utf-8')
-                    self._wss_cli.start_task(new_subscription_count, self._url, final_payload)
-                    new_subscription_count += 1
-
-                if old_subscription_count > new_subscription_count:
-                    self._log(f"serializer: waiting {self._loss_guard_s}s before terminating old connections.", "INFO")
-                    await asyncio.sleep(self._loss_guard_s)
-                    
-                    self._log(f"serializer: Terminating {old_subscription_count - new_subscription_count} old subscription tasks.", "INFO")
-                    for offset in range(new_subscription_count, old_subscription_count):
-                        self._wss_cli.terminate_task(offset)
-
-            except asyncio.CancelledError:
-                self._log("serializer: Task cancelled.", "INFO")
-                break
-            except Exception as e:
-                self._log(f"serializer: Task failed with '{e}'", "ERROR")
-                traceback.print_exc()
+        self._running_db_tasks[BOOKS_INSERTER_ID] = self._db_cli.copy_persistent(task_id=BOOKS_INSERTER_ID, table_name="buffer_books_2", params_buffer=self._book_rows, signal=self._book_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure)
+        self._running_db_tasks[PRICE_CHANGES_INSERTER_ID] = self._db_cli.copy_persistent(task_id=PRICE_CHANGES_INSERTER_ID, table_name="buffer_price_changes_2", params_buffer=self._price_change_rows, signal=self._price_change_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure)
+        self._running_db_tasks[LAST_TRADE_PRICES_INSERTER_ID] = self._db_cli.copy_persistent(task_id=LAST_TRADE_PRICES_INSERTER_ID, table_name="buffer_last_trade_prices_2", params_buffer=self._last_trade_price_rows, signal=self._last_trade_price_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure)
+        self._running_db_tasks[TICK_CHANGES_INSERTER_ID] = self._db_cli.copy_persistent(task_id=TICK_CHANGES_INSERTER_ID, table_name="buffer_tick_changes_2", params_buffer=self._tick_change_rows, signal=self._tick_change_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure)
+        self._running_db_tasks[CONNECTIONS_INSERTER_ID] = self._db_cli.copy_persistent(task_id=CONNECTIONS_INSERTER_ID, table_name="buffer_events_connections_2", params_buffer=self._connection_rows, signal=self._connection_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure)
 
     def _on_read(self, task_offset: int, message: str) -> bool:
         try:
@@ -329,31 +322,8 @@ class Events:
         return True
 
     def _on_ack(self, task_offset: int, message: str) -> bool:
-        try:
-            event_data = orjson.loads(message)
-        except orjson.JSONDecodeError as e:
-            self._log(f"on_read: Task {task_offset}: Failed to decode JSON with '{e}'. Snippet: '{message[:200]}'", "WARNING")
-            return True
-        if not isinstance(event_data, list):
-            self._log(f"non list ack {message[:300]}", "WARNING")
-            return True
-
-        
-        self._log(f"on_ack: task {task_offset} acked with len", "INFO")
+        self._log(f"on_ack: task {task_offset} acked with len {len(message)}", "INFO")
         return self._on_read(task_offset, message)
-
-    def _on_connect(self, task_offset: int) -> bool:
-        self._log(f"on_connect: Task {task_offset}: Successfully connected.", "INFO")
-        self._connection_rows.append((time.time_ns() // 1_000_000, True, None))
-        self._connection_flag.set()
-        return True
-
-    def _on_connect_failure(self, task_offset: int, exception: Exception, url: str, payload: str) -> bool:
-        reason = f"{type(exception).__name__}: {exception}"
-        self._log(f"on_connect_failure: Task {task_offset} to URL '{url}' failed: {reason}", "WARNING")
-        self._connection_rows.append((time.time_ns() // 1_000_000, False, reason[:250]))
-        self._connection_flag.set()
-        return True
 
     def _on_read_failure(self, task_offset: int, exception: Exception, url: str) -> bool:
         reason = f"{type(exception).__name__}: {exception}"
@@ -370,23 +340,31 @@ class Events:
         elif task_id == CONNECTIONS_INSERTER_ID: self._connection_rows.clear()
 
     async def _on_inserter_failure(self, task_id: str, exception: Exception, params: List[Tuple]):
-        self._log(f"on_inserter_failure: {task_id} failed with '{exception}' on {len(params)} params. Stopping module.", "FATAL")
+        self._log(f"on_inserter_failure: DB inserter '{task_id}' failed with '{exception}' on {len(params)} params. Stopping module.", "FATAL")
+        traceback.print_exc()
         self.stop()
 
     def _handle_event_dict(self, event: dict):
         event_type = event.get("event_type")
-        if not isinstance(event_type, str) or not event_type:
-            self._log(f"handle_event_dict: Skipping event with invalid 'event_type'. Event: '{str(event)[:300]}'", "WARNING")
+        
+        if not event_type:
+            self._log(f"handle_event_dict: Received generic message: {str(event)[:500]}", "INFO")
+            return
+
+        if event_type == "error":
+            self._log(f"handle_event_dict: Received ERROR from server: {str(event)}", "ERROR")
+            return
+            
+        if event_type == "info":
+            self._log(f"handle_event_dict: Received INFO from server: {str(event)}", "INFO")
             return
 
         timestamp_str = event.get("timestamp")
         if not isinstance(timestamp_str, str) or not timestamp_str:
-            self._log(f"handle_event_dict: Skipping event '{event_type}' due to invalid 'timestamp'. Event: '{str(event)[:300]}'", "WARNING")
             return
         try:
             timestamp = int(timestamp_str)
         except (ValueError, TypeError):
-            self._log(f"handle_event_dict: Skipping event '{event_type}' due to unparseable timestamp: '{timestamp_str}'.", "WARNING")
             return
 
         if event_type == "book":
@@ -397,117 +375,57 @@ class Events:
             self._parse_last_trade_price_event(event, timestamp)
         elif event_type == "tick_size_change":
             self._parse_tick_size_event(event, timestamp)
-        else:
-            self._log(f"handle_event_dict: Received unhandled event_type: '{event_type}'.", "INFO")
 
     def _parse_book_event(self, event: dict, timestamp: int):
         asset_id = event.get("asset_id")
-        if not isinstance(asset_id, str) or not asset_id:
-            self._log(f"parse_book_event: Skipping book event due to missing or invalid 'asset_id'. Event: '{str(event)[:300]}'", "WARNING")
-            return
-        
+        if not isinstance(asset_id, str) or not asset_id: return
         self._book_rows.append((self._book_idx, time.time_ns() // 1_000_000, timestamp, asset_id,  orjson.dumps(event).decode('utf-8')))
         self._book_idx += 1
         self._book_flag.set()
 
     def _parse_price_change_event(self, event: dict, timestamp: int):
         price_changes = event.get("price_changes")
-        if not isinstance(price_changes, list):
-            self._log(f"parse_price_change_event: Expected 'price_changes' to be a list, but got {type(price_changes)}. Event: '{str(event)[:300]}'", "WARNING")
-            return
-            
+        if not isinstance(price_changes, list): return
         rows_added = 0
         for item in price_changes:
-            if not isinstance(item, dict): 
-                continue
-
+            if not isinstance(item, dict): continue
             asset_id = item.get("asset_id")
-            if not isinstance(asset_id, str) or not asset_id:
-                self._log(f"parse_price_change_event: Skipping item due to missing or invalid 'asset_id'. Item: '{str(item)[:300]}'", "WARNING")
-                continue
-
+            if not isinstance(asset_id, str) or not asset_id: continue
             price_str = item.get("price")
-            if not isinstance(price_str, str):
-                self._log(f"parse_price_change_event: Skipping item for asset '{asset_id}' due to missing 'price'. Item: '{str(item)[:300]}'", "WARNING")
-                continue
-
             size_str = item.get("size")
-            if not isinstance(size_str, str):
-                self._log(f"parse_price_change_event: Skipping item for asset '{asset_id}' due to missing 'size'. Item: '{str(item)[:300]}'", "WARNING")
-                continue
-
             side = item.get("side")
-            if not isinstance(side, str) or side not in ("BUY", "SELL"):
-                self._log(f"parse_price_change_event: Skipping item for asset '{asset_id}' due to invalid 'side'. Item: '{str(item)[:300]}'", "WARNING")
-                continue
-
+            if not (isinstance(price_str, str) and isinstance(size_str, str) and side in ("BUY", "SELL")): continue
             try:
                 price, size = float(price_str), float(size_str)
                 self._price_change_rows.append((self._price_change_idx, time.time_ns() // 1_000_000, timestamp, asset_id, price, size, side,  orjson.dumps(item).decode('utf-8')))
                 self._price_change_idx += 1
                 rows_added += 1
-            except (ValueError, TypeError):
-                self._log(f"parse_price_change_event: Skipping item for asset '{asset_id}' due to unparseable numeric values. Item: '{item}'", "WARNING")
-                continue
-        
-        if rows_added > 0:
-            self._price_change_flag.set()
+            except (ValueError, TypeError): continue
+        if rows_added > 0: self._price_change_flag.set()
 
     def _parse_last_trade_price_event(self, event: dict, timestamp: int):
         asset_id = event.get("asset_id")
-        if not isinstance(asset_id, str) or not asset_id:
-            self._log(f"parse_last_trade_price_event: Skipping event due to missing or invalid 'asset_id'. Event: '{str(event)[:300]}'", "WARNING")
-            return
-
+        if not isinstance(asset_id, str) or not asset_id: return
         price_str = event.get("price")
-        if not isinstance(price_str, str):
-            self._log(f"parse_last_trade_price_event: Skipping event for asset '{asset_id}' due to missing 'price'. Event: '{str(event)[:300]}'", "WARNING")
-            return
-
         size_str = event.get("size")
-        if not isinstance(size_str, str):
-            self._log(f"parse_last_trade_price_event: Skipping event for asset '{asset_id}' due to missing 'size'. Event: '{str(event)[:300]}'", "WARNING")
-            return
-
         side = event.get("side")
-        if not isinstance(side, str) or side not in ("BUY", "SELL"):
-            self._log(f"parse_last_trade_price_event: Skipping event for asset '{asset_id}' due to invalid 'side'. Event: '{str(event)[:300]}'", "WARNING")
-            return
-
         fee_rate_bps_str = event.get("fee_rate_bps")
-        if not isinstance(fee_rate_bps_str, str):
-            self._log(f"parse_last_trade_price_event: Skipping event for asset '{asset_id}' due to missing 'fee_rate_bps'. Event: '{str(event)[:300]}'", "WARNING")
-            return
-
+        if not (isinstance(price_str, str) and isinstance(size_str, str) and side in ("BUY", "SELL") and isinstance(fee_rate_bps_str, str)): return
         try:
-            price = float(price_str)
-            size = float(size_str)
-            fee_rate_bps = float(fee_rate_bps_str)
-        except (ValueError, TypeError):
-            self._log(f"parse_last_trade_price_event: Skipping event for asset '{asset_id}' due to unparseable numeric values. Event: '{event}'", "WARNING")
-            return
-            
-        self._last_trade_price_rows.append((self._last_trade_price_idx, time.time_ns() // 1_000_000, timestamp, asset_id, price, size, side,  fee_rate_bps, orjson.dumps(event).decode('utf-8')))
-        self._last_trade_price_idx += 1
-        self._last_trade_price_flag.set()
+            price, size, fee_rate_bps = float(price_str), float(size_str), float(fee_rate_bps_str)
+            self._last_trade_price_rows.append((self._last_trade_price_idx, time.time_ns() // 1_000_000, timestamp, asset_id, price, size, side,  fee_rate_bps, orjson.dumps(event).decode('utf-8')))
+            self._last_trade_price_idx += 1
+            self._last_trade_price_flag.set()
+        except (ValueError, TypeError): return
 
     def _parse_tick_size_event(self, event: dict, timestamp: int):
         asset_id = event.get("asset_id")
-        if not isinstance(asset_id, str) or not asset_id:
-            self._log(f"parse_tick_size_event: Skipping event due to missing or invalid 'asset_id'. Event: '{str(event)[:300]}'", "WARNING")
-            return
-
+        if not isinstance(asset_id, str) or not asset_id: return
         tick_size_str = event.get("new_tick_size")
-        if not isinstance(tick_size_str, str):
-            self._log(f"parse_tick_size_event: Skipping event for asset '{asset_id}' due to missing or invalid 'new_tick_size'. Event: '{str(event)[:300]}'", "WARNING")
-            return
-
+        if not isinstance(tick_size_str, str): return
         try:
             tick_size = float(tick_size_str)
-        except (ValueError, TypeError):
-            self._log(f"parse_tick_size_event: Skipping event for asset '{asset_id}' due to unparseable 'new_tick_size': '{tick_size_str}'.", "WARNING")
-            return
-
-        self._tick_change_rows.append((self._tick_change_idx, time.time_ns() // 1_000_000, timestamp, asset_id, tick_size,  orjson.dumps(event).decode('utf-8')))
-        self._tick_change_idx += 1
-        self._tick_change_flag.set()
+            self._tick_change_rows.append((self._tick_change_idx, time.time_ns() // 1_000_000, timestamp, asset_id, tick_size,  orjson.dumps(event).decode('utf-8')))
+            self._tick_change_idx += 1
+            self._tick_change_flag.set()
+        except (ValueError, TypeError): return

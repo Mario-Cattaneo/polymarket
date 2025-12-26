@@ -20,7 +20,7 @@ DB_USER = os.getenv("POLY_DB_CLI")
 DB_PASS = os.getenv("POLY_DB_CLI_PASS")
 
 # --- Configuration for the analysis ---
-FORK_MARKET_TABLE = "markets_2"
+FORK_MARKET_TABLE = "markets_3"
 CTFE_EXCHANGE_ADDRESS = "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e".lower()
 MOO_UMA_ADAPTER_ADDRESS = "0x65070BE91477460D8A7AeEb94ef92fe056C2f2A7".lower()
 

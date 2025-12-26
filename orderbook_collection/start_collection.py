@@ -14,6 +14,7 @@ import markets
 import events
 import analytics
 
+# Set to True to wipe the database and start fresh
 RESET = False
 
 POLY_HOME = None
@@ -32,7 +33,7 @@ def monitor_log(log_content: str):
 
 
 # ====================================================================
-# CONFIGURABLE PARAMETERS (UPDATED)
+# CONFIGURABLE PARAMETERS
 # ====================================================================
 
 # --- Partition Timing ---
@@ -43,9 +44,8 @@ partition_buffer_count = 2
 MAINTENANCE_INTERVAL_SECONDS = 7200
 
 # List of all tables that require partition management.
-# UPDATED: Suffix _2 added
+# REMOVED: buffer_markets_2 (to prevent rapid DB growth)
 PARTITIONED_TABLES = [
-    'buffer_markets_2',
     'buffer_books_2',
     'buffer_price_changes_2',
     'buffer_last_trade_prices_2',
@@ -58,7 +58,7 @@ PARTITIONED_TABLES = [
 
 
 # ====================================================================
-# DATABASE INITIALIZATION SCRIPT (F-STRING)
+# DATABASE INITIALIZATION SCRIPT
 # ====================================================================
 
 SETUP_SCHEMA_STMT = f"""
@@ -68,8 +68,8 @@ DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'event') THEN CREATE TYPE EVENT AS ENUM ('price_change', 'last_trade_price', 'book'); END IF;
 END$$;
 
--- UPDATED: markets_2 with missed_before_gone
-CREATE TABLE IF NOT EXISTS markets_2 (
+-- UPDATED: markets_3 (State table, NOT partitioned)
+CREATE TABLE IF NOT EXISTS markets_3 (
     found_index BIGINT, 
     found_time_ms BIGINT, 
     asset_id TEXT PRIMARY KEY, 
@@ -84,23 +84,7 @@ CREATE TABLE IF NOT EXISTS markets_2 (
     message jsonb 
 );
 
--- UPDATED: buffer_markets_2 with missed_before_gone
-CREATE TABLE IF NOT EXISTS buffer_markets_2 (
-    found_index BIGINT, 
-    found_time_ms BIGINT, 
-    asset_id TEXT, 
-    exhaustion_cycle BIGINT, 
-    market_id TEXT, 
-    condition_id TEXT, 
-    question_id TEXT, 
-    negrisk_id TEXT, 
-    "offset" BIGINT, 
-    closed_time BIGINT DEFAULT NULL, 
-    missed_before_gone BIGINT DEFAULT NULL,
-    message jsonb 
-) PARTITION BY RANGE (found_time_ms);
-
--- UPDATED: All other buffers renamed to _2
+-- Buffer tables (Partitioned by time)
 CREATE TABLE IF NOT EXISTS buffer_books_2 (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, message jsonb ) PARTITION BY RANGE (found_time_ms);
 CREATE TABLE IF NOT EXISTS buffer_price_changes_2 (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, price REAL, size REAL, side SIDE, message jsonb ) PARTITION BY RANGE (found_time_ms);
 CREATE TABLE IF NOT EXISTS buffer_last_trade_prices_2 (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, price REAL, size REAL, side SIDE, fee_rate_bps REAL , message jsonb ) PARTITION BY RANGE (found_time_ms);
@@ -141,10 +125,11 @@ $$ LANGUAGE plpgsql;
 -- Part 2: One-Time System Initialization
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM partition_manager_config) THEN RAISE NOTICE 'Partition manager already initialized.'; RETURN; END IF;
+    IF EXISTS (SELECT 1 FROM partition_manager_config) THEN RETURN; END IF;
     RAISE NOTICE 'INITIALIZING PARTITION MANAGER...';
     INSERT INTO partition_manager_config (system_start_time_ms) VALUES ((EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT);
-    PERFORM create_floating_partition_if_needed('buffer_markets_2');
+    
+    -- Initialize partitions for all buffer tables
     PERFORM create_floating_partition_if_needed('buffer_books_2');
     PERFORM create_floating_partition_if_needed('buffer_price_changes_2');
     PERFORM create_floating_partition_if_needed('buffer_last_trade_prices_2');
@@ -160,17 +145,19 @@ $$;
 
 TEARDOWN_SCHEMA_STMT = """
     DROP TABLE IF EXISTS
-        markets_2, 
-        buffer_markets_2, buffer_books_2, buffer_price_changes_2, buffer_last_trade_prices_2,
+        markets_3, 
+        buffer_books_2, buffer_price_changes_2, buffer_last_trade_prices_2,
         buffer_tick_changes_2, buffer_server_book_2, buffer_markets_rtt_2,
         buffer_analytics_rtt_2, buffer_events_connections_2,
         partition_manager_config CASCADE;
     
     DROP FUNCTION IF EXISTS create_floating_partition_if_needed(TEXT) CASCADE;
-    
     DROP TYPE IF EXISTS SIDE, EVENT CASCADE;
 """
 
+# ====================================================================
+# MONITORING AND MAINTENANCE
+# ====================================================================
 
 monitor_sleep = 2
 previous_tasks = set()
@@ -203,7 +190,10 @@ async def monitor_system(markets, analytics, events):
         new_tasks_info = "\n".join([f"  + {_format_task_info(t)}" for t in new_tasks])
         finished_tasks_info = "\n".join([f"  - {_format_task_info(t)}" for t in finished_tasks])
         
-        markets_summary = markets.task_summary(); analytics_summary = analytics.task_summary(); events_summary = events.task_summary()
+        markets_summary = markets.task_summary()
+        analytics_summary = analytics.task_summary()
+        events_summary = events.task_summary()
+        
         markets_buffers = _format_buffer_sizes(markets.get_buffer_sizes())
         analytics_buffers = _format_buffer_sizes(analytics.get_buffer_sizes())
         events_buffers = _format_buffer_sizes(events.get_buffer_sizes())
@@ -233,98 +223,73 @@ async def monitor_system(markets, analytics, events):
         monitor_sleep = min(monitor_sleep * 2, 777)
         await asyncio.sleep(monitor_sleep)
 
-# --- Background task for partition maintenance ---
 async def partition_maintenance_worker(_db_cli: db_cli.DatabaseManager):
-    """The background task that runs forever, scheduling the maintenance."""
+    """Background task for scheduling partition creation."""
     print("[INFO] Partition maintenance worker started.")
     while True:
         try:
-            print("[INFO] Running partition maintenance check...")
             for table_name in PARTITIONED_TABLES:
-                # We format the SQL string here. This is safe because table_name comes
-                # from our own controlled list (PARTITIONED_TABLES), not user input.
                 stmt = f"SELECT create_floating_partition_if_needed('{table_name}');"
                 await _db_cli.exec(task_id=f"maintenance_{table_name}", stmt=stmt)
-            print("[INFO] Partition maintenance check completed successfully.")
         except Exception as e:
-            print(f"[ERROR] Partition maintenance failed: {e!r}\n{traceback.format_exc()}")
-        
-        print(f"[INFO] Sleeping for {MAINTENANCE_INTERVAL_SECONDS} seconds until next maintenance run.")
+            print(f"[ERROR] Partition maintenance failed: {e!r}")
         await asyncio.sleep(MAINTENANCE_INTERVAL_SECONDS)
 
 
+# ====================================================================
+# MAIN EXECUTION
+# ====================================================================
+
 async def start_collection():
+    global POLY_HOME, POLY_LOGS
     print("[INFO] starting")
 
-    loop = asyncio.get_running_loop()
-    if loop.get_debug():
-        loop.slow_callback_duration = 0.100
-        print(f"[INFO] asyncio debug mode is ON. slow callback threshold set to {loop.slow_callback_duration}s.")
-    else:
-        print("[INFO] asyncio debug mode is OFF.")
-        
-    print("[INFO] validating environment variables")
-
-    pg_socket = os.getenv("PG_SOCKET"); 
-    if not isinstance(pg_socket, str):
-        print("[ERROR] misisng env var PG_SOCKET")
-        return
-
-    pg_port = os.getenv("POLY_PG_PORT")
-    if not isinstance(pg_port, str):
-        print("[ERROR] misisng env var POLY_PG_PORT")
-        return
+    # Validate Environment
+    env_vars = ["PG_SOCKET", "POLY_PG_PORT", "POLY_DB", "POLY_DB_CLI", "POLY_DB_CLI_PASS", "POLY_HOME", "POLY_LOGS"]
+    for var in env_vars:
+        if not os.getenv(var):
+            print(f"[ERROR] missing env var {var}")
+            return
     
-    db_name = os.getenv("POLY_DB")
-    if not isinstance(db_name, str):
-        print("[ERROR] misisng env var POLY_DB")
-        return
-    
-    db_user = os.getenv("POLY_DB_CLI"); 
-    if not isinstance(db_user, str):
-        print("[ERROR] misisng env var POLY_DB_CLI")
-        return
-    db_pass = os.getenv("POLY_DB_CLI_PASS")
-    if not isinstance(db_pass, str):
-        print("[ERROR] misisng env var POLY_DB_CLI_PASS")
-        return
+    # Set global variables from environment
+    POLY_HOME = os.getenv("POLY_HOME")
+    POLY_LOGS = os.getenv("POLY_LOGS")
 
-    print("[INFO] all environment variables are present.")
-
+    # Initialize Logger
     try:
-        _logger = logger.Logger(log_dir=POLY_LOGS)
-        print(f"[INFO] module-specific logger initialized in '{POLY_LOGS}'.")
+        _logger = logger.Logger(log_dir=os.getenv("POLY_LOGS"))
     except Exception as e:
-        print(f"[FATAL] failed to initialize module logger in '{POLY_LOGS}': {e!r}")
+        print(f"[FATAL] failed to initialize logger: {e!r}")
         return
 
-    _db_cli = db_cli.DatabaseManager(db_host=pg_socket, db_port=pg_port, db_name=db_name, db_user=db_user, db_pass=db_pass)
+    # Database Connection
+    _db_cli = db_cli.DatabaseManager(
+        db_host=os.getenv("PG_SOCKET"), db_port=os.getenv("POLY_PG_PORT"), 
+        db_name=os.getenv("POLY_DB"), db_user=os.getenv("POLY_DB_CLI"), 
+        db_pass=os.getenv("POLY_DB_CLI_PASS")
+    )
     try:
         await _db_cli.connect()
-        print("[INFO] database manager connected.")
     except Exception as e:
         print(f"[FATAL] failed to connect to database: {e}")
         return
 
+    # Schema Setup
     try:
         if RESET:
-            print("[WARN] RESET flag is TRUE. Tearing down existing schema...")
-            await _db_cli.exec(task_id="teardown_schema", stmt=TEARDOWN_SCHEMA_STMT)
-            print("[WARN] Schema teardown complete.")
+            print("[WARN] RESET is TRUE. Tearing down schema...")
+            await _db_cli.exec(task_id="teardown", stmt=TEARDOWN_SCHEMA_STMT)
         
-        print("[INFO] Setting up database schema...")
-        await _db_cli.exec(task_id="setup_schema", stmt=SETUP_SCHEMA_STMT)
-        print("[INFO] Database schema setup complete.")
+        await _db_cli.exec(task_id="setup", stmt=SETUP_SCHEMA_STMT)
+        print("[INFO] Database schema ready.")
     except Exception as e:
-        print(f"[FATAL] Failed to set up database schema: {e}")
+        print(f"[FATAL] Schema setup failed: {e}")
         await _db_cli.disconnect()
         return
     
-    # --- Start the partition maintenance background task ---
     maintenance_task = asyncio.create_task(partition_maintenance_worker(_db_cli))
     
     try:
-        print("[INFO] Initializing application modules")
         _http_cli = http_cli.HttpManager(keepalive_expiry=7.0)
         _orderbook_registry = orderbook.OrderbookRegistry()
         
@@ -332,64 +297,30 @@ async def start_collection():
         _analytics = analytics.Analytics(log=_logger.get_logger("analytics"), http_man=_http_cli, db_man=_db_cli, orderbook_reg=_orderbook_registry)
         _events = events.Events(log=_logger.get_logger("events"), db_man=_db_cli, orderbook_reg=_orderbook_registry)
     
-        print("[INFO] All application modules initialized")
-    except Exception as e:
-        print(f"[FATAL] Failed to initialize core application modules: {e!r}")
-        if 'maintenance_task' in locals(): maintenance_task.cancel()
-        await _db_cli.disconnect()
-        return
-
-    try:
-        print("[INFO] Starting collection services")
+        print("[INFO] Modules initialized. Starting services...")
+        
         await _markets.start(restore=not RESET)
-        await _events.start(restore=not RESET, markets_exhausted=_markets.markets_exhausted)
+        await _events.start(markets_exhausted=_markets.markets_exhausted)
         await _analytics.start()
-        print("[INFO] All collection services started successfully. System is running.")
-    except Exception as e:
-        print(f"[FATAL] A critical error occurred while starting collection services: {e!r}\n{traceback.format_exc()}")
-        if 'maintenance_task' in locals(): maintenance_task.cancel()
-        await _db_cli.disconnect()
-        return
-
-    try:
+        
+        print("[INFO] System running.")
         while True:
             await monitor_system(_markets, _analytics, _events)
+
+    except Exception as e:
+        print(f"[FATAL] Critical error: {e!r}\n{traceback.format_exc()}")
     finally:
-        print("[INFO] Shutdown signal received. Cleaning up...")
-        # --- Cancel the maintenance task on shutdown ---
-        if 'maintenance_task' in locals(): maintenance_task.cancel()
+        maintenance_task.cancel()
         if '_events' in locals(): _events.stop()
         if '_analytics' in locals(): _analytics.stop()
         if '_markets' in locals(): _markets.stop()
         await _db_cli.disconnect()
         _logger.close()
-        print("[INFO] Cleanup complete. Exiting.")
 
 if __name__ == "__main__":
-    DEBUG = False
     try:
-        POLY_HOME = os.getenv("POLY_HOME");
-        if not isinstance(POLY_HOME, str):
-            print("[ERROR] misisng env var POLY_HOME")
-            sys.exit(1)
-
-        POLY_LOGS = os.getenv("POLY_LOGS")
-        if not isinstance(POLY_LOGS, str):
-            print("[ERROR] misisng env var POLY_LOGS")
-            sys.exit(1)
-
-        poly_logs_dir = Path(POLY_LOGS)
-        poly_logs_dir.mkdir(parents=True, exist_ok=True)
-        warnings_log_path = poly_logs_dir / "warnings.log"
-        logging.basicConfig(
-            level=logging.DEBUG if DEBUG else logging.WARNING,
-            format='%(asctime)s - %(levelname)s - [%(name)s] - %(message)s',
-            filename=warnings_log_path,
-            filemode='w'
-        )
-        asyncio.run(start_collection(), debug=DEBUG)
+        asyncio.run(start_collection())
     except KeyboardInterrupt:
-        print("\n[INFO] Application interrupted by user (KeyboardInterrupt).")
+        print("\n[INFO] Interrupted by user.")
     except Exception as e:
-        print(f"[FATAL] An unhandled exception occurred in the main execution block: {e!r}")
-        print(traceback.format_exc())
+        print(f"[FATAL] Unhandled exception: {e!r}")

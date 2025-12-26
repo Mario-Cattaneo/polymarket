@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Set
+from typing import Callable, Dict, Set, List
 
 class OrderbookRegistry:
     """
@@ -6,8 +6,10 @@ class OrderbookRegistry:
     
     This registry manages a central set of tokens and provides callback mechanisms
     for other modules to react to the insertion or deletion of tokens.
+    It also tracks tokens added within a single "exhaustion cycle" for batch processing.
     """
     _tokens: Set[str] = set()
+    _exhaustion_cycle_batch: List[str] = []  # NEW: Tracks tokens for the current cycle
     _removed_tokens = 0
     _inserted_tokens = 0
     
@@ -18,17 +20,14 @@ class OrderbookRegistry:
 
     @classmethod
     def lifetime_removed(cls) -> int:
-        """Returns the total number of tokens removed during the application's lifetime."""
         return cls._removed_tokens
     
     @classmethod
     def lifetime_inserted(cls) -> int:
-        """Returns the total number of tokens inserted during the application's lifetime."""
         return cls._inserted_tokens
 
     @classmethod
     def _register_callback(cls, callback_dict: Dict, callback_func: Callable) -> int:
-        """A generic helper to register any callback."""
         handle = cls._next_callback_handle
         callback_dict[handle] = callback_func
         cls._next_callback_handle += 1
@@ -36,51 +35,35 @@ class OrderbookRegistry:
 
     @classmethod
     def register_delete_callback(cls, delete_callback: Callable[[str], None]) -> int:
-        """Registers a function to be called whenever a token is deleted."""
         return cls._register_callback(cls._delete_callbacks, delete_callback)
 
     @classmethod
     def register_insert_callback(cls, insert_callback: Callable[[str], None]) -> int:
-        """Registers a function to be called whenever a new token is inserted."""
         return cls._register_callback(cls._insert_callbacks, insert_callback)
 
     @classmethod
     def unregister_delete_callback(cls, handle: int):
-        """Safely unregisters a delete callback using its handle."""
         cls._delete_callbacks.pop(handle, None)
 
     @classmethod
     def unregister_insert_callback(cls, handle: int):
-        """Safely unregisters an insert callback using its handle."""
         cls._insert_callbacks.pop(handle, None)
 
     @classmethod
     def insert_token(cls, token: str) -> bool:
-        """
-        Adds a new token to the registry.
-        
-        Returns False if the token already exists, True otherwise.
-        Triggers all registered insert callbacks on successful insertion.
-        """
         if token in cls._tokens:
             return False
         
         cls._tokens.add(token)
+        cls._exhaustion_cycle_batch.append(token) # MODIFIED: Add to cycle batch
         cls._inserted_tokens += 1
         
-        # Iterate over a copy in case a callback modifies the dictionary
         for call_back in list(cls._insert_callbacks.values()):
             call_back(token)
         return True
 
     @classmethod
     def delete_token(cls, token: str) -> bool:
-        """
-        Removes a token from the registry.
-
-        Returns False if the token does not exist, True otherwise.
-        Triggers all registered delete callbacks on successful deletion.
-        """
         if token not in cls._tokens:
             return False
         
@@ -93,16 +76,28 @@ class OrderbookRegistry:
     
     @classmethod
     def iterate_over_tokens(cls, on_iteration: Callable[[str], bool]):
-        """
-        Iterates over all registered tokens, calling the provided function for each.
-        
-        The iteration stops if the on_iteration function returns False.
-        """
         for token in list(cls._tokens):
             if not on_iteration(token):
                 return
 
     @classmethod
     def get_token_count(cls) -> int:
-        """Returns the current number of active tokens in the registry."""
         return len(cls._tokens)
+
+    @classmethod
+    def get_all_tokens(cls) -> List[str]:
+        """Returns a list of all current tokens for full reserialization."""
+        return list(cls._tokens)
+
+    @classmethod
+    def consume_exhaustion_cycle_batch(cls) -> List[str]:
+        """
+        NEW: Atomically retrieves and clears the list of tokens from the last cycle.
+        This is the primary method for the Events module to get new tokens.
+        """
+        if not cls._exhaustion_cycle_batch:
+            return []
+        
+        batch_to_return = list(cls._exhaustion_cycle_batch)
+        cls._exhaustion_cycle_batch.clear()
+        return batch_to_return

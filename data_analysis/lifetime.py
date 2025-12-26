@@ -25,7 +25,7 @@ logger = logging.getLogger()
 PG_HOST, PG_PORT, DB_NAME, DB_USER, DB_PASS = (os.getenv("PG_SOCKET"), os.getenv("POLY_PG_PORT"), os.getenv("POLY_DB"), os.getenv("POLY_DB_CLI"), os.getenv("POLY_DB_CLI_PASS"))
 PLOTS_DIR = os.getenv('POLY_PLOTS', './plots')
 
-MARKET_TABLES = {1: "markets", 2: "markets_2"}
+MARKET_TABLES = {1: "markets", 2: "markets_3"}
 
 CONTRACT_CONFIG = {
     'negrisk_exchange': {'table': 'events_neg_risk_exchange', 'address': '0xc5d563a36ae78145c45a50134d48a1215220f80a'},

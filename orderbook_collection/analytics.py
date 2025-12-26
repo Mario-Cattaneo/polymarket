@@ -14,8 +14,8 @@ SERVER_BOOK_INSERTER_ID = "server_book_inserter"
 RTT_INSERTER_ID = "analytics_rtt_inserter"
 
 MISSED_UPDATER_ID = "missed_count_updater"
-# UPDATED: markets_2
-MISSED_UPDATE_STMT = "UPDATE markets_2 SET missed_before_gone = $1 WHERE asset_id = $2"
+# UPDATED: markets_3
+MISSED_UPDATE_STMT = "UPDATE markets_3 SET missed_before_gone = $1 WHERE asset_id = $2"
 
 SERIALIZER_ID = "serializer"
 
@@ -39,7 +39,7 @@ class Analytics:
 
         self._http_config = HttpTaskConfig(
             base_back_off_s=1.0, max_back_off_s=150.0,
-            back_off_rate=2.0, request_break_s=0.15
+            back_off_rate=2.0, request_break_s=0.03
         )
         self._http_callbacks = HttpTaskCallbacks(
             next_request=self._next_request,

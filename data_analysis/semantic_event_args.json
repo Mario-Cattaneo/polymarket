@@ -1,130 +1,96 @@
 {
     "events_ctf_exchange": {
+        "FeeCharged": {
+            "0": { "name": "receiver", "type": "address" },
+            "1": { "name": "tokenId", "type": "uint256" },
+            "2": { "name": "fee", "type": "uint256" }
+        },
+        "OrderCancelled": {
+            "0": { "name": "orderHash", "type": "bytes32" }
+        },
         "OrderFilled": {
-            "1": { "name": "maker" },
-            "2": { "name": "taker" }
+            "0": { "name": "orderHash", "type": "bytes32" },
+            "1": { "name": "maker", "type": "address" },
+            "2": { "name": "taker", "type": "address" },
+            "3": { "name": "makerAssetId", "type": "uint256" },
+            "4": { "name": "takerAssetId", "type": "uint256" },
+            "5": { "name": "making", "type": "uint256" },
+            "6": { "name": "taking", "type": "uint256" },
+            "7": { "name": "fee", "type": "uint256" }
         },
         "OrdersMatched": {
-            "1": { "name": "maker" }
+            "0": { "name": "orderHash", "type": "bytes32" },
+            "1": { "name": "maker", "type": "address" },
+            "2": { "name": "makerAssetId", "type": "uint256" },
+            "3": { "name": "takerAssetId", "type": "uint256" },
+            "4": { "name": "making", "type": "uint256" },
+            "5": { "name": "taking", "type": "uint256" }
         },
-        "FeeCharged": {
-            "0": { "name": "receiver" }
+        "TokenRegistered": {
+            "0": { "name": "token0", "type": "uint256" },
+            "1": { "name": "token1", "type": "uint256" },
+            "2": { "name": "conditionId", "type": "bytes32" }
         }
     },
     "events_neg_risk_exchange": {
-        "OrderFilled": {
-            "1": { "name": "maker" },
-            "2": { "name": "taker" }
-        },
-        "OrdersMatched": {
-            "1": { "name": "maker" }
-        },
-        "FeeCharged": {
-            "0": { "name": "receiver" }
-        }
+        "FeeCharged": { "0": { "name": "receiver", "type": "address" }, "1": { "name": "tokenId", "type": "uint256" }, "2": { "name": "fee", "type": "uint256" } },
+        "OrderCancelled": { "0": { "name": "orderHash", "type": "bytes32" } },
+        "OrderFilled": { "0": { "name": "orderHash", "type": "bytes32" }, "1": { "name": "maker", "type": "address" }, "2": { "name": "taker", "type": "address" }, "3": { "name": "makerAssetId", "type": "uint256" }, "4": { "name": "takerAssetId", "type": "uint256" }, "5": { "name": "making", "type": "uint256" }, "6": { "name": "taking", "type": "uint256" }, "7": { "name": "fee", "type": "uint256" } },
+        "OrdersMatched": { "0": { "name": "orderHash", "type": "bytes32" }, "1": { "name": "maker", "type": "address" }, "2": { "name": "makerAssetId", "type": "uint256" }, "3": { "name": "takerAssetId", "type": "uint256" }, "4": { "name": "making", "type": "uint256" }, "5": { "name": "taking", "type": "uint256" } },
+        "TokenRegistered": { "0": { "name": "token0", "type": "uint256" }, "1": { "name": "token1", "type": "uint256" }, "2": { "name": "conditionId", "type": "bytes32" } }
     },
     "events_conditional_tokens": {
-        "ConditionPreparation": {
-            "1": { "name": "oracle" }
-        },
-        "ConditionResolution": {
-            "1": { "name": "oracle" }
-        },
-        "PositionSplit": {
-            "0": { "name": "stakeholder" },
-            "1": { "name": "collateralToken" }
-        },
-        "PositionsMerge": {
-            "0": { "name": "stakeholder" },
-            "1": { "name": "collateralToken" }
-        },
-        "PayoutRedemption": {
-            "0": { "name": "redeemer" },
-            "1": { "name": "collateralToken" }
-        }
+        "ConditionPreparation": { "0": { "name": "conditionId", "type": "bytes32" }, "1": { "name": "oracle", "type": "address" }, "2": { "name": "questionId", "type": "bytes32" }, "3": { "name": "outcomeSlotCount", "type": "uint256" } },
+        "ConditionResolution": { "0": { "name": "conditionId", "type": "bytes32" }, "1": { "name": "oracle", "type": "address" }, "2": { "name": "questionId", "type": "bytes32" }, "3": { "name": "outcomeSlotCount", "type": "uint256" }, "4": { "name": "payoutNumerators", "type": "uint256[]" } },
+        "PositionSplit": { "0": { "name": "stakeholder", "type": "address" }, "1": { "name": "collateralToken", "type": "address" }, "2": { "name": "parentCollectionId", "type": "bytes32" }, "3": { "name": "conditionId", "type": "bytes32" }, "4": { "name": "partition", "type": "uint256[]" }, "5": { "name": "amount", "type": "uint256" } },
+        "PositionsMerge": { "0": { "name": "stakeholder", "type": "address" }, "1": { "name": "collateralToken", "type": "address" }, "2": { "name": "parentCollectionId", "type": "bytes32" }, "3": { "name": "conditionId", "type": "bytes32" }, "4": { "name": "partition", "type": "uint256[]" }, "5": { "name": "amount", "type": "uint256" } },
+        "PayoutRedemption": { "0": { "name": "redeemer", "type": "address" }, "1": { "name": "collateralToken", "type": "address" }, "2": { "name": "parentCollectionId", "type": "bytes32" }, "3": { "name": "conditionId", "type": "bytes32" }, "4": { "name": "indexSets", "type": "uint256[]" }, "5": { "name": "payout", "type": "uint256" } }
+    },
+    "events_neg_risk_operator": {
+        "MarketPrepared": { "0": { "name": "marketId", "type": "bytes32" }, "1": { "name": "feeBips", "type": "uint256" }, "2": { "name": "data", "type": "bytes" } },
+        "QuestionFlagged": { "0": { "name": "questionId", "type": "bytes32" } },
+        "QuestionUnflagged": { "0": { "name": "questionId", "type": "bytes32" } },
+        "QuestionPrepared": { "0": { "name": "marketId", "type": "bytes32" }, "1": { "name": "questionId", "type": "bytes32" }, "2": { "name": "requestId", "type": "bytes32" }, "3": { "name": "questionIndex", "type": "uint256" }, "4": { "name": "data", "type": "bytes" } },
+        "QuestionReported": { "0": { "name": "questionId", "type": "bytes32" }, "1": { "name": "requestId", "type": "bytes32" }, "2": { "name": "result", "type": "bool" } },
+        "QuestionResolved": { "0": { "name": "questionId", "type": "bytes32" }, "1": { "name": "result", "type": "bool" } },
+        "QuestionEmergencyResolved": { "0": { "name": "questionId", "type": "bytes32" }, "1": { "name": "result", "type": "bool" } }
     },
     "events_neg_risk_adapter": {
-        "MarketPrepared": {
-            "1": { "name": "oracle" }
-        },
-        "PayoutRedemption": {
-            "0": { "name": "redeemer" }
-        },
-        "PositionSplit": {
-            "0": { "name": "stakeholder" }
-        },
-        "PositionsConverted": {
-            "0": { "name": "stakeholder" }
-        },
-        "PositionsMerge": {
-            "0": { "name": "stakeholder" }
-        }
+        "MarketPrepared": { "0": { "name": "marketId", "type": "bytes32" }, "1": { "name": "oracle", "type": "address" }, "2": { "name": "feeBips", "type": "uint256" }, "3": { "name": "data", "type": "bytes" } },
+        "OutcomeReported": { "0": { "name": "marketId", "type": "bytes32" }, "1": { "name": "questionId", "type": "bytes32" }, "2": { "name": "outcome", "type": "bool" } },
+        "PayoutRedemption": { "0": { "name": "redeemer", "type": "address" }, "1": { "name": "conditionId", "type": "bytes32" }, "2": { "name": "amounts", "type": "uint256[]" }, "3": { "name": "payout", "type": "uint256" } },
+        "PositionSplit": { "0": { "name": "stakeholder", "type": "address" }, "1": { "name": "conditionId", "type": "bytes32" }, "2": { "name": "amount", "type": "uint256" } },
+        "PositionsConverted": { "0": { "name": "stakeholder", "type": "address" }, "1": { "name": "marketId", "type": "bytes32" }, "2": { "name": "indexSet", "type": "uint256" }, "3": { "name": "amount", "type": "uint256" } },
+        "PositionsMerge": { "0": { "name": "stakeholder", "type": "address" }, "1": { "name": "conditionId", "type": "bytes32" }, "2": { "name": "amount", "type": "uint256" } },
+        "QuestionPrepared": { "0": { "name": "marketId", "type": "bytes32" }, "1": { "name": "questionId", "type": "bytes32" }, "2": { "name": "index", "type": "uint256" }, "3": { "name": "data", "type": "bytes" } }
     },
     "events_uma_adapter": {
-        "AncillaryDataUpdated": {
-            "1": { "name": "updater" }
-        },
-        "QuestionInitialized": {
-            "2": { "name": "creator" },
-            "4": { "name": "rewardToken" }
-        }
+        "AncillaryDataUpdated": { "0": { "name": "questionId", "type": "bytes32" }, "1": { "name": "creator", "type": "address" }, "2": { "name": "ancillaryData", "type": "bytes" } },
+        "QuestionFlagged": { "0": { "name": "questionId", "type": "bytes32" } },
+        "QuestionInitialized": { "0": { "name": "questionId", "type": "bytes32" }, "1": { "name": "timestamp", "type": "uint256" }, "2": { "name": "creator", "type": "address" }, "3": { "name": "ancillaryData", "type": "bytes" }, "4": { "name": "rewardToken", "type": "address" }, "5": { "name": "reward", "type": "uint256" }, "6": { "name": "proposalBond", "type": "uint256" } },
+        "QuestionManuallyResolved": { "0": { "name": "questionId", "type": "bytes32" }, "1": { "name": "payouts", "type": "uint256[]" } },
+        "QuestionPaused": { "0": { "name": "questionId", "type": "bytes32" } },
+        "QuestionReset": { "0": { "name": "questionId", "type": "bytes32" } },
+        "QuestionResolved": { "0": { "name": "questionId", "type": "bytes32" }, "1": { "name": "price", "type": "int256" }, "2": { "name": "payouts", "type": "uint256[]" } },
+        "QuestionUnflagged": { "0": { "name": "questionId", "type": "bytes32" } },
+        "QuestionUnpaused": { "0": { "name": "questionId", "type": "bytes32" } }
     },
     "events_managed_oracle": {
-        "DisputePrice": {
-            "0": { "name": "requester" },
-            "1": { "name": "proposer" },
-            "2": { "name": "disputer" }
-        },
-        "ProposePrice": {
-            "0": { "name": "requester" },
-            "1": { "name": "proposer" },
-            "7": { "name": "currency" }
-        },
-        "RequestPrice": {
-            "0": { "name": "requester" },
-            "4": { "name": "currency" }
-        },
-        "Settle": {
-            "0": { "name": "requester" },
-            "1": { "name": "proposer" },
-            "2": { "name": "disputer" }
-        },
-        "RequestManagerAdded": { "0": { "name": "requestManager" }},
-        "RequestManagerRemoved": { "0": { "name": "requestManager" }},
-        "DefaultProposerWhitelistUpdated": { "0": { "name": "whitelist" }},
-        "RequesterWhitelistUpdated": { "0": { "name": "whitelist" }},
-        "CustomProposerWhitelistSet": { "4": { "name": "whitelist" }}
+        "DisputePrice": { "0": { "name": "requester", "type": "address" }, "1": { "name": "proposer", "type": "address" }, "2": { "name": "disputer", "type": "address" }, "3": { "name": "identifier", "type": "bytes32" }, "4": { "name": "timestamp", "type": "uint256" }, "5": { "name": "ancillaryData", "type": "bytes" }, "6": { "name": "proposedPrice", "type": "int256" } },
+        "ProposePrice": { "0": { "name": "requester", "type": "address" }, "1": { "name": "proposer", "type": "address" }, "2": { "name": "identifier", "type": "bytes32" }, "3": { "name": "timestamp", "type": "uint256" }, "4": { "name": "ancillaryData", "type": "bytes" }, "5": { "name": "proposedPrice", "type": "int256" }, "6": { "name": "expirationTime", "type": "uint256" }, "7": { "name": "currency", "type": "address" } },
+        "RequestPrice": { "0": { "name": "requester", "type": "address" }, "1": { "name": "identifier", "type": "bytes32" }, "2": { "name": "timestamp", "type": "uint256" }, "3": { "name": "ancillaryData", "type": "bytes" }, "4": { "name": "currency", "type": "address" }, "5": { "name": "reward", "type": "uint256" }, "6": { "name": "finalFee", "type": "uint256" } },
+        "Settle": { "0": { "name": "requester", "type": "address" }, "1": { "name": "proposer", "type": "address" }, "2": { "name": "disputer", "type": "address" }, "3": { "name": "identifier", "type": "bytes32" }, "4": { "name": "timestamp", "type": "uint256" }, "5": { "name": "ancillaryData", "type": "bytes" }, "6": { "name": "resolvedPrice", "type": "int256" }, "7": { "name": "payout", "type": "uint256" } }
     },
     "oracle_tunnel_child": {
-        "PriceRequestBridged": {
-            "0": { "name": "requester" }
-        }
+        "PriceRequestBridged": { "0": { "name": "requester", "type": "address" }, "1": { "name": "identifier", "type": "bytes32" }, "2": { "name": "time", "type": "uint256" }, "3": { "name": "ancillaryData", "type": "bytes" }, "4": { "name": "childRequestId", "type": "bytes32" }, "5": { "name": "parentRequestId", "type": "bytes32" } }
     },
     "fx_tunnel": {
-        "NewFxMessage": {
-            "0": { "name": "rootMessageSender" },
-            "1": { "name": "receiver" }
-        }
+        "NewFxMessage": { "0": { "name": "rootMessageSender", "type": "address" }, "1": { "name": "receiver", "type": "address" }, "2": { "name": "data", "type": "bytes" } }
     },
     "OOV2": {
-        "RequestPrice": {
-            "0": { "name": "requester" },
-            "4": { "name": "currency" }
-        },
-        "ProposePrice": {
-            "0": { "name": "requester" },
-            "1": { "name": "proposer" },
-            "7": { "name": "currency" }
-        },
-        "DisputePrice": {
-            "0": { "name": "requester" },
-            "1": { "name": "proposer" },
-            "2": { "name": "disputer" }
-        },
-        "Settle": {
-            "0": { "name": "requester" },
-            "1": { "name": "proposer" },
-            "2": { "name": "disputer" }
-        }
+        "RequestPrice": { "0": { "name": "requester", "type": "address" }, "1": { "name": "identifier", "type": "bytes32" }, "2": { "name": "timestamp", "type": "uint256" }, "3": { "name": "ancillaryData", "type": "bytes" }, "4": { "name": "currency", "type": "address" }, "5": { "name": "reward", "type": "uint256" }, "6": { "name": "finalFee", "type": "uint256" } },
+        "ProposePrice": { "0": { "name": "requester", "type": "address" }, "1": { "name": "proposer", "type": "address" }, "2": { "name": "identifier", "type": "bytes32" }, "3": { "name": "timestamp", "type": "uint256" }, "4": { "name": "ancillaryData", "type": "bytes" }, "5": { "name": "proposedPrice", "type": "int256" }, "6": { "name": "expirationTime", "type": "uint256" }, "7": { "name": "currency", "type": "address" } },
+        "DisputePrice": { "0": { "name": "requester", "type": "address" }, "1": { "name": "proposer", "type": "address" }, "2": { "name": "disputer", "type": "address" }, "3": { "name": "identifier", "type": "bytes32" }, "4": { "name": "timestamp", "type": "uint256" }, "5": { "name": "ancillaryData", "type": "bytes" }, "6": { "name": "proposedPrice", "type": "int256" } },
+        "Settle": { "0": { "name": "requester", "type": "address" }, "1": { "name": "proposer", "type": "address" }, "2": { "name": "disputer", "type": "address" }, "3": { "name": "identifier", "type": "bytes32" }, "4": { "name": "timestamp", "type": "uint256" }, "5": { "name": "ancillaryData", "type": "bytes" }, "6": { "name": "resolvedPrice", "type": "int256" }, "7": { "name": "payout", "type": "uint256" } }
     }
 }
