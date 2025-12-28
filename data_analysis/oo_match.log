@@ -1,0 +1,37 @@
+2025-12-28 22:30:48 - INFO - Initializing database connection...
+2025-12-28 22:30:48 - INFO - Fetching data from markets_3, oov2, and events_managed_oracle...
+2025-12-28 22:30:50 - INFO - Processing and structuring data for analysis...
+2025-12-28 22:30:58 - INFO - Database connection closed.
+
+============================================================
+1. Initial Data Summary & Match Rates
+============================================================
+
+--- Total Counts ---
+- Total Order Books (markets_3): 29,779
+- Total DisputePrice Events (from all oracles): 227
+- Total ProposePrice Events (from all oracles): 55,484
+- Total RequestPrice Events (from all oracles): 64,761
+- Total Settle Events (from all oracles): 55,473
+
+--- Match Analysis ---
+- Order Books matched with a RequestPrice: 10,777 (36.19%)
+- ProposePrice events linked to a RequestPrice: 45,398 / 55,017 (82.52%)
+- DisputePrice events linked to a RequestPrice: 186 / 186 (100.00%)
+- Settle events linked to a RequestPrice: 45,351 / 55,013 (82.44%)
+
+========================================================================================================================
+2. Timeline and Causality Analysis Matrix (for matched markets)
+========================================================================================================================
+Each cell contains: Avg(T_col - T_row) | Sign Match % | Data Points (n)
+            createdAt         startDate         found_time_ms     request_ts        propose_ts        dispute_ts        closed_time       settle_ts         endDate           
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+createdAt   ---               4.9h | 100% | 10777n5.5h | 100% | 10777n52.5m | 5% | 10777n1.2d | 97% | 4938n2.4d | 100% | 15n 2.3d | 100% | 6763n1.2d | 100% | 4899n14.0d | 100% | 10767n
+startDate   -4.9h | 100% | 10777n---               38.7m | 100% | 10777n-4.0h | 100% | 10777n1.1d | 97% | 4938n2.3d | 100% | 15n 2.3d | 100% | 6763n1.2d | 100% | 4899n13.8d | 99% | 10767n
+found_time_ms-5.5h | 100% | 10777n-38.7m | 100% | 10777n---               -4.6h | 100% | 10777n1.1d | 97% | 4938n1.9d | 93% | 15n  2.3d | 100% | 6763n1.2d | 100% | 4899n13.7d | 99% | 10767n
+request_ts  -52.5m | 5% | 10777n4.0h | 100% | 10777n4.6h | 100% | 10777n---               1.3d | 100% | 4938n2.5d | 100% | 15n 2.5d | 100% | 6763n1.4d | 100% | 4899n13.9d | 100% | 10767n
+propose_ts  -1.2d | 97% | 4938n-1.1d | 97% | 4938n-1.1d | 97% | 4938n-1.3d | 100% | 4938n---               33.4m | 100% | 15n6.4h | 100% | 4871n2.2h | 100% | 4899n12.7h | 73% | 4938n
+dispute_ts  -2.4d | 100% | 15n-2.3d | 100% | 15n-1.9d | 93% | 15n -2.5d | 100% | 15n-33.4m | 100% | 15n---               20.5h | 100% | 13n16.1h | 100% | 13n32.9d | 60% | 15n 
+closed_time -2.3d | 100% | 6763n-2.3d | 100% | 6763n-2.3d | 100% | 6763n-2.5d | 100% | 6763n-6.4h | 100% | 4871n-20.5h | 100% | 13n---               -4.3h | 100% | 4834n5.3h | 10% | 6763n
+settle_ts   -1.2d | 100% | 4899n-1.2d | 100% | 4899n-1.2d | 100% | 4899n-1.4d | 100% | 4899n-2.2h | 100% | 4899n-16.1h | 100% | 13n4.3h | 100% | 4834n---               10.0h | 34% | 4899n
+endDate     -14.0d | 100% | 10767n-13.8d | 99% | 10767n-13.7d | 99% | 10767n-13.9d | 100% | 10767n-12.7h | 73% | 4938n-32.9d | 60% | 15n-5.3h | 10% | 6763n-10.0h | 34% | 4899n---               

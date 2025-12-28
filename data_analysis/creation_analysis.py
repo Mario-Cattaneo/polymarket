@@ -14,6 +14,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(message)s", date
 logger = logging.getLogger()
 
 # --- Database Credentials ---
+# NOTE: These environment variables must be set before running the script
 PG_HOST = os.getenv("PG_SOCKET")
 PG_PORT = os.getenv("POLY_PG_PORT")
 DB_NAME = os.getenv("POLY_DB")
@@ -59,7 +60,6 @@ def analyze_and_print_stats(name, df, id_column):
         print(f"- {name:<30}: 0 total, 0 unique, 0 duplicates")
         return
 
-    # Optimization: Drop NAs and convert to string once
     raw_series = df[id_column].dropna().astype(str).str.lower()
     total_count = len(raw_series)
     unique_count = raw_series.nunique()
@@ -72,6 +72,93 @@ def analyze_and_print_stats(name, df, id_column):
         is_valid = not value_counts.empty and value_counts.eq(2).all()
         print(f"  - Verification (all have 1 duplicate): {'PASS' if is_valid else 'FAIL'}")
 
+async def ensure_indexes(pool):
+    """Creates necessary indexes for performance if they do not already exist."""
+    logger.info("Ensuring critical indexes exist...")
+    async with pool.acquire() as conn:
+        # Index for markets_3 time filtering
+        await conn.execute(f"""
+            CREATE INDEX IF NOT EXISTS idx_{FORK_MARKET_TABLE}_time_cycle 
+            ON {FORK_MARKET_TABLE} (found_time_ms, exhaustion_cycle);
+        """)
+        
+        # Indexes for event tables (critical for time and event_name filtering)
+        event_tables = [
+            'events_conditional_tokens', 'events_ctf_exchange', 
+            'events_neg_risk_exchange', 'OOV2', 'events_managed_oracle'
+        ]
+        
+        for table in event_tables:
+            # Composite index for the most common WHERE clauses
+            await conn.execute(f"""
+                CREATE INDEX IF NOT EXISTS idx_{table}_filter_composite 
+                ON {table} (event_name, contract_address, timestamp_ms);
+            """)
+            # Index for the timestamp filter (used by build_time_clause)
+            await conn.execute(f"""
+                CREATE INDEX IF NOT EXISTS idx_{table}_timestamp 
+                ON {table} (timestamp_ms);
+            """)
+    logger.info("Index check complete.")
+
+async def fetch_request_prices(pool, time_clause, time_params):
+    """
+    Fetches RequestPrice events from OOV2 and events_managed_oracle, 
+    extracts the market_id from the ancillaryData using a CTE and regex.
+    """
+    logger.info("Fetching RequestPrice events and extracting market_id using CTE...")
+    
+    # The market_id is embedded as a string in the ancillaryData (part of the 'data' column).
+    query = f"""
+        WITH RequestEvents AS (
+            -- Combine RequestPrice events from both tables
+            SELECT
+                transaction_hash,
+                block_number,
+                timestamp_ms,
+                contract_address,
+                topics[2] AS uma_identifier,
+                data
+            FROM OOV2
+            WHERE event_name = 'RequestPrice'
+            UNION ALL
+            SELECT
+                transaction_hash,
+                block_number,
+                timestamp_ms,
+                contract_address,
+                topics[2] AS uma_identifier,
+                data
+            FROM events_managed_oracle
+            WHERE event_name = 'RequestPrice'
+        )
+        SELECT
+            t.transaction_hash,
+            t.block_number,
+            t.timestamp_ms,
+            t.contract_address,
+            t.uma_identifier,
+            -- Extract the market_id (a string of digits) from the ancillaryData in the 'data' field
+            (regexp_match(
+                -- Decode the hex string (starting after '0x') to bytea, then convert to UTF-8 text
+                decode(substring(t.data from 3), 'hex'),
+                'market_id: (\d+)'
+            ))[1] AS extracted_market_id
+        FROM
+            RequestEvents AS t
+        WHERE
+            -- Apply time filter here. The new indexes on timestamp_ms will speed up the CTE.
+            t.timestamp_ms IS NOT NULL {time_clause.replace('timestamp_ms', 't.timestamp_ms')}
+            -- Filter out rows where market_id extraction failed
+            AND (regexp_match(
+                decode(substring(t.data from 3), 'hex'),
+                'market_id: (\d+)'
+            ))[1] IS NOT NULL
+    """
+    
+    return await fetch_data(pool, query, time_params)
+
+
 # ----------------------------------------------------------------
 # 3. MAIN EXECUTION
 # ----------------------------------------------------------------
@@ -79,6 +166,9 @@ def analyze_and_print_stats(name, df, id_column):
 async def main():
     pool = await asyncpg.create_pool(user=DB_USER, password=DB_PASS, database=DB_NAME, host=PG_HOST, port=PG_PORT)
     logger.info("Successfully connected to the database.")
+    
+    # --- CRITICAL PERFORMANCE STEP: Ensure Indexes ---
+    await ensure_indexes(pool)
 
     # --- Step 0: Time Filter Setup ---
     def build_time_clause(column_name, current_params):
@@ -95,14 +185,55 @@ async def main():
 
     logger.info("Fetching all required data...")
 
+    # Prepare time clause for all fetches
+    t_all, p_all = build_time_clause("timestamp_ms", [])
+    
     # 1. Fetch Markets (markets_3)
-    # UPDATED: exhaustion_cycle > 0
     logger.info(f"Fetching {FORK_MARKET_TABLE} (exhaustion_cycle > 0)...")
-    markets_base = f"SELECT condition_id, message ->> 'questionID' as question_id FROM {FORK_MARKET_TABLE} WHERE exhaustion_cycle > 0"
+    markets_base = f"SELECT market_id, condition_id, question_id, message ->> 'questionID' as json_question_id FROM {FORK_MARKET_TABLE} WHERE exhaustion_cycle > 0"
     t_mk, p_mk = build_time_clause("found_time_ms", [])
     clob_df = await fetch_data(pool, markets_base + t_mk, p_mk)
     
-    # 2. Fetch Ground Truth (CSV)
+    # 2. Fetch RequestPrice Events (NEW STEP)
+    request_price_df = await fetch_request_prices(pool, t_all, p_all)
+    
+    # --- Step 1: Match RequestPrice with Orderbooks (NEW STEP) ---
+    logger.info("Matching RequestPrice events with Orderbooks...")
+    
+    request_price_df.rename(columns={'extracted_market_id': 'market_id'}, inplace=True)
+    
+    matched_df = pd.merge(
+        clob_df, 
+        request_price_df, 
+        on='market_id', 
+        how='inner', 
+        suffixes=('_market', '_request')
+    )
+    
+    # --- Step 2: Analysis of Matched Data (NEW STEP) ---
+    print("\n" + "="*80)
+    print("REQUEST PRICE TO ORDERBOOK MATCHING ANALYSIS")
+    print("="*80)
+    
+    total_requests = len(request_price_df)
+    total_markets = len(clob_df)
+    total_matches = len(matched_df)
+    
+    print(f"- Total RequestPrice Events Fetched: {total_requests:,}")
+    print(f"- Total Orderbook Markets Fetched:   {total_markets:,}")
+    print(f"- Total Matches (on market_id):      {total_matches:,}")
+    
+    if total_requests > 0:
+        match_rate = (total_matches / total_requests) * 100
+        print(f"- Match Rate (Requests -> Markets):  {match_rate:.2f}%")
+
+    analyze_and_print_stats("Matched Markets (market_id)", matched_df, 'market_id')
+    
+    if not matched_df.empty:
+        print("\nSample Matched Data (Market ID, Market Question ID, Request Tx Hash):")
+        print(matched_df[['market_id', 'question_id', 'transaction_hash']].head())
+
+    # 3. Fetch Ground Truth (CSV)
     try:
         logger.info(f"Loading CSV: {GAMMA_MARKETS_FILE}...")
         ground_orderbooks_df = pd.read_csv(GAMMA_MARKETS_FILE, usecols=['conditionId', 'questionID'])
@@ -112,7 +243,7 @@ async def main():
         logger.error("Ground truth file not found.")
         ground_orderbooks_df = pd.DataFrame()
 
-    # 3. Fetch Condition Preparation
+    # 4. Fetch Condition Preparation
     logger.info("Fetching ConditionPreparation events...")
     cond_prep_base = """
         SELECT topics[2] as condition_id, '0x' || substring(topics[3] from 27) as oracle, topics[4] as question_id 
@@ -123,7 +254,7 @@ async def main():
     t_cp, p_cp = build_time_clause("timestamp_ms", [ADDR['conditional_tokens']])
     cond_prep_df = await fetch_data(pool, cond_prep_base + t_cp, p_cp)
 
-    # 4. Fetch Exchange Events
+    # 5. Fetch Exchange Events
     logger.info("Fetching Exchange TokenRegistered events...")
     async def fetch_exchange(table, addr):
         base = f"""
@@ -140,11 +271,11 @@ async def main():
 
     logger.info("Data fetched. Starting analysis...")
 
-    # --- Step 2: Partition Data ---
+    # --- Step 3: Partition Data (Original Step 2) ---
     prep_partitions = {oracle: group for oracle, group in cond_prep_df.groupby('oracle')}
     exchange_partitions = {'ctfe_exchange': exchange_ctfe_df, 'negrisk_exchange': exchange_negrisk_df}
 
-    # --- Step 3: Analysis ---
+    # --- Step 4: Analysis (Original Step 3) ---
     print("\n" + "="*80)
     print("INITIAL ANALYSIS: UNIQUE AND DUPLICATE COUNTS")
     print("="*80)
@@ -163,7 +294,7 @@ async def main():
     for oracle, df in prep_partitions.items():
         analyze_and_print_stats(f"Prep (Oracle: {oracle[:10]}...)", df, 'question_id')
 
-    # --- Step 4: Intersections ---
+    # --- Step 5: Intersections (Original Step 4) ---
     logger.info("Calculating intersections (this may take a moment)...")
     
     # Helper to safely convert to set
@@ -224,6 +355,6 @@ async def main():
 
 if __name__ == "__main__":
     if not all([PG_HOST, DB_NAME, DB_USER, DB_PASS]):
-        logger.error("Database credentials not set.")
+        logger.error("Database credentials not set. Please set PG_SOCKET, POLY_PG_PORT, POLY_DB, POLY_DB_CLI, and POLY_DB_CLI_PASS.")
     else:
         asyncio.run(main())

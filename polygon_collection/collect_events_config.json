@@ -32,28 +32,28 @@
           "signature": "FeeCharged(address,uint256,uint256)",
           "collected_range": [
             79172085,
-            80818670
+            80919757
           ]
         },
         {
           "signature": "NewAdmin(address,address)",
           "collected_range": [
             79172085,
-            80818670
+            80919757
           ]
         },
         {
           "signature": "NewOperator(address,address)",
           "collected_range": [
             79172085,
-            80818670
+            80919757
           ]
         },
         {
           "signature": "OrderCancelled(bytes32)",
           "collected_range": [
             79172085,
-            80818670
+            80919757
           ]
         },
         {
@@ -61,7 +61,7 @@
           "init_batch_size": 350,
           "collected_range": [
             79172085,
-            80818670
+            80919757
           ]
         },
         {

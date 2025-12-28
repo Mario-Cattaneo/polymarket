@@ -1,130 +1,28 @@
-2025-12-26 15:02:43 | Successfully connected to the database.
-2025-12-26 15:02:43 | Fetching all required data...
-2025-12-26 15:02:43 | Fetching markets_3 (exhaustion_cycle > 0)...
-2025-12-26 15:03:01 | Query fetched 38,694 rows in 17.51s
-2025-12-26 15:03:01 | Loading CSV: /data-hdd/orderbookThesis/data/csv/gamma_markets.csv...
-2025-12-26 15:03:01 | Loaded 254,565 records from CSV
-2025-12-26 15:03:01 | Fetching ConditionPreparation events...
-2025-12-26 15:03:19 | Query fetched 21,050 rows in 18.07s
-2025-12-26 15:03:19 | Fetching Exchange TokenRegistered events...
-2025-12-26 15:03:36 | Query fetched 20,598 rows in 16.17s
-2025-12-26 15:03:38 | Query fetched 7,430 rows in 2.71s
-2025-12-26 15:03:38 | Data fetched. Starting analysis...
-2025-12-26 15:03:39 | Calculating intersections (this may take a moment)...
-2025-12-26 15:03:39 | Analysis complete.
-
-================================================================================
-INITIAL ANALYSIS: UNIQUE AND DUPLICATE COUNTS
-================================================================================
-
-[A] Condition ID Counts
-- Orderbook (DB)                : 38,694 total, 19,347 unique, 19,347 duplicates
-- Ground Orderbook (CSV)        : 254,565 total, 254,565 unique, 0 duplicates
-- ctfe_exchange                 : 20,598 total, 10,299 unique, 10,299 duplicates
-  - Verification (all have 1 duplicate): PASS
-- negrisk_exchange              : 7,430 total, 3,715 unique, 3,715 duplicates
-  - Verification (all have 1 duplicate): PASS
-- Prep (Oracle: 0x1a13545b...)  : 8 total, 8 unique, 0 duplicates
-- Prep (Oracle: 0x48b88fe2...)  : 4 total, 4 unique, 0 duplicates
-- Prep (Oracle: 0x58e1745b...)  : 9,508 total, 9,508 unique, 0 duplicates
-- Prep (Oracle: 0x65070be9...)  : 7,815 total, 7,815 unique, 0 duplicates
-- Prep (Oracle: 0xd91e80cf...)  : 3,715 total, 3,715 unique, 0 duplicates
-
-[B] Question ID Counts
-- Orderbook (DB)                : 38,694 total, 19,347 unique, 19,347 duplicates
-- Ground Orderbook (CSV)        : 252,603 total, 252,603 unique, 0 duplicates
-- Prep (Oracle: 0x1a13545b...)  : 8 total, 8 unique, 0 duplicates
-- Prep (Oracle: 0x48b88fe2...)  : 4 total, 4 unique, 0 duplicates
-- Prep (Oracle: 0x58e1745b...)  : 9,508 total, 9,508 unique, 0 duplicates
-- Prep (Oracle: 0x65070be9...)  : 7,815 total, 7,815 unique, 0 duplicates
-- Prep (Oracle: 0xd91e80cf...)  : 3,715 total, 3,715 unique, 0 duplicates
-
-================================================================================
-ORDERBOOK SOURCE COMPARISON
-================================================================================
-- DB Orderbook ∩ Ground (CSV) [Question IDs]: 19,319
-- DB Orderbook ∩ Ground (CSV) [Condition IDs]: 19,319
-
-================================================================================
-INTERSECTION ANALYSIS FOR: ORDERBOOK (DB)
-================================================================================
-
-[A] Shared Unique Question IDs (vs Preparation):
-- Orderbook (DB) ∩ Prep (Oracle: 0x1a13545b...): 0 shared
-- Orderbook (DB) ∩ Prep (Oracle: 0x48b88fe2...): 0 shared
-- Orderbook (DB) ∩ Prep (Oracle: 0x58e1745b...): 9,234 shared
-- Orderbook (DB) ∩ Prep (Oracle: 0x65070be9...): 7,478 shared
-- Orderbook (DB) ∩ Prep (Oracle: 0xd91e80cf...): 2,302 shared
-
-[B] Shared Unique Condition IDs:
-
-  [B.1] Orderbook (DB) ∩ ConditionPreparation Partitions:
-  - Orderbook (DB) ∩ Prep (Oracle: 0x1a13545b...): 0 shared
-  - Orderbook (DB) ∩ Prep (Oracle: 0x48b88fe2...): 0 shared
-  - Orderbook (DB) ∩ Prep (Oracle: 0x58e1745b...): 9,234 shared
-  - Orderbook (DB) ∩ Prep (Oracle: 0x65070be9...): 7,478 shared
-  - Orderbook (DB) ∩ Prep (Oracle: 0xd91e80cf...): 2,302 shared
-
-  [B.2] Orderbook (DB) ∩ Exchange Partitions:
-  - Orderbook (DB) ∩ ctfe_exchange: 9,896 shared
-  - Orderbook (DB) ∩ negrisk_exchange: 2,302 shared
-
-  [B.3] Exchange ∩ Preparation Partitions:
-  - ctfe_exchange ∩ Prep (Oracle: 0x1a13545b...): 0 shared
-  - ctfe_exchange ∩ Prep (Oracle: 0x48b88fe2...): 0 shared
-  - ctfe_exchange ∩ Prep (Oracle: 0x58e1745b...): 2,487 shared
-  - ctfe_exchange ∩ Prep (Oracle: 0x65070be9...): 7,812 shared
-  - ctfe_exchange ∩ Prep (Oracle: 0xd91e80cf...): 0 shared
-  - negrisk_exchange ∩ Prep (Oracle: 0x1a13545b...): 0 shared
-  - negrisk_exchange ∩ Prep (Oracle: 0x48b88fe2...): 0 shared
-  - negrisk_exchange ∩ Prep (Oracle: 0x58e1745b...): 0 shared
-  - negrisk_exchange ∩ Prep (Oracle: 0x65070be9...): 0 shared
-  - negrisk_exchange ∩ Prep (Oracle: 0xd91e80cf...): 3,715 shared
-
-  [B.4] Three-Way Intersections (Orderbook (DB) ∩ Exchange ∩ Preparation):
-  - Orderbook (DB) ∩ ctfe_exchange ∩ Prep (Oracle: 0x1a13545b...): 0 shared
-  - Orderbook (DB) ∩ ctfe_exchange ∩ Prep (Oracle: 0x48b88fe2...): 0 shared
-  - Orderbook (DB) ∩ ctfe_exchange ∩ Prep (Oracle: 0x58e1745b...): 2,418 shared
-  - Orderbook (DB) ∩ ctfe_exchange ∩ Prep (Oracle: 0x65070be9...): 7,478 shared
-  - Orderbook (DB) ∩ ctfe_exchange ∩ Prep (Oracle: 0xd91e80cf...): 0 shared
-  - Orderbook (DB) ∩ negrisk_exchange ∩ Prep (Oracle: 0x1a13545b...): 0 shared
-  - Orderbook (DB) ∩ negrisk_exchange ∩ Prep (Oracle: 0x48b88fe2...): 0 shared
-  - Orderbook (DB) ∩ negrisk_exchange ∩ Prep (Oracle: 0x58e1745b...): 0 shared
-  - Orderbook (DB) ∩ negrisk_exchange ∩ Prep (Oracle: 0x65070be9...): 0 shared
-  - Orderbook (DB) ∩ negrisk_exchange ∩ Prep (Oracle: 0xd91e80cf...): 2,302 shared
-
-================================================================================
-INTERSECTION ANALYSIS FOR: GROUND ORDERBOOK (CSV)
-================================================================================
-
-[A] Shared Unique Question IDs (vs Preparation):
-- Ground Orderbook (CSV) ∩ Prep (Oracle: 0x1a13545b...): 0 shared
-- Ground Orderbook (CSV) ∩ Prep (Oracle: 0x48b88fe2...): 0 shared
-- Ground Orderbook (CSV) ∩ Prep (Oracle: 0x58e1745b...): 9,507 shared
-- Ground Orderbook (CSV) ∩ Prep (Oracle: 0x65070be9...): 7,810 shared
-- Ground Orderbook (CSV) ∩ Prep (Oracle: 0xd91e80cf...): 2,327 shared
-
-[B] Shared Unique Condition IDs:
-
-  [B.1] Ground Orderbook (CSV) ∩ ConditionPreparation Partitions:
-  - Ground Orderbook (CSV) ∩ Prep (Oracle: 0x1a13545b...): 0 shared
-  - Ground Orderbook (CSV) ∩ Prep (Oracle: 0x48b88fe2...): 0 shared
-  - Ground Orderbook (CSV) ∩ Prep (Oracle: 0x58e1745b...): 9,507 shared
-  - Ground Orderbook (CSV) ∩ Prep (Oracle: 0x65070be9...): 7,810 shared
-  - Ground Orderbook (CSV) ∩ Prep (Oracle: 0xd91e80cf...): 2,327 shared
-
-  [B.2] Ground Orderbook (CSV) ∩ Exchange Partitions:
-  - Ground Orderbook (CSV) ∩ ctfe_exchange: 10,297 shared
-  - Ground Orderbook (CSV) ∩ negrisk_exchange: 2,327 shared
-
-  [B.4] Three-Way Intersections (Ground Orderbook (CSV) ∩ Exchange ∩ Preparation):
-  - Ground Orderbook (CSV) ∩ ctfe_exchange ∩ Prep (Oracle: 0x1a13545b...): 0 shared
-  - Ground Orderbook (CSV) ∩ ctfe_exchange ∩ Prep (Oracle: 0x48b88fe2...): 0 shared
-  - Ground Orderbook (CSV) ∩ ctfe_exchange ∩ Prep (Oracle: 0x58e1745b...): 2,487 shared
-  - Ground Orderbook (CSV) ∩ ctfe_exchange ∩ Prep (Oracle: 0x65070be9...): 7,810 shared
-  - Ground Orderbook (CSV) ∩ ctfe_exchange ∩ Prep (Oracle: 0xd91e80cf...): 0 shared
-  - Ground Orderbook (CSV) ∩ negrisk_exchange ∩ Prep (Oracle: 0x1a13545b...): 0 shared
-  - Ground Orderbook (CSV) ∩ negrisk_exchange ∩ Prep (Oracle: 0x48b88fe2...): 0 shared
-  - Ground Orderbook (CSV) ∩ negrisk_exchange ∩ Prep (Oracle: 0x58e1745b...): 0 shared
-  - Ground Orderbook (CSV) ∩ negrisk_exchange ∩ Prep (Oracle: 0x65070be9...): 0 shared
-  - Ground Orderbook (CSV) ∩ negrisk_exchange ∩ Prep (Oracle: 0xd91e80cf...): 2,327 shared
+/home/mario_cattaneo/polymarket/data_analysis/./creation_analysis.py:157: SyntaxWarning: invalid escape sequence '\d'
+  """
+/home/mario_cattaneo/polymarket/data_analysis/./creation_analysis.py:157: SyntaxWarning: invalid escape sequence '\d'
+  """
+2025-12-28 14:55:53 | Successfully connected to the database.
+2025-12-28 14:55:53 | Ensuring critical indexes exist...
+Traceback (most recent call last):
+  File "/home/mario_cattaneo/polymarket/data_analysis/./creation_analysis.py", line 360, in <module>
+    asyncio.run(main())
+  File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 674, in run_until_complete
+    self.run_forever()
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 641, in run_forever
+    self._run_once()
+  File "/usr/lib/python3.12/asyncio/base_events.py", line 1949, in _run_once
+    event_list = self._selector.select(timeout)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/selectors.py", line 468, in select
+    fd_event_list = self._selector.poll(timeout, max_ev)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/asyncio/runners.py", line 157, in _on_sigint
+    raise KeyboardInterrupt()
+KeyboardInterrupt
