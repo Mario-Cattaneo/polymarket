@@ -345,19 +345,30 @@ class EventCollector:
         # 4. Idle
         return self._build_dummy_request()
 
-    def _build_request(self, req_id, start, end):
+    def _build_request(self, req_id_tuple, start, end):
+        # FIX: Include current_contract_address in the ID to prevent collisions
+        # between different contracts sharing the same HttpManager
+        unique_req_id = (self.current_contract_address, ) + req_id_tuple
+        
         payload = {
             "jsonrpc": "2.0", "method": "eth_getLogs", "id": 1,
             "params": [{"address": self.current_contract_address, "fromBlock": hex(start), "toBlock": hex(end), "topics": [self.current_topic]}]
         }
-        return req_id, self.rpc_url, Method.POST, {"Content-Type": "application/json"}, json.dumps(payload).encode()
+        return unique_req_id, self.rpc_url, Method.POST, {"Content-Type": "application/json"}, json.dumps(payload).encode()
 
     def _build_dummy_request(self):
-        return (0, 0, "ignore"), self.rpc_url, Method.POST, None, None
+        # FIX: Match the tuple size (4 elements)
+        return (None, 0, 0, "ignore"), self.rpc_url, Method.POST, None, None
 
     async def on_response(self, req_id: Any, content: bytes, status: int, headers: Any, rtt: float) -> bool:
-        start, end, req_type = req_id
+        # FIX: Unpack 4 elements
+        addr, start, end, req_type = req_id
+        
         if req_type == "ignore": return True
+
+        # FIX: Zombie Check - Ignore responses from previous contracts
+        if addr != self.current_contract_address:
+            return True
 
         try:
             response = json.loads(content)
@@ -445,8 +456,15 @@ class EventCollector:
             self.avg_logs_per_block = (ALPHA * logs_per_block) + ((1 - ALPHA) * self.avg_logs_per_block)
 
     async def on_exception(self, req_id: Any, e: Exception) -> bool:
-        start, end, req_type = req_id
+        # FIX: Unpack 4 elements
+        addr, start, end, req_type = req_id
+        
         if req_type == "ignore": return True
+        
+        # FIX: Zombie Check
+        if addr != self.current_contract_address:
+            return True
+
         logger.error(f"Exception {start}-{end}: {e}")
         self._handle_failure(start, end, req_type)
         return True

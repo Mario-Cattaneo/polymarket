@@ -5,6 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import logging
+import time
 from datetime import datetime, timezone
 
 # ----------------------------------------------------------------
@@ -29,26 +30,30 @@ ADDR = {
     'conditional_tokens': "0x4d97dcd97ec945f40cf65f87097ace5ea0476045".lower(),
 }
 
-# The 3 Oracles of interest based on your logs
 INTERESTING_ORACLES = [
     "0x58e1745b", # Oracle A
     "0x65070be9", # Oracle B
-    "0xd91e80cf"  # Oracle C (NegRisk adapter usually)
+    "0xd91e80cf"  # Oracle C
 ]
 
-# --- Time Filtering (Matches your logs) ---
+# --- Time Filtering ---
 FILTER_BY_TIME = True
-START_TIME = 1766146619712  # From your logs
-END_TIME = 1766673099000    # From your logs
+START_TIME = 1766146619712  # Dec-19-2025
+END_TIME = 1766673099000    # Dec-25-2025
 
 # ----------------------------------------------------------------
 # 2. DATA FETCHING
 # ----------------------------------------------------------------
 
 async def fetch_data(pool, query, params=[]):
+    """Fetches data with timing logging."""
     try:
         async with pool.acquire() as connection:
+            start = time.time()
             rows = await connection.fetch(query, *params)
+            elapsed = time.time() - start
+            if elapsed > 1.0:
+                logger.info(f"Query fetched {len(rows):,} rows in {elapsed:.2f}s")
             return pd.DataFrame([dict(row) for row in rows]) if rows else pd.DataFrame()
     except Exception as e:
         logger.error(f"SQL Error: {e}")
@@ -58,7 +63,6 @@ async def main():
     pool = await asyncpg.create_pool(user=DB_USER, password=DB_PASS, database=DB_NAME, host=PG_HOST, port=PG_PORT)
     logger.info("Connected to database.")
 
-    # --- Helper for Time Clauses ---
     def build_time_clause(column_name, current_params):
         if not FILTER_BY_TIME: return "", current_params
         clauses = []
@@ -71,22 +75,35 @@ async def main():
             clauses.append(f"{column_name} <= ${len(new_params)}")
         return (" AND " + " AND ".join(clauses) if clauses else ""), new_params
 
-    # 1. Fetch Orderbook (Markets 3)
-    logger.info("Fetching Orderbook data...")
-    q_ob = f"SELECT condition_id, found_time_ms as timestamp FROM {FORK_MARKET_TABLE} WHERE exhaustion_cycle != 0"
+    # 1. Fetch Orderbook
+    # FILTER: exhaustion_cycle > 0
+    logger.info("Fetching Orderbook data (exhaustion_cycle > 0)...")
+    q_ob = f"SELECT condition_id, found_time_ms as timestamp FROM {FORK_MARKET_TABLE} WHERE exhaustion_cycle > 0"
     t_ob, p_ob = build_time_clause("found_time_ms", [])
     df_ob = await fetch_data(pool, q_ob + t_ob, p_ob)
 
-    # 2. Fetch CTF (Condition Preparation)
-    logger.info("Fetching CTF (ConditionPreparation) data...")
-    q_ctf = "SELECT topics[2] as condition_id, timestamp_ms as timestamp, '0x' || substring(topics[3] from 27) as oracle FROM events_conditional_tokens WHERE event_name = 'ConditionPreparation' AND LOWER(contract_address) = $1"
+    # 2. Fetch CTF
+    # EXPLICIT FILTER: LOWER(contract_address) = $1
+    logger.info("Fetching CTF data...")
+    q_ctf = """
+        SELECT topics[2] as condition_id, timestamp_ms as timestamp, '0x' || substring(topics[3] from 27) as oracle 
+        FROM events_conditional_tokens 
+        WHERE event_name = 'ConditionPreparation' 
+        AND LOWER(contract_address) = $1
+    """
     t_ctf, p_ctf = build_time_clause("timestamp_ms", [ADDR['conditional_tokens']])
     df_ctf = await fetch_data(pool, q_ctf + t_ctf, p_ctf)
 
     # 3. Fetch Exchanges
+    # EXPLICIT FILTER: LOWER(contract_address) = $1
     logger.info("Fetching Exchange data...")
     async def fetch_ex(table, addr):
-        q = f"SELECT topics[4] as condition_id, timestamp_ms as timestamp FROM {table} WHERE event_name = 'TokenRegistered' AND LOWER(contract_address) = $1"
+        q = f"""
+            SELECT topics[4] as condition_id, timestamp_ms as timestamp 
+            FROM {table} 
+            WHERE event_name = 'TokenRegistered' 
+            AND LOWER(contract_address) = $1
+        """
         t, p = build_time_clause("timestamp_ms", [addr])
         return await fetch_data(pool, q + t, p)
 
@@ -97,58 +114,45 @@ async def main():
     logger.info("Data fetching complete. Processing...")
 
     # ----------------------------------------------------------------
-    # 3. DATA PROCESSING
+    # 3. DATA PROCESSING & PLOTTING
     # ----------------------------------------------------------------
 
     def prepare_cdf_data(df, label):
-        if df.empty:
-            return pd.DataFrame(columns=['timestamp', 'count', 'label'])
+        if df.empty: return pd.DataFrame(columns=['datetime', 'count', 'label'])
         
-        # 1. Keep only unique condition_ids (first occurrence by time)
+        # Optimization: Sort by timestamp first
         df_sorted = df.sort_values('timestamp')
+        
+        # Drop duplicates keeping the first occurrence (earliest time)
         df_unique = df_sorted.drop_duplicates(subset='condition_id', keep='first').copy()
         
-        # 2. Convert timestamp to datetime
+        # Convert to datetime
         df_unique['datetime'] = pd.to_datetime(df_unique['timestamp'], unit='ms', utc=True)
         
-        # 3. Create cumulative count
+        # Create cumulative count (1 to N)
         df_unique['count'] = range(1, len(df_unique) + 1)
         df_unique['label'] = label
         
         return df_unique[['datetime', 'count', 'label']]
 
-    # --- Prepare Groups ---
-    
-    # 1. Orderbook
+    # Prepare Data Groups
     plot_data = {'Orderbook (DB)': prepare_cdf_data(df_ob, 'Orderbook')}
-
-    # 2. CTF (All)
     plot_data['CTF (All Preps)'] = prepare_cdf_data(df_ctf, 'CTF (All)')
 
-    # 3. The 3 Oracles
     for oracle_hash in INTERESTING_ORACLES:
-        # Filter CTF data by oracle string (partial match)
         oracle_df = df_ctf[df_ctf['oracle'].str.startswith(oracle_hash)]
         plot_data[f'Oracle {oracle_hash[:6]}...'] = prepare_cdf_data(oracle_df, f'Oracle {oracle_hash[:6]}')
 
-    # 4. CTF Exchange (Alone)
     plot_data['CTF Exchange'] = prepare_cdf_data(df_ctfe, 'CTF Exchange')
-
-    # 5. NegRisk Exchange (Alone)
     plot_data['NegRisk Exchange'] = prepare_cdf_data(df_neg, 'NegRisk Exchange')
 
-    # 6. Combined Exchanges
     df_combined = pd.concat([df_ctfe, df_neg])
     plot_data['Combined Exchanges'] = prepare_cdf_data(df_combined, 'Combined Exchanges')
 
-    # ----------------------------------------------------------------
-    # 4. PLOTTING
-    # ----------------------------------------------------------------
-    
+    # Plotting
     logger.info("Generating Plot...")
     plt.figure(figsize=(14, 8))
     
-    # Define styles/colors for clarity
     styles = {
         'Orderbook (DB)':       {'color': 'black', 'linewidth': 2.5, 'linestyle': '-'},
         'CTF (All Preps)':      {'color': 'gray',  'linewidth': 2,   'linestyle': '--'},
@@ -156,10 +160,8 @@ async def main():
         'CTF Exchange':         {'color': 'cyan',  'linewidth': 1,   'linestyle': ':'},
         'NegRisk Exchange':     {'color': 'navy',  'linewidth': 1,   'linestyle': ':'},
     }
-    # Default style for oracles
     oracle_colors = ['red', 'orange', 'purple']
 
-    # Plot lines
     oracle_idx = 0
     for label, df in plot_data.items():
         if df.empty:
@@ -167,28 +169,23 @@ async def main():
             continue
             
         style = styles.get(label, {})
-        
-        # Assign colors to oracles dynamically
         if 'Oracle' in label:
             style = {'color': oracle_colors[oracle_idx % len(oracle_colors)], 'linewidth': 1.5, 'linestyle': '-.'}
             oracle_idx += 1
 
         plt.plot(df['datetime'], df['count'], label=f"{label} (n={len(df):,})", **style)
 
-    # Formatting
     plt.title('Cumulative Arrival of Unique Condition IDs (CDF)', fontsize=16)
     plt.xlabel('Time (UTC)', fontsize=12)
     plt.ylabel('Cumulative Count of Unique Conditions', fontsize=12)
     plt.grid(True, which='both', linestyle='--', alpha=0.6)
     plt.legend(loc='upper left', fontsize=10)
     
-    # Format X-Axis Date
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
     plt.gca().xaxis.set_major_locator(mdates.AutoDateLocator())
     plt.gcf().autofmt_xdate()
 
-    # Save and Show
-    output_file = "condition_ids_cdf.png"
+    output_file = "condition_ids_cdf_optimized.png"
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     logger.info(f"Plot saved to {output_file}")
     plt.show()
