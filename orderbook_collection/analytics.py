@@ -14,8 +14,8 @@ SERVER_BOOK_INSERTER_ID = "server_book_inserter"
 RTT_INSERTER_ID = "analytics_rtt_inserter"
 
 MISSED_UPDATER_ID = "missed_count_updater"
-# UPDATED: markets_3
-MISSED_UPDATE_STMT = "UPDATE markets_3 SET missed_before_gone = $1 WHERE asset_id = $2"
+# *** CORRECTED LINE: Updated to use 'markets_4' and 'token_id' ***
+MISSED_UPDATE_STMT = "UPDATE markets_4 SET missed_before_gone = $1 WHERE token_id = $2"
 
 SERIALIZER_ID = "serializer"
 
@@ -170,12 +170,10 @@ class Analytics:
 
     def _start_db_inserters(self):
         self._log("start: Starting database inserters...", "INFO")
-        # UPDATED: buffer_server_book_2
         self._running_db_tasks[SERVER_BOOK_INSERTER_ID] = self._db_cli.copy_persistent(
             task_id=SERVER_BOOK_INSERTER_ID, table_name="buffer_server_book_2" , params_buffer=self._server_book_rows,
             signal=self._server_book_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
         )
-        # UPDATED: buffer_analytics_rtt_2
         self._running_db_tasks[RTT_INSERTER_ID] = self._db_cli.copy_persistent(
             task_id=RTT_INSERTER_ID, table_name="buffer_analytics_rtt_2", params_buffer=self._rtt_rows,
             signal=self._rtt_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure

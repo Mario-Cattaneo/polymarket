@@ -43,17 +43,10 @@ partition_buffer_count = 2
 # --- Application Scheduler ---
 MAINTENANCE_INTERVAL_SECONDS = 7200
 
-# List of all tables that require partition management.
-# REMOVED: buffer_markets_2 (to prevent rapid DB growth)
 PARTITIONED_TABLES = [
-    'buffer_books_2',
-    'buffer_price_changes_2',
-    'buffer_last_trade_prices_2',
-    'buffer_tick_changes_2',
-    'buffer_server_book_2',
-    'buffer_markets_rtt_2',
-    'buffer_analytics_rtt_2',
-    'buffer_events_connections_2',
+    'buffer_books_2', 'buffer_price_changes_2', 'buffer_last_trade_prices_2',
+    'buffer_tick_changes_2', 'buffer_server_book_2', 'buffer_markets_rtt_2',
+    'buffer_analytics_rtt_2', 'buffer_events_connections_2',
 ]
 
 
@@ -61,6 +54,7 @@ PARTITIONED_TABLES = [
 # DATABASE INITIALIZATION SCRIPT
 # ====================================================================
 
+# --- REFACTORED: Updated schema with 'events' and 'markets_4' tables ---
 SETUP_SCHEMA_STMT = f"""
 -- Part 1: Schema and Function Definition
 DO $$ BEGIN
@@ -68,21 +62,27 @@ DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'event') THEN CREATE TYPE EVENT AS ENUM ('price_change', 'last_trade_price', 'book'); END IF;
 END$$;
 
--- UPDATED: markets_3 (State table, NOT partitioned)
-CREATE TABLE IF NOT EXISTS markets_3 (
-    found_index BIGINT, 
-    found_time_ms BIGINT, 
-    asset_id TEXT PRIMARY KEY, 
-    exhaustion_cycle BIGINT, 
-    market_id TEXT, 
-    condition_id TEXT, 
-    question_id TEXT, 
-    negrisk_id TEXT, 
-    "offset" BIGINT, 
-    closed_time BIGINT DEFAULT NULL, 
-    missed_before_gone BIGINT DEFAULT NULL,
-    message jsonb 
+-- NEW: events table to store the raw event payload
+CREATE TABLE IF NOT EXISTS events (
+    event_id TEXT PRIMARY KEY,
+    found_time_ms BIGINT,
+    message jsonb
 );
+
+-- UPDATED: markets_4 table, lighter and references the events table
+CREATE TABLE IF NOT EXISTS markets_4 (
+    token_id TEXT PRIMARY KEY,
+    market_id TEXT,
+    condition_id TEXT,
+    question_id TEXT,
+    event_id TEXT REFERENCES events(event_id),
+    found_index BIGINT,
+    found_time_ms BIGINT,
+    closed_time_ms BIGINT DEFAULT NULL,
+    exhaustion_cycle BIGINT,
+    missed_before_gone BIGINT DEFAULT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_markets_4_event_id ON markets_4(event_id);
 
 -- Buffer tables (Partitioned by time)
 CREATE TABLE IF NOT EXISTS buffer_books_2 (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, message jsonb ) PARTITION BY RANGE (found_time_ms);
@@ -145,7 +145,7 @@ $$;
 
 TEARDOWN_SCHEMA_STMT = """
     DROP TABLE IF EXISTS
-        markets_3, 
+        markets_4, events, -- Updated tables
         buffer_books_2, buffer_price_changes_2, buffer_last_trade_prices_2,
         buffer_tick_changes_2, buffer_server_book_2, buffer_markets_rtt_2,
         buffer_analytics_rtt_2, buffer_events_connections_2,
@@ -156,7 +156,7 @@ TEARDOWN_SCHEMA_STMT = """
 """
 
 # ====================================================================
-# MONITORING AND MAINTENANCE
+# MONITORING AND MAINTENANCE (No changes needed here)
 # ====================================================================
 
 monitor_sleep = 2
@@ -237,7 +237,7 @@ async def partition_maintenance_worker(_db_cli: db_cli.DatabaseManager):
 
 
 # ====================================================================
-# MAIN EXECUTION
+# MAIN EXECUTION (No changes needed here)
 # ====================================================================
 
 async def start_collection():

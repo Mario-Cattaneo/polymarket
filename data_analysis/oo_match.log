@@ -1,37 +1,90 @@
-2025-12-28 22:30:48 - INFO - Initializing database connection...
-2025-12-28 22:30:48 - INFO - Fetching data from markets_3, oov2, and events_managed_oracle...
-2025-12-28 22:30:50 - INFO - Processing and structuring data for analysis...
-2025-12-28 22:30:58 - INFO - Database connection closed.
+2025-12-29 16:49:38 - INFO - Initializing database connection...
+2025-12-29 16:49:38 - INFO - Fetching data from markets_4, events, oov2, and events_managed_oracle...
+2025-12-29 16:49:39 - INFO - Processing and structuring data for analysis...
+2025-12-29 16:49:46 - INFO - Database connection closed.
 
 ============================================================
 1. Initial Data Summary & Match Rates
 ============================================================
 
 --- Total Counts ---
-- Total Order Books (markets_3): 29,779
-- Total DisputePrice Events (from all oracles): 227
-- Total ProposePrice Events (from all oracles): 55,484
-- Total RequestPrice Events (from all oracles): 64,761
-- Total Settle Events (from all oracles): 55,473
+- Total Order Books (markets_4, all exhaustion cycles): 33,605
+- Total DisputePrice Events (from all oracles): 239
+- Total ProposePrice Events (from all oracles): 60,279
+- Total RequestPrice Events (from all oracles): 70,334
+- Total Settle Events (from all oracles): 60,230
 
 --- Match Analysis ---
-- Order Books matched with a RequestPrice: 10,777 (36.19%)
-- ProposePrice events linked to a RequestPrice: 45,398 / 55,017 (82.52%)
-- DisputePrice events linked to a RequestPrice: 186 / 186 (100.00%)
-- Settle events linked to a RequestPrice: 45,351 / 55,013 (82.44%)
+- Order Books matched with a RequestPrice: 19,480 (57.97%)
+- Order Books unmatched: 14,125
+- ProposePrice events linked to a RequestPrice: 50,155 / 59,790 (83.89%)
+- DisputePrice events linked to a RequestPrice: 198 / 198 (100.00%)
+- Settle events linked to a RequestPrice: 50,072 / 59,748 (83.81%)
+
+============================================================
+2. Unmatched Order Book Analysis
+============================================================
+
+--- For 14,125 Unmatched Markets with Creation Date ---
+- Avg createdAt: 2025-09-26 04:17:15
+- Max createdAt: 2025-12-29 16:41:47
+
+--- For 13,884 Unmatched Markets with Start Date ---
+- Avg startDate: 2025-09-26 10:50:05
+- Max startDate: 2026-01-26 01:00:00
+
+============================================================
+3. Event Timestamp Discrepancy Analysis
+============================================================
+This section analyzes the difference between two timestamps for each oracle event:
+1. Block Commit Timestamp (Row Timestamp): The estimated time the event's transaction was mined.
+2. On-Chain Event Timestamp (Argument Timestamp): The timestamp value passed as an argument to the smart contract.
+
+The calculation performed is: Difference = (Block Commit Timestamp) - (On-Chain Event Timestamp)
+
+**Interpretation Insights:**
+- For `RequestPrice`, this difference shows the accuracy of our block-based timestamp estimation.
+- For `ProposePrice`, `DisputePrice`, and `Settle`, the On-Chain Event Timestamp refers to the *original request's timestamp*.
+  Therefore, the difference represents the time elapsed between the initial request and the subsequent action.
+
+NOTE: The main causality matrix below uses the **Block Commit Timestamp** (`timestamp_ms`).
+
+--- DisputePrice (239 events) ---
+Calculation: (Time of Dispute) - (Time of Original Request)
+- Average Difference: 14.9d
+- Median Difference:  5.2d
+- Std Deviation:      34.6d
+
+--- ProposePrice (60,279 events) ---
+Calculation: (Time of Proposal) - (Time of Original Request)
+- Average Difference: 9.5d
+- Median Difference:  3.8d
+- Std Deviation:      23.4d
+
+--- RequestPrice (70,334 events) ---
+Calculation: (Time of Request Commit) - (Time of Request Event)
+- Average Difference: -1.3h
+- Median Difference:  -1.9m
+- Std Deviation:      1.8h
+
+--- Settle (60,230 events) ---
+Calculation: (Time of Settlement) - (Time of Original Request)
+- Average Difference: 9.6d
+- Median Difference:  3.9d
+- Std Deviation:      23.4d
 
 ========================================================================================================================
-2. Timeline and Causality Analysis Matrix (for matched markets)
+4. Timeline and Causality Analysis Matrix (for matched markets)
 ========================================================================================================================
 Each cell contains: Avg(T_col - T_row) | Sign Match % | Data Points (n)
             createdAt         startDate         found_time_ms     request_ts        propose_ts        dispute_ts        closed_time       settle_ts         endDate           
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-createdAt   ---               4.9h | 100% | 10777n5.5h | 100% | 10777n52.5m | 5% | 10777n1.2d | 97% | 4938n2.4d | 100% | 15n 2.3d | 100% | 6763n1.2d | 100% | 4899n14.0d | 100% | 10767n
-startDate   -4.9h | 100% | 10777n---               38.7m | 100% | 10777n-4.0h | 100% | 10777n1.1d | 97% | 4938n2.3d | 100% | 15n 2.3d | 100% | 6763n1.2d | 100% | 4899n13.8d | 99% | 10767n
-found_time_ms-5.5h | 100% | 10777n-38.7m | 100% | 10777n---               -4.6h | 100% | 10777n1.1d | 97% | 4938n1.9d | 93% | 15n  2.3d | 100% | 6763n1.2d | 100% | 4899n13.7d | 99% | 10767n
-request_ts  -52.5m | 5% | 10777n4.0h | 100% | 10777n4.6h | 100% | 10777n---               1.3d | 100% | 4938n2.5d | 100% | 15n 2.5d | 100% | 6763n1.4d | 100% | 4899n13.9d | 100% | 10767n
-propose_ts  -1.2d | 97% | 4938n-1.1d | 97% | 4938n-1.1d | 97% | 4938n-1.3d | 100% | 4938n---               33.4m | 100% | 15n6.4h | 100% | 4871n2.2h | 100% | 4899n12.7h | 73% | 4938n
-dispute_ts  -2.4d | 100% | 15n-2.3d | 100% | 15n-1.9d | 93% | 15n -2.5d | 100% | 15n-33.4m | 100% | 15n---               20.5h | 100% | 13n16.1h | 100% | 13n32.9d | 60% | 15n 
-closed_time -2.3d | 100% | 6763n-2.3d | 100% | 6763n-2.3d | 100% | 6763n-2.5d | 100% | 6763n-6.4h | 100% | 4871n-20.5h | 100% | 13n---               -4.3h | 100% | 4834n5.3h | 10% | 6763n
-settle_ts   -1.2d | 100% | 4899n-1.2d | 100% | 4899n-1.2d | 100% | 4899n-1.4d | 100% | 4899n-2.2h | 100% | 4899n-16.1h | 100% | 13n4.3h | 100% | 4834n---               10.0h | 34% | 4899n
-endDate     -14.0d | 100% | 10767n-13.8d | 99% | 10767n-13.7d | 99% | 10767n-13.9d | 100% | 10767n-12.7h | 73% | 4938n-32.9d | 60% | 15n-5.3h | 10% | 6763n-10.0h | 34% | 4899n---               
+createdAt   ---               18.9h | 99% | 19399n16.7d | 100% | 19480n2.3d | 61% | 19480n10.7d | 100% | 222n59.5d | 100% | 13n6.8d | 100% | 90n 11.3d | 100% | 140n102.9d | 100% | 19342n
+startDate   -18.9h | 99% | 19399n---               16.0d | 100% | 19399n1.5d | 7% | 19399n10.6d | 100% | 222n59.0d | 100% | 13n6.8d | 100% | 90n 11.2d | 100% | 140n102.5d | 100% | 19261n
+found_time_ms-16.7d | 100% | 19480n-16.0d | 100% | 19399n---               -14.4d | 100% | 19480n-6.7d | 100% | 222n-14.2d | 100% | 13n1.6h | 100% | 90n -10.1d | 100% | 140n86.3d | 96% | 19342n
+request_ts  -2.3d | 61% | 19480n-1.5d | 7% | 19399n14.4d | 100% | 19480n---               4.9d | 96% | 222n 6.3d | 100% | 13n 3.5d | 100% | 90n 5.1d | 100% | 140n100.6d | 100% | 19342n
+propose_ts  -10.7d | 100% | 222n-10.6d | 100% | 222n6.7d | 100% | 222n-4.9d | 96% | 222n---               42.3m | 100% | 13n6.2h | 100% | 86n 8.4h | 100% | 140n45.5d | 54% | 221n
+dispute_ts  -59.5d | 100% | 13n-59.0d | 100% | 13n14.2d | 100% | 13n-6.3d | 100% | 13n-42.3m | 100% | 13n---               No Data           3.6d | 100% | 10n 70.5d | 92% | 13n 
+closed_time -6.8d | 100% | 90n-6.8d | 100% | 90n-1.6h | 100% | 90n-3.5d | 100% | 90n-6.2h | 100% | 86nNo Data           ---               -4.2h | 100% | 41n15.0h | 38% | 90n 
+settle_ts   -11.3d | 100% | 140n-11.2d | 100% | 140n10.1d | 100% | 140n-5.1d | 100% | 140n-8.4h | 100% | 140n-3.6d | 100% | 10n4.2h | 100% | 41n ---               71.2d | 64% | 139n
+endDate     -102.9d | 100% | 19342n-102.5d | 100% | 19261n-86.3d | 96% | 19342n-100.6d | 100% | 19342n-45.5d | 54% | 221n-70.5d | 92% | 13n-15.0h | 38% | 90n-71.2d | 64% | 139n---               

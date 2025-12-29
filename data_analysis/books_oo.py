@@ -30,6 +30,7 @@ DB_CONFIG = {
 }
 
 # --- Event ABIs for Ancillary Data Extraction ---
+# The timestamp is expected to be the second element (index 1)
 EVENT_ABIS = {
     "RequestPrice": ["bytes32", "uint256", "bytes", "address", "uint256", "uint256"],
     "ProposePrice": ["bytes32", "uint256", "bytes", "int256", "uint256", "address"],
@@ -71,7 +72,10 @@ def parse_ms_timestamp(ts_ms: int):
 def parse_iso_timestamp(ts_str: str):
     if not ts_str: return None
     if ts_str.endswith('Z'): ts_str = ts_str[:-1] + '+00:00'
-    return datetime.fromisoformat(ts_str)
+    try:
+        return datetime.fromisoformat(ts_str)
+    except ValueError:
+        return None
 
 def format_seconds(sec: float) -> str:
     """Formats seconds into a human-readable d/h/m/s format."""
@@ -79,6 +83,13 @@ def format_seconds(sec: float) -> str:
     if abs(sec) < 3600: return f"{sec/60:.1f}m"
     if abs(sec) < 86400: return f"{sec/3600:.1f}h"
     return f"{sec/86400:.1f}d"
+
+def get_avg_datetime(dates: list):
+    """Calculates the average of a list of datetime objects."""
+    if not dates: return None
+    timestamps = [d.timestamp() for d in dates]
+    avg_timestamp = statistics.mean(timestamps)
+    return datetime.fromtimestamp(avg_timestamp, tz=timezone.utc)
 
 # --- Main Analysis Logic ---
 async def analyze_summary_and_matrix_final():
@@ -88,9 +99,14 @@ async def analyze_summary_and_matrix_final():
 
     try:
         # --- 1. Load Data ---
-        logger.info("Fetching data from markets_3, oov2, and events_managed_oracle...")
+        logger.info("Fetching data from markets_4, events, oov2, and events_managed_oracle...")
         async with db_pool.acquire() as conn1, db_pool.acquire() as conn2:
-            market_task = conn1.fetch('SELECT message, found_time_ms, closed_time FROM markets_3 WHERE exhaustion_cycle > 0')
+            market_query = """
+                SELECT m.market_id, m.found_time_ms, m.closed_time_ms, e.message
+                FROM markets_4 AS m JOIN events AS e ON m.event_id = e.event_id
+            """
+            market_task = conn1.fetch(market_query)
+            
             event_names_str = ', '.join(f"'{name}'" for name in EVENT_ABIS.keys())
             oracle_query = f"""
                 (SELECT event_name, data, timestamp_ms FROM oov2 WHERE event_name IN ({event_names_str}))
@@ -102,26 +118,38 @@ async def analyze_summary_and_matrix_final():
 
         # --- 2. Process and Structure Data ---
         logger.info("Processing and structuring data for analysis...")
-        markets_by_mid = {
-            json.loads(rec.get('message')).get('id'): rec
-            for rec in market_records if json.loads(rec.get('message')).get('id')
-        }
+        markets_by_mid = {rec.get('market_id'): rec for rec in market_records if rec.get('market_id')}
 
         total_event_counts = Counter(rec['event_name'] for rec in oracle_records)
         events_by_mid = defaultdict(lambda: defaultdict(list))
+        timestamp_diffs = defaultdict(list)
+
         for record in oracle_records:
             event_name, data_hex = record.get('event_name'), record.get('data')
             if not all([event_name, data_hex]): continue
             try:
-                ancillary_text = abi_decode(EVENT_ABIS[event_name], HexBytes(data_hex))[2].decode('utf-8', 'ignore')
+                decoded_data = abi_decode(EVENT_ABIS[event_name], HexBytes(data_hex))
+                ancillary_text = decoded_data[2].decode('utf-8', 'ignore')
                 market_id = extract_market_id(ancillary_text)
-                if market_id: events_by_mid[market_id][event_name].append(record)
-            except Exception: continue
+                
+                if market_id:
+                    events_by_mid[market_id][event_name].append(record)
+
+                # Timestamp analysis
+                row_ts_ms = record.get('timestamp_ms')
+                arg_ts_sec = decoded_data[1] # Timestamp is the second argument
+                if row_ts_ms and arg_ts_sec:
+                    diff_ms = row_ts_ms - (arg_ts_sec * 1000)
+                    timestamp_diffs[event_name].append(diff_ms / 1000) # Store diff in seconds
+
+            except Exception:
+                continue
 
         # --- 3. Calculate Summary Statistics ---
         market_mids = set(markets_by_mid.keys())
         request_mids = {mid for mid, events in events_by_mid.items() if 'RequestPrice' in events}
         matched_orderbooks_with_request = market_mids.intersection(request_mids)
+        unmatched_orderbooks = market_mids - matched_orderbooks_with_request
         
         propose_with_request, total_propose_markets = 0, 0
         dispute_with_request, total_dispute_markets = 0, 0
@@ -139,20 +167,76 @@ async def analyze_summary_and_matrix_final():
                 total_settle_markets += 1
                 if has_request: settle_with_request += 1
 
-        # --- 4. Generate Initial Summary Report ---
+        # --- 4. Generate Reports ---
         print("\n" + "="*60)
         print("1. Initial Data Summary & Match Rates")
         print("="*60)
         print("\n--- Total Counts ---")
-        print(f"- Total Order Books (markets_3): {len(markets_by_mid):,}")
+        print(f"- Total Order Books (markets_4, all exhaustion cycles): {len(markets_by_mid):,}")
         for name, count in sorted(total_event_counts.items()):
             print(f"- Total {name} Events (from all oracles): {count:,}")
 
         print("\n--- Match Analysis ---")
-        print(f"- Order Books matched with a RequestPrice: {len(matched_orderbooks_with_request):,} ({len(matched_orderbooks_with_request) / len(markets_by_mid):.2%})")
-        print(f"- ProposePrice events linked to a RequestPrice: {propose_with_request:,} / {total_propose_markets:,} ({propose_with_request / total_propose_markets:.2%})")
-        print(f"- DisputePrice events linked to a RequestPrice: {dispute_with_request:,} / {total_dispute_markets:,} ({dispute_with_request / total_dispute_markets:.2%})")
-        print(f"- Settle events linked to a RequestPrice: {settle_with_request:,} / {total_settle_markets:,} ({settle_with_request / total_settle_markets:.2%})")
+        match_pct = (len(matched_orderbooks_with_request) / len(markets_by_mid) * 100) if markets_by_mid else 0
+        propose_pct = (propose_with_request / total_propose_markets * 100) if total_propose_markets > 0 else 0
+        dispute_pct = (dispute_with_request / total_dispute_markets * 100) if total_dispute_markets > 0 else 0
+        settle_pct = (settle_with_request / total_settle_markets * 100) if total_settle_markets > 0 else 0
+
+        print(f"- Order Books matched with a RequestPrice: {len(matched_orderbooks_with_request):,} ({match_pct:.2f}%)")
+        print(f"- Order Books unmatched: {len(unmatched_orderbooks):,}")
+        print(f"- ProposePrice events linked to a RequestPrice: {propose_with_request:,} / {total_propose_markets:,} ({propose_pct:.2f}%)")
+        print(f"- DisputePrice events linked to a RequestPrice: {dispute_with_request:,} / {total_dispute_markets:,} ({dispute_pct:.2f}%)")
+        print(f"- Settle events linked to a RequestPrice: {settle_with_request:,} / {total_settle_markets:,} ({settle_pct:.2f}%)")
+
+        # --- 4a. Unmatched Order Book Analysis ---
+        print("\n" + "="*60)
+        print("2. Unmatched Order Book Analysis")
+        print("="*60)
+        unmatched_created = [parse_iso_timestamp(json.loads(markets_by_mid[mid]['message']).get('createdAt')) for mid in unmatched_orderbooks]
+        unmatched_started = [parse_iso_timestamp(json.loads(markets_by_mid[mid]['message']).get('startDate')) for mid in unmatched_orderbooks]
+        unmatched_created = [d for d in unmatched_created if d]
+        unmatched_started = [d for d in unmatched_started if d]
+
+        if unmatched_created:
+            print(f"\n--- For {len(unmatched_created):,} Unmatched Markets with Creation Date ---")
+            print(f"- Avg createdAt: {get_avg_datetime(unmatched_created).strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"- Max createdAt: {max(unmatched_created).strftime('%Y-%m-%d %H:%M:%S')}")
+        if unmatched_started:
+            print(f"\n--- For {len(unmatched_started):,} Unmatched Markets with Start Date ---")
+            print(f"- Avg startDate: {get_avg_datetime(unmatched_started).strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"- Max startDate: {max(unmatched_started).strftime('%Y-%m-%d %H:%M:%S')}")
+
+        # --- 4b. Event Timestamp Analytics ---
+        print("\n" + "="*60)
+        print("3. Event Timestamp Discrepancy Analysis")
+        print("="*60)
+        print("This section analyzes the difference between two timestamps for each oracle event:")
+        print("1. Block Commit Timestamp (Row Timestamp): The estimated time the event's transaction was mined.")
+        print("2. On-Chain Event Timestamp (Argument Timestamp): The timestamp value passed as an argument to the smart contract.")
+        print("\nThe calculation performed is: Difference = (Block Commit Timestamp) - (On-Chain Event Timestamp)")
+        print("\n**Interpretation Insights:**")
+        print("- For `RequestPrice`, this difference shows the accuracy of our block-based timestamp estimation.")
+        print("- For `ProposePrice`, `DisputePrice`, and `Settle`, the On-Chain Event Timestamp refers to the *original request's timestamp*.")
+        print("  Therefore, the difference represents the time elapsed between the initial request and the subsequent action.")
+        print("\nNOTE: The main causality matrix below uses the **Block Commit Timestamp** (`timestamp_ms`).")
+        
+        event_calc_map = {
+            "RequestPrice": "(Time of Request Commit) - (Time of Request Event)",
+            "ProposePrice": "(Time of Proposal) - (Time of Original Request)",
+            "DisputePrice": "(Time of Dispute) - (Time of Original Request)",
+            "Settle": "(Time of Settlement) - (Time of Original Request)"
+        }
+
+        for event_name, diffs in sorted(timestamp_diffs.items()):
+            if not diffs: continue
+            avg_diff = statistics.mean(diffs)
+            median_diff = statistics.median(diffs)
+            stdev_diff = statistics.stdev(diffs) if len(diffs) > 1 else 0
+            print(f"\n--- {event_name} ({len(diffs):,} events) ---")
+            print(f"Calculation: {event_calc_map.get(event_name, 'N/A')}")
+            print(f"- Average Difference: {format_seconds(avg_diff)}")
+            print(f"- Median Difference:  {format_seconds(median_diff)}")
+            print(f"- Std Deviation:      {format_seconds(stdev_diff)}")
 
         # --- 5. Build Full Timelines for Matched Markets ---
         full_timelines = []
@@ -160,7 +244,6 @@ async def analyze_summary_and_matrix_final():
             market_rec = markets_by_mid[mid]
             msg_json = json.loads(market_rec.get('message'))
             
-            # FIX: Safely get the minimum timestamp or None
             propose_timestamps = [rec['timestamp_ms'] for rec in events_by_mid[mid].get('ProposePrice', [])]
             dispute_timestamps = [rec['timestamp_ms'] for rec in events_by_mid[mid].get('DisputePrice', [])]
             settle_timestamps = [rec['timestamp_ms'] for rec in events_by_mid[mid].get('Settle', [])]
@@ -169,7 +252,7 @@ async def analyze_summary_and_matrix_final():
                 'found_time_ms': parse_ms_timestamp(market_rec.get('found_time_ms')),
                 'createdAt': parse_iso_timestamp(msg_json.get('createdAt')),
                 'startDate': parse_iso_timestamp(msg_json.get('startDate')),
-                'closed_time': parse_ms_timestamp(market_rec.get('closed_time')),
+                'closed_time': parse_ms_timestamp(market_rec.get('closed_time_ms')),
                 'endDate': parse_iso_timestamp(msg_json.get('endDate')),
                 'request_ts': parse_ms_timestamp(min(rec['timestamp_ms'] for rec in events_by_mid[mid]['RequestPrice'])),
                 'propose_ts': parse_ms_timestamp(min(propose_timestamps) if propose_timestamps else None),
@@ -202,7 +285,7 @@ async def analyze_summary_and_matrix_final():
                 matrix_data[(row_key, col_key)] = f"{format_seconds(avg_diff)} | {sign_match_pct:.0f}% | {count}n"
 
         print("\n" + "="*120)
-        print("2. Timeline and Causality Analysis Matrix (for matched markets)")
+        print("4. Timeline and Causality Analysis Matrix (for matched markets)")
         print("="*120)
         print("Each cell contains: Avg(T_col - T_row) | Sign Match % | Data Points (n)")
         
