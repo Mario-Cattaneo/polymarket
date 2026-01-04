@@ -34,32 +34,31 @@ KALSHI_WSS_URL = WS_BASE_URL + WS_URL_SUFFIX
 
 # --- Database Schema Definition (with message columns and indexes) ---
 CREATE_TABLES_SQL = """
-CREATE TABLE IF NOT EXISTS kalshi_markets (
+CREATE TABLE IF NOT EXISTS kalshi_markets_2 (
     market_ticker TEXT PRIMARY KEY,
     found_time_ms BIGINT NOT NULL,
     market JSONB NOT NULL
 );
-CREATE TABLE IF NOT EXISTS kalshi_trades (
+CREATE TABLE IF NOT EXISTS kalshi_trades_2 (
     id SERIAL PRIMARY KEY,
-    market_ticker TEXT NOT NULL REFERENCES kalshi_markets(market_ticker),
+    market_ticker TEXT NOT NULL REFERENCES kalshi_markets_2(market_ticker),
     timestamp BIGINT NOT NULL,
     price BIGINT NOT NULL,
     quantity BIGINT NOT NULL,
     taker_side TEXT NOT NULL,
     message JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_kalshi_trades_timestamp ON kalshi_trades(timestamp);
+CREATE INDEX IF NOT EXISTS idx_kalshi_trades_timestamp ON kalshi_trades_2(timestamp);
 
-CREATE TABLE IF NOT EXISTS kalshi_orderbook_updates (
+CREATE TABLE IF NOT EXISTS kalshi_orderbook_updates_2 (
     id SERIAL PRIMARY KEY,
-    market_ticker TEXT NOT NULL REFERENCES kalshi_markets(market_ticker),
+    market_ticker TEXT NOT NULL REFERENCES kalshi_markets_2(market_ticker),
     timestamp BIGINT NOT NULL,
-    side TEXT NOT NULL,
-    price BIGINT NOT NULL,
-    delta BIGINT NOT NULL,
+    update_type TEXT NOT NULL,
     message JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_kalshi_orderbook_updates_timestamp ON kalshi_orderbook_updates(timestamp);
+CREATE INDEX IF NOT EXISTS idx_kalshi_orderbook_updates_timestamp ON kalshi_orderbook_updates_2(timestamp);
+CREATE INDEX IF NOT EXISTS idx_kalshi_orderbook_updates_type ON kalshi_orderbook_updates_2(update_type);
 """
 
 # --- Helper & Auth Functions ---
@@ -123,14 +122,14 @@ async def init_db(pool):
     logger.info("Database tables and indexes initialized successfully.")
 
 async def upsert_market(pool, market_json):
-    """Inserts or updates a market in the kalshi_markets table."""
+    """Inserts or updates a market in the kalshi_markets_2 table."""
     ticker = market_json.get('ticker_name') or market_json.get('ticker')
     if not ticker:
         logger.warning(f"Market JSON missing ticker field: {market_json}")
         return
     
     await pool.execute("""
-        INSERT INTO kalshi_markets (market_ticker, found_time_ms, market)
+        INSERT INTO kalshi_markets_2 (market_ticker, found_time_ms, market)
         VALUES ($1, $2, $3)
         ON CONFLICT (market_ticker) DO UPDATE SET
             found_time_ms = EXCLUDED.found_time_ms,
@@ -139,18 +138,18 @@ async def upsert_market(pool, market_json):
     logger.info(f"Upserted market '{ticker}' into the database.")
 
 async def insert_trade(pool, trade_data):
-    """Inserts a trade record into the kalshi_trades table."""
+    """Inserts a trade record into the kalshi_trades_2 table."""
     await pool.execute("""
-        INSERT INTO kalshi_trades (market_ticker, timestamp, price, quantity, taker_side, message)
+        INSERT INTO kalshi_trades_2 (market_ticker, timestamp, price, quantity, taker_side, message)
         VALUES ($1, $2, $3, $4, $5, $6)
     """, trade_data['market_ticker'], trade_data['ts'] * 1_000_000_000, trade_data['yes_price'], trade_data['count'], trade_data['taker_side'], json.dumps(trade_data))
 
-async def insert_orderbook_update(pool, ob_data):
-    """Inserts an order book delta record into the kalshi_orderbook_updates table."""
+async def insert_orderbook_update(pool, ob_data, update_type='delta'):
+    """Inserts an order book update record (delta or snapshot) into the kalshi_orderbook_updates_2 table."""
     await pool.execute("""
-        INSERT INTO kalshi_orderbook_updates (market_ticker, timestamp, side, price, delta, message)
-        VALUES ($1, $2, $3, $4, $5, $6)
-    """, ob_data['market_ticker'], int(time.time() * 1_000_000_000), ob_data['side'], ob_data['price'], ob_data['delta'], json.dumps(ob_data))
+        INSERT INTO kalshi_orderbook_updates_2 (market_ticker, timestamp, update_type, message)
+        VALUES ($1, $2, $3, $4)
+    """, ob_data['market_ticker'], int(time.time() * 1_000_000_000), update_type, json.dumps(ob_data))
 
 # --- Main Logic ---
 
@@ -198,16 +197,23 @@ async def websocket_listener(initial_tickers, pool):
             async with websockets.connect(KALSHI_WSS_URL, additional_headers=auth_headers) as websocket:
                 logger.info("WebSocket connection established successfully!")
                 
+                # Always subscribe to market lifecycle channel
                 lifecycle_sub = {"id": 1, "cmd": "subscribe", "params": {"channels": ["market_lifecycle_v2"]}}
                 await websocket.send(json.dumps(lifecycle_sub))
+                logger.info("Subscribed to market_lifecycle_v2 channel.")
 
+                # Resubscribe to all tracked tickers (trade and orderbook_delta) after connection/reconnection
                 if tracked_tickers:
+                    logger.info(f"Resubscribing to {len(tracked_tickers)} tracked markets for trade and orderbook_delta...")
                     trade_sub = {
                         "id": msg_id_counter, "cmd": "subscribe", 
                         "params": {"channels": ["trade", "orderbook_delta"], "market_tickers": list(tracked_tickers)}
                     }
                     await websocket.send(json.dumps(trade_sub))
+                    logger.info(f"Resubscribed to {len(tracked_tickers)} markets.")
                     msg_id_counter += 1
+                else:
+                    logger.info("No tracked markets yet, skipping trade/orderbook subscription.")
 
                 async with aiohttp.ClientSession() as session:
                     async for message in websocket:
@@ -218,8 +224,11 @@ async def websocket_listener(initial_tickers, pool):
                             if msg_type == 'trade':
                                 await insert_trade(pool, msg['msg'])
                             
+                            elif msg_type == 'orderbook_snapshot':
+                                await insert_orderbook_update(pool, msg['msg'], update_type='snapshot')
+                            
                             elif msg_type == 'orderbook_delta':
-                                await insert_orderbook_update(pool, msg['msg'])
+                                await insert_orderbook_update(pool, msg['msg'], update_type='delta')
 
                             elif msg_type == 'market_lifecycle_v2' and msg['msg']['event_type'] == 'created':
                                 new_ticker = msg['msg']['market_ticker']

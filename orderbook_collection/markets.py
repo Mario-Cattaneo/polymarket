@@ -10,24 +10,31 @@ from db_cli import DatabaseManager
 from http_cli import (HttpTaskConfig, HttpTaskCallbacks, HttpManager, Method,
 RequestProducer, ResponseContent, StatusCode, RTT)
 
-# --- SQL STATEMENTS FOR THE NEW 'events' and 'markets_4' TABLES ---
+# --- MODIFIED: SQL STATEMENTS FOR 'events' and 'markets_4' TABLES ---
 
 EVENTS_INSERTER_ID = "events_inserter"
+# This statement remains the same, but will only be used for truly new events.
 EVENTS_INSERT_STMT = """
 INSERT INTO events (event_id, found_time_ms, message)
 VALUES ($1, $2, $3)
 ON CONFLICT (event_id) DO NOTHING;
 """
 
+# --- NEW: SQL statement and ID for updating existing events ---
+EVENTS_UPDATER_ID = "events_updater"
+EVENTS_UPDATE_STMT = """
+UPDATE events SET message = $1, found_time_ms = $2 WHERE event_id = $3;
+"""
+
 MARKETS_INSERTER_ID = "markets_inserter"
 MARKETS_INSERT_STMT = """
-INSERT INTO markets_4 (found_index, found_time_ms, token_id, exhaustion_cycle, market_id, condition_id, question_id, event_id)
+INSERT INTO markets_5 (found_index, found_time_ms, token_id, cycle, market_id, condition_id, question_id, event_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (token_id) DO NOTHING;
 """
 
 MARKET_CLOSER_ID = "market_closer"
-MARKET_CLOSE_STMT = "UPDATE markets_4 SET closed_time_ms = $1 WHERE token_id = $2"
+MARKET_CLOSE_STMT = "UPDATE markets_5 SET closed_time_ms = $1 WHERE token_id = $2"
 
 RTT_INSERTER_ID = "market_rtt_inserters"
 
@@ -40,17 +47,27 @@ class Markets:
 
         self._found_index = 0
         self._current_offset = 0
-        self._exhaustion_cycle = 0
+        self._next_offset = 0  # Next offset to request (ahead of processed)
+        self._cycle = 0
         
-        # --- NEW: Flag to track if a change occurred in the current pass ---
-        self._changes_in_current_cycle = False
-        
-        self._active_assets: Set[str] = set()
+        # Active assets are now tracked centrally in OrderbookRegistry
+        # self._active_assets is removed - use OrderbookRegistry.get_all_tokens() instead
+        self._processed_event_ids: Set[str] = set()
 
         # Buffers for each database operation
         self._new_event_inserts: List[Tuple] = []
         self._new_event_insert_flag = asyncio.Event()
         
+        # DB insert tracking for verbose logging
+        self._total_events_inserted = 0
+        self._total_events_updated = 0
+        self._total_markets_inserted = 0
+        self._total_markets_closed = 0
+        self._db_log_threshold = 10000
+        
+        self._event_updates: List[Tuple] = []
+        self._event_update_flag = asyncio.Event()
+
         self._new_market_inserts: List[Tuple] = []
         self._new_market_insert_flag = asyncio.Event()
         
@@ -82,10 +99,11 @@ class Markets:
     def get_buffer_sizes(self) -> Dict[str, int]:
         return {
             "new_event_inserts": len(self._new_event_inserts),
+            "event_updates": len(self._event_updates),
             "new_market_inserts": len(self._new_market_inserts),
             "rtt_rows": len(self._rtt_rows),
             "closed_market_rows": len(self._closed_market_rows),
-            "active_assets_count": len(self._active_assets)
+            "active_assets_count": OrderbookRegistry.get_token_count()
         }
 
     def task_summary(self) -> dict:
@@ -97,9 +115,8 @@ class Markets:
             "market_getter": getter_stats,
             "state": {
                 "current_offset": self._current_offset,
-                "active_assets": len(self._active_assets),
-                "cycle": self._exhaustion_cycle,
-                "changes_in_cycle": self._changes_in_current_cycle
+                "active_assets": OrderbookRegistry.get_token_count(),
+                "cycle": self._cycle
             }
         }
 
@@ -118,6 +135,12 @@ class Markets:
                 signal=self._new_event_insert_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
             )
             
+            self._log(f"start: starting {EVENTS_UPDATER_ID}", "INFO")
+            self._running_db_tasks[EVENTS_UPDATER_ID] = self._db_cli.exec_persistent(
+                task_id=EVENTS_UPDATER_ID, stmt=EVENTS_UPDATE_STMT, params_buffer=self._event_updates,
+                signal=self._event_update_flag, on_success=self._on_insert_success, on_failure=self._on_inserter_failure
+            )
+
             self._log(f"start: starting {MARKETS_INSERTER_ID}", "INFO")
             self._running_db_tasks[MARKETS_INSERTER_ID] = self._db_cli.exec_persistent(
                 task_id=MARKETS_INSERTER_ID, stmt=MARKETS_INSERT_STMT, params_buffer=self._new_market_inserts,
@@ -160,32 +183,38 @@ class Markets:
     async def _restore_from_db(self):
         self._log("restore_from_db: starting restoration...", "INFO")
         try:
-            state_res = await self._db_cli.fetch("restore_cycle", 'SELECT MAX(exhaustion_cycle) as cycle FROM markets_4;')
+            # Restore cycle
+            state_res = await self._db_cli.fetch("restore_cycle", 'SELECT MAX(cycle) as cycle FROM markets_5;')
             if state_res and state_res[0].get('cycle') is not None:
-                self._exhaustion_cycle = int(state_res[0]['cycle'])
+                self._cycle = int(state_res[0]['cycle'])
 
-            active_res = await self._db_cli.fetch("restore_active", 'SELECT token_id FROM markets_4 WHERE closed_time_ms IS NULL;')
+            # Restore active assets
+            active_res = await self._db_cli.fetch("restore_active", 'SELECT token_id FROM markets_5 WHERE closed_time_ms IS NULL;')
             if active_res:
-                self._active_assets = {r['token_id'] for r in active_res if r['token_id']}
-                self._log(f"restore: {len(self._active_assets)} active assets loaded into local set.", "INFO")
+                active_tokens = [r['token_id'] for r in active_res if r['token_id']]
+                self._log(f"restore: {len(active_tokens)} active assets loaded from database.", "INFO")
                 
-                for token_id in self._active_assets:
-                    self._orderbook_reg.insert_token(token_id)
-                self._log(f"restore: {len(self._active_assets)} active assets registered. Cycle: {self._exhaustion_cycle}", "INFO")
+                for token_id in active_tokens:
+                    OrderbookRegistry.insert_token(token_id)
+                self._log(f"restore: {len(active_tokens)} active assets registered. Cycle: {self._cycle}", "INFO")
 
-                self._log("restore: Manually signaling market exhaustion after DB restore.", "INFO")
-                self.markets_exhausted.set()
+            self._log("restore: Manually signaling market exhaustion after DB restore.", "INFO")
+            self.markets_exhausted.set()
 
         except Exception as e:
             self._log(f"restore_from_db: failed '{e}'", "ERROR")
 
     def _next_request(self) -> Tuple[int, str, Method, Optional[Dict], Optional[bytes]]:
-        url = f"https://gamma-api.polymarket.com/events?order=id&ascending=false&limit={self._limit}&offset={self._current_offset}"
-        return (self._current_offset, url, Method.GET, None, None)
+        request_id = (self._cycle, self._next_offset)
+        url = f"https://gamma-api.polymarket.com/events?order=id&ascending=false&limit={self._limit}&offset={self._next_offset}"
+        self._next_offset += self._limit
+        return (request_id, url, Method.GET, None, None)
         
-    async def _on_response(self, request_id: int, response_content: ResponseContent, status_code: StatusCode, headers: Optional[Dict[str, str]], rtt: RTT) -> bool:
+    async def _on_response(self, request_id: Tuple[int, int], response_content: ResponseContent, status_code: StatusCode, headers: Optional[Dict[str, str]], rtt: RTT) -> bool:
+        request_cycle, request_offset = request_id
+        
         if status_code != 200:
-            self._log(f"on_response: request for offset {request_id} received non-200 status: {status_code}", "WARNING")
+            self._log(f"on_response: request for cycle {request_cycle}, offset {request_offset} received non-200 status: {status_code}", "WARNING")
             return False
         
         now_ms = time.time_ns() // 1_000_000
@@ -195,97 +224,132 @@ class Markets:
         try:
             events = orjson.loads(response_content)
         except Exception as e:
-            self._log(f"on_response: JSON parsing failed for offset {request_id}. Error: {e}", "WARNING")
+            self._log(f"on_response: JSON parsing failed for cycle {request_cycle}, offset {request_offset}. Error: {e}", "WARNING")
             return False
 
         if not isinstance(events, list):
-            self._log(f"on_response: expected a list of events but got {type(events).__name__} for offset {request_id}", "WARNING")
+            self._log(f"on_response: expected a list of events but got {type(events).__name__} for cycle {request_cycle}, offset {request_offset}", "WARNING")
             return False
         
-        # --- REFACTORED: Exhaustion Logic ---
         if not events:
-            # Check if any changes occurred during this entire pass
-            if self._changes_in_current_cycle:
-                self._log(f"Exhaustion: Cycle {self._exhaustion_cycle} complete with changes. Incrementing cycle.", "INFO")
-                self._exhaustion_cycle += 1
-                # Reset the flag for the new cycle
-                self._changes_in_current_cycle = False
-            else:
-                self._log(f"Exhaustion: Cycle {self._exhaustion_cycle} complete with NO changes. Repeating cycle.", "INFO")
-            
-            # Reset offset to start the next pass regardless
-            self._current_offset = 0
-            self.markets_exhausted.set()
+            # Only act on exhaustion if this response is from the current cycle
+            if request_cycle == self._cycle:
+                self._next_offset = 0
+                self._cycle += 1
+                self._log(f"Exhaustion: Cycle {request_cycle} complete. Starting cycle {self._cycle}.", "INFO")
+                self.markets_exhausted.set()
             return True
 
         new_market_count = 0
         closed_market_count = 0
+        inserted_event_count = 0
+        updated_event_count = 0
 
         for event_obj in events:
             event_id = event_obj.get("id")
             if not event_id: continue
 
-            markets_list = event_obj.pop("markets", [])
+            markets_list = event_obj.get("markets", [])
             event_dump = orjson.dumps(event_obj).decode('utf-8')
             
-            self._new_event_inserts.append((event_id, now_ms, event_dump))
-            self._new_event_insert_flag.set()
+            found_new_or_closed_market = False
+            event_seen_before = event_id in self._processed_event_ids
 
-            if not markets_list: continue
+            if markets_list:
+                for market_obj in markets_list:
+                    is_closed = market_obj.get("closed", False)
+                    market_id = market_obj.get("id")
+                    token_ids_str = market_obj.get("clobTokenIds")
+                    
+                    try:
+                        tokens = orjson.loads(token_ids_str) if token_ids_str else []
+                    except:
+                        tokens = []
 
-            for market_obj in markets_list:
-                self._found_index += 1
-                is_closed = market_obj.get("closed", False)
-                market_id = market_obj.get("id")
-                token_ids_str = market_obj.get("clobTokenIds")
-                
-                try:
-                    tokens = orjson.loads(token_ids_str) if token_ids_str else []
-                except:
-                    tokens = []
-
-                for token in tokens:
-                    if not token: continue
+                    # Check if this is a new market (any token not in active_assets means new market)
+                    is_new_market = not is_closed and any(not OrderbookRegistry.has_token(token) for token in tokens if token)
 
                     if is_closed:
-                        if token in self._active_assets:
-                            self._active_assets.remove(token)
+                        for token in tokens:
+                            if not token: continue
                             self._orderbook_reg.delete_token(token)
                             self._closed_market_rows.append((now_ms, token))
                             self._closed_market_flag.set()
                             closed_market_count += 1
-                    else:
-                        if token not in self._active_assets:
-                            self._active_assets.add(token)
-                            self._orderbook_reg.insert_token(token)
-                            condition_id = market_obj.get("conditionId")
-                            question_id = market_obj.get("questionId")
-                            self._new_market_inserts.append((
-                                self._found_index, now_ms, token, self._exhaustion_cycle, 
-                                market_id, condition_id, question_id, event_id
-                            ))
+                            found_new_or_closed_market = True
+                    elif is_new_market:
+                        # This is a new market - process all tokens and call registry callback once
+                        found_new_or_closed_market = True
+                        condition_id = market_obj.get("conditionId")
+                        question_id = market_obj.get("questionId")
+                        
+                        # Add all tokens from this market
+                        for token in tokens:
+                            if not token: continue
+                            if not OrderbookRegistry.has_token(token):
+                                self._found_index += 1
+                                OrderbookRegistry.insert_token(token)  # Register token in the registry (no local tracking needed)
+                                self._new_market_inserts.append((
+                                    self._found_index, now_ms, token, request_cycle, 
+                                    market_id, condition_id, question_id, event_id
+                                ))
+                                new_market_count += 1
+                        
+                        # Call registry callback once per market with both token IDs
+                        if len(tokens) >= 2:
+                            self._orderbook_reg.on_market_found(tokens[0], tokens[1])
+                        
+                        if new_market_count > 0:
                             self._new_market_insert_flag.set()
-                            new_market_count += 1
-        
-        # --- REFACTORED: Conditional Logging and Change Tracking ---
-        if new_market_count > 0 or closed_market_count > 0:
-            # A change was detected, so we set the flag for this cycle
-            self._changes_in_current_cycle = True
-            # And now we log the meaningful event
-            self._log(f"Processed {len(events)} events at offset {request_id}. New Markets: {new_market_count}, Closed: {closed_market_count}", "INFO")
+            
+            # Decide whether to INSERT or UPDATE the event
+            if not event_seen_before:
+                # First time seeing this event - INSERT it
+                self._new_event_inserts.append((event_id, now_ms, event_dump))
+                self._new_event_insert_flag.set()
+                self._processed_event_ids.add(event_id)
+                inserted_event_count += 1
+            elif found_new_or_closed_market:
+                # Seen before but has market changes - UPDATE it
+                self._event_updates.append((event_dump, now_ms, event_id))
+                self._event_update_flag.set()
+                updated_event_count += 1
 
-        self._current_offset += len(events)
+        if new_market_count > 0 or closed_market_count > 0 or inserted_event_count > 0 or updated_event_count > 0:
+            self._log(f"Processed {len(events)} events at cycle {request_cycle}, offset {request_offset}. New Markets: {new_market_count}, Closed: {closed_market_count}, Inserted Events: {inserted_event_count}, Updated Events: {updated_event_count}", "INFO")
+
         return True
 
-    async def _on_exception(self, request_id: Any, exception: Exception) -> bool:
-        self._log(f"on_exception: HTTP request for offset {request_id} failed with {type(exception).__name__}: {exception}", "ERROR")
+    async def _on_exception(self, request_id: Tuple[int, int], exception: Exception) -> bool:
+        request_cycle, request_offset = request_id
+        self._log(f"on_exception: HTTP request for cycle {request_cycle}, offset {request_offset} failed with {type(exception).__name__}: {exception}", "ERROR")
         return False
 
     async def _on_insert_success(self, task_id: str, params: List[Tuple]):
-        if task_id == EVENTS_INSERTER_ID: self._new_event_inserts.clear()
-        elif task_id == MARKETS_INSERTER_ID: self._new_market_inserts.clear()
-        elif task_id == RTT_INSERTER_ID: self._rtt_rows.clear()
-        elif task_id == MARKET_CLOSER_ID: self._closed_market_rows.clear()
+        count = len(params)
+        
+        if task_id == EVENTS_INSERTER_ID:
+            self._total_events_inserted += count
+            self._new_event_inserts.clear()
+            if self._total_events_inserted % self._db_log_threshold < count:
+                self._log(f"DB: Total events inserted: {self._total_events_inserted}", "INFO")
+        elif task_id == EVENTS_UPDATER_ID:
+            self._total_events_updated += count
+            self._event_updates.clear()
+            if self._total_events_updated % self._db_log_threshold < count:
+                self._log(f"DB: Total events updated: {self._total_events_updated}", "INFO")
+        elif task_id == MARKETS_INSERTER_ID:
+            self._total_markets_inserted += count
+            self._new_market_inserts.clear()
+            if self._total_markets_inserted % self._db_log_threshold < count:
+                self._log(f"DB: Total markets inserted: {self._total_markets_inserted}", "INFO")
+        elif task_id == RTT_INSERTER_ID:
+            self._rtt_rows.clear()
+        elif task_id == MARKET_CLOSER_ID:
+            self._total_markets_closed += count
+            self._closed_market_rows.clear()
+            if self._total_markets_closed % self._db_log_threshold < count:
+                self._log(f"DB: Total markets closed: {self._total_markets_closed}", "INFO")
 
     async def _on_inserter_failure(self, task_id: str, exception: Exception, params: List[Tuple]):
         self._log(f"on_inserter_failure: CRITICAL DB FAILURE on task '{task_id}'. Exception: {exception}. The application cannot continue safely and will stop.", "FATAL")

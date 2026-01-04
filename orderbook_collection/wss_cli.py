@@ -163,15 +163,18 @@ class WebSocketManager:
                         )
                         state.last_activity_time = time.monotonic()
 
-                        await managed_task.wss_cli.send(payload)
-                        ack = await managed_task.wss_cli.recv()
-                        state.last_activity_time = time.monotonic()
+                        # Only send initial payload and wait for ack if payload is provided
+                        if payload:
+                            await managed_task.wss_cli.send(payload)
+                            ack = await managed_task.wss_cli.recv()
+                            state.last_activity_time = time.monotonic()
+
+                            if self.callbacks.on_acknowledgement and not self.callbacks.on_acknowledgement(offset, ack):
+                                return
 
                         # FIX: Set state to CONNECTED *before* callbacks so send_message works immediately
                         managed_task.connection_state = "CONNECTED"
 
-                        if self.callbacks.on_acknowledgement and not self.callbacks.on_acknowledgement(offset, ack):
-                            return
                         if self.callbacks.on_connect and not self.callbacks.on_connect(offset):
                             return
 

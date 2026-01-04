@@ -27,50 +27,46 @@ class Events:
             on_read=self._on_read, on_acknowledgement=self._on_ack, on_read_failure=self._on_read_failure,
             on_connect=self._on_connect, on_connect_failure=self._on_connect_failure
         )
-        # Increased max_msg_size to 2MB to safely accommodate 10k asset ID batches
-        self._wss_config = WebSocketTaskConfig(timeout=10, ping_interval=15, max_msg_size=2_097_152)
         
-        # Single connection manager
-        self._wss_cli = WebSocketManager(callbacks=self._wss_callbacks, config=self._wss_config, request_break_s=0.15, max_concurrent_subscriptions=1)
-
-        self._limit_per_subscription = 10000
+        # Websocket configuration
+        self._max_msg_size = 1_048_576  # 1MB
+        self._soft_msg_break_s = 0.1
+        self._wss_config = WebSocketTaskConfig(timeout=10, ping_interval=15, max_msg_size=self._max_msg_size)
+        self._wss_cli = WebSocketManager(callbacks=self._wss_callbacks, config=self._wss_config, request_break_s=self._soft_msg_break_s, max_concurrent_subscriptions=1)
         
-        self._active_tokens: Set[str] = set()
-        self._initial_batch_tokens: Set[str] = set() # Track tokens handled by the persistent initial_payload
-        self._pending_unsubscribes: Set[str] = set()
+        # Callback buffers and state
+        self._subscribe_buffer: List[Tuple[str, str]] = []
+        self._unsubscribe_buffer: List[str] = []
+        self._subscribe_task_queued = False
+        self._unsubscribe_task_queued = False
+        self._last_send_time = 0.0
+        self._max_tokens_per_batch = 10000  # Conservative batch size to stay under 1MB message limit
         
         self._started = False
-        self._connection_started = False
         self._running_db_tasks: Dict[str, asyncio.Task] = {}
-        self._running_internal_tasks: Dict[str, asyncio.Task] = {}
         
-        # Signals
-        self._markets_exhausted: asyncio.Event = asyncio.Event()
-        self._reconnected_event: asyncio.Event = asyncio.Event()
-        self._cleanup_event: asyncio.Event = asyncio.Event()
-        
+        self._market_found_callback_handle: Optional[int] = None
         self._token_delete_callback_handle: Optional[int] = None
 
         self._book_idx, self._price_change_idx, self._last_trade_price_idx, self._tick_change_idx = 0, 0, 0, 0
         self._book_rows, self._price_change_rows, self._last_trade_price_rows, self._tick_change_rows, self._connection_rows = [], [], [], [], []
         self._book_flag, self._price_change_flag, self._last_trade_price_flag, self._tick_change_flag, self._connection_flag = asyncio.Event(), asyncio.Event(), asyncio.Event(), asyncio.Event(), asyncio.Event()
 
-    async def start(self, markets_exhausted: asyncio.Event):
+    async def start(self):
         if self._started: 
             self._log("start: Events module is already running.", "WARNING")
             return
-        
-        self._markets_exhausted = markets_exhausted
             
         try:
             self._start_db_inserters()
             
-            # NOTE: We do NOT start the WS task here. 
-            # We wait for the first batch of tokens in the manager to ensure we send a valid initial payload.
-
-            manager_task = asyncio.create_task(self._subscription_manager())
-            self._running_internal_tasks["subscription_manager"] = manager_task
-            manager_task.add_done_callback(lambda t: self._running_internal_tasks.pop("subscription_manager", None))
+            # Unconditionally start websocket connection without initial message
+            self._wss_cli.start_task(0, self._url, "")
+            self._log("start: Websocket connection started.", "INFO")
+            
+            # Register callbacks with the orderbook registry
+            self._market_found_callback_handle = self._orderbook_registry.register_market_found_callback(self._on_market_found)
+            self._token_delete_callback_handle = self._orderbook_registry.register_delete_callback(self._on_token_deleted)
             
             self._started = True
             self._log("start: Events module started.", "INFO")
@@ -80,147 +76,130 @@ class Events:
             traceback.print_exc()
             self.stop()
 
-    async def _subscription_manager(self):
+    def _on_market_found(self, token_id_1: str, token_id_2: str):
         """
-        Manages dynamic subscriptions, unsubscriptions, and re-subscriptions.
+        Synchronous callback from registry when a new market is found.
+        Buffers the token IDs and schedules rate-limited sending if needed.
         """
+        self._subscribe_buffer.append((token_id_1, token_id_2))
         
-        # --- PHASE 1: BOOTSTRAP ---
-        # Wait for the first signal of markets to create the connection with a valid payload
-        if not self._connection_started:
-            self._log("subscription_manager: Waiting for initial market tokens to bootstrap connection...", "INFO")
-            await self._markets_exhausted.wait()
+        # Check if task already queued
+        if self._subscribe_task_queued:
+            return
+        
+        # Check when last message was sent
+        current_time = time.time()
+        time_since_last = current_time - self._last_send_time
+        
+        if time_since_last >= self._soft_msg_break_s:
+            # Can send immediately
+            asyncio.create_task(self._send_subscribe_buffer())
+        else:
+            # Schedule after remaining break time
+            wait_time = self._soft_msg_break_s - time_since_last
+            self._subscribe_task_queued = True
+            asyncio.create_task(self._delayed_send_subscribe(wait_time))
+    
+    def _on_token_deleted(self, token_id: str):
+        """
+        Synchronous callback from registry when a token is deleted.
+        Buffers the token ID and schedules rate-limited sending if needed.
+        """
+        self._unsubscribe_buffer.append(token_id)
+        
+        # Check if task already queued
+        if self._unsubscribe_task_queued:
+            return
+        
+        # Check when last message was sent
+        current_time = time.time()
+        time_since_last = current_time - self._last_send_time
+        
+        if time_since_last >= self._soft_msg_break_s:
+            # Can send immediately
+            asyncio.create_task(self._send_unsubscribe_buffer())
+        else:
+            # Schedule after remaining break time
+            wait_time = self._soft_msg_break_s - time_since_last
+            self._unsubscribe_task_queued = True
+            asyncio.create_task(self._delayed_send_unsubscribe(wait_time))
+    
+    async def _delayed_send_subscribe(self, wait_time: float):
+        """Waits for the required time then sends buffered subscribe messages."""
+        await asyncio.sleep(wait_time)
+        await self._send_subscribe_buffer()
+        self._subscribe_task_queued = False
+    
+    async def _delayed_send_unsubscribe(self, wait_time: float):
+        """Waits for the required time then sends buffered unsubscribe messages."""
+        await asyncio.sleep(wait_time)
+        await self._send_unsubscribe_buffer()
+        self._unsubscribe_task_queued = False
+    
+    async def _send_subscribe_buffer(self):
+        """Sends all buffered subscription messages and clears the buffer."""
+        if not self._subscribe_buffer:
+            return
+        
+        # Build list of all tokens to subscribe
+        tokens = []
+        for token_1, token_2 in self._subscribe_buffer:
+            tokens.extend([token_1, token_2])
+        
+        payload = orjson.dumps({"operation": "subscribe", "assets_ids": tokens}).decode('utf-8')
+        success = await self._wss_cli.send_message(0, payload)
+        
+        if success:
+            self._log(f"_send_subscribe_buffer: Subscribed to {len(tokens)} tokens ({len(self._subscribe_buffer)} markets).", "INFO")
+        else:
+            self._log(f"_send_subscribe_buffer: Failed to send subscription for {len(tokens)} tokens (websocket not ready).", "WARNING")
+        
+        self._subscribe_buffer.clear()
+        self._last_send_time = time.time()
+    
+    async def _send_unsubscribe_buffer(self):
+        """Sends all buffered unsubscription messages and clears the buffer."""
+        if not self._unsubscribe_buffer:
+            return
+        
+        payload = orjson.dumps({"operation": "unsubscribe", "assets_ids": self._unsubscribe_buffer}).decode('utf-8')
+        success = await self._wss_cli.send_message(0, payload)
+        
+        if success:
+            self._log(f"_send_unsubscribe_buffer: Unsubscribed from {len(self._unsubscribe_buffer)} tokens.", "INFO")
+        else:
+            self._log(f"_send_unsubscribe_buffer: Failed to send unsubscription for {len(self._unsubscribe_buffer)} tokens (websocket not ready).", "WARNING")
+        
+        self._unsubscribe_buffer.clear()
+        self._last_send_time = time.time()
+    
+    async def _resubscribe_all_tokens(self, tokens_list: List[str]):
+        """Resubscribe to all active tokens in batches after reconnection."""
+        if not tokens_list:
+            return
+        
+        total_tokens = len(tokens_list)
+        
+        # Send subscriptions in batches to avoid exceeding 1MB message size
+        for i in range(0, total_tokens, self._max_tokens_per_batch):
+            batch = tokens_list[i:i + self._max_tokens_per_batch]
+            payload = orjson.dumps({"operation": "subscribe", "assets_ids": batch}).decode('utf-8')
             
-            new_tokens = self._orderbook_registry.consume_exhaustion_cycle_batch()
-            if not new_tokens:
-                self._log("subscription_manager: Exhaustion signal received but no tokens found. Retrying...", "WARNING")
+            success = await self._wss_cli.send_message(0, payload)
             
-            # Prepare initial batch (max 10k)
-            initial_batch = new_tokens[:self._limit_per_subscription]
-            self._active_tokens.update(initial_batch)
-            self._initial_batch_tokens = set(initial_batch)
+            batch_num = i // self._max_tokens_per_batch + 1
+            total_batches = (total_tokens + self._max_tokens_per_batch - 1) // self._max_tokens_per_batch
             
-            self._log(f"subscription_manager: Bootstrapping connection with {len(initial_batch)} tokens.", "INFO")
+            if success:
+                self._log(f"_resubscribe_all_tokens: Resubscribed batch {batch_num}/{total_batches} ({len(batch)} tokens).", "INFO")
+            else:
+                self._log(f"_resubscribe_all_tokens: Failed to resubscribe batch {batch_num}/{total_batches} ({len(batch)} tokens).", "WARNING")
             
-            # Start the connection with a real subscribe payload.
-            initial_payload = orjson.dumps({"operation": "subscribe", "assets_ids": initial_batch}).decode('utf-8')
-            self._wss_cli.start_task(0, self._url, initial_payload)
-            self._connection_started = True
-
-            # Wait for connection to be established with timeout
-            try:
-                await asyncio.wait_for(self._reconnected_event.wait(), timeout=20.0)
-                self._log("subscription_manager: Bootstrap connection established.", "INFO")
-            except asyncio.TimeoutError:
-                self._log("subscription_manager: Timeout waiting for bootstrap connection. The server might be unreachable or rejecting the payload.", "ERROR")
-            
-            # Handle any remaining tokens from the first exhaustion cycle
-            remaining_tokens = new_tokens[self._limit_per_subscription:]
-            if remaining_tokens:
-                self._log(f"subscription_manager: Subscribing to remaining {len(remaining_tokens)} tokens from bootstrap batch.", "INFO")
-                self._active_tokens.update(remaining_tokens)
-                
-                for i in range(0, len(remaining_tokens), self._limit_per_subscription):
-                    batch = remaining_tokens[i:i + self._limit_per_subscription]
-                    payload = orjson.dumps({"operation": "subscribe", "assets_ids": batch}).decode('utf-8')
-                    
-                    # Send and Log
-                    success = await self._wss_cli.send_message(0, payload)
-                    batch_num = (i // self._limit_per_subscription) + 1
-                    total_batches = (len(remaining_tokens) + self._limit_per_subscription - 1) // self._limit_per_subscription
-                    
-                    if success:
-                        self._log(f"subscription_manager: Successfully sent bootstrap batch {batch_num}/{total_batches} ({len(batch)} tokens).", "INFO")
-                    else:
-                        self._log(f"subscription_manager: Failed to send bootstrap batch {batch_num}/{total_batches}. Will be handled by reconnection logic.", "WARNING")
-            
-            self._log("subscription_manager: Bootstrap phase complete. Entering main event loop.", "INFO")
-            
-            self._markets_exhausted.clear()
-            self._reconnected_event.clear()
-
-            if self._token_delete_callback_handle is None: 
-                self._token_delete_callback_handle = self._orderbook_registry.register_delete_callback(self._token_delete_callback)
-
-        # --- PHASE 2: EVENT LOOP ---
-        while True:
-            try:
-                wait_tasks = [
-                    asyncio.create_task(self._markets_exhausted.wait()),
-                    asyncio.create_task(self._reconnected_event.wait()),
-                    asyncio.create_task(self._cleanup_event.wait())
-                ]
-
-                done, pending = await asyncio.wait(
-                    wait_tasks,
-                    return_when=asyncio.FIRST_COMPLETED
-                )
-
-                for t in pending: t.cancel()
-
-                # --- PRIORITY 1: Reconnection ---
-                if self._reconnected_event.is_set():
-                    self._reconnected_event.clear()
-                    self._markets_exhausted.clear()
-                    self._cleanup_event.clear()
-                    
-                    # wss_cli automatically resends the 'initial_payload' (the bootstrap batch).
-                    # We only need to resubscribe to tokens that were NOT in that bootstrap batch.
-                    tokens_to_resub = [t for t in self._active_tokens if t not in self._initial_batch_tokens]
-                    
-                    if tokens_to_resub:
-                        self._log(f"subscription_manager: Reconnected. Resubscribing to {len(tokens_to_resub)} additional tokens...", "INFO")
-                        for i in range(0, len(tokens_to_resub), self._limit_per_subscription):
-                            batch = tokens_to_resub[i:i + self._limit_per_subscription]
-                            payload = orjson.dumps({"operation": "subscribe", "assets_ids": batch}).decode('utf-8')
-                            success = await self._wss_cli.send_message(0, payload)
-                            if not success:
-                                self._log("subscription_manager: Failed to send resubscribe batch. Connection dropped.", "WARNING")
-                                break 
-
-                # --- PRIORITY 2: New Markets ---
-                elif self._markets_exhausted.is_set():
-                    self._markets_exhausted.clear()
-                    
-                    new_tokens = self._orderbook_registry.consume_exhaustion_cycle_batch()
-                    if not new_tokens: continue
-
-                    unique_new_tokens = [t for t in new_tokens if t not in self._active_tokens]
-                    
-                    if unique_new_tokens:
-                        self._log(f"subscription_manager: Found {len(unique_new_tokens)} new tokens to subscribe.", "INFO")
-                        self._active_tokens.update(unique_new_tokens)
-                        
-                        for i in range(0, len(unique_new_tokens), self._limit_per_subscription):
-                            batch = unique_new_tokens[i:i + self._limit_per_subscription]
-                            payload = orjson.dumps({"operation": "subscribe", "assets_ids": batch}).decode('utf-8')
-                            success = await self._wss_cli.send_message(0, payload)
-                            if success:
-                                self._log(f"subscription_manager: Sent subscribe batch {i//self._limit_per_subscription + 1} ({len(batch)} tokens).", "INFO")
-                            else:
-                                self._log("subscription_manager: Failed to send subscribe batch (socket not ready).", "WARNING")
-
-                # --- PRIORITY 3: Unsubscriptions ---
-                elif self._cleanup_event.is_set():
-                    self._cleanup_event.clear()
-                    
-                    tokens_to_remove = list(self._pending_unsubscribes)
-                    self._pending_unsubscribes.clear()
-                    
-                    if tokens_to_remove:
-                        self._log(f"subscription_manager: Unsubscribing from {len(tokens_to_remove)} tokens.", "INFO")
-                        for i in range(0, len(tokens_to_remove), self._limit_per_subscription):
-                            batch = tokens_to_remove[i:i + self._limit_per_subscription]
-                            payload = orjson.dumps({"operation": "unsubscribe", "assets_ids": batch}).decode('utf-8')
-                            await self._wss_cli.send_message(0, payload)
-
-            except asyncio.CancelledError:
-                self._log("subscription_manager: Task cancelled.", "INFO")
-                break
-            except Exception as e:
-                self._log(f"subscription_manager: Task failed with an unhandled exception: '{e}'", "ERROR")
-                traceback.print_exc()
-                await asyncio.sleep(5)
+            # Rate limit between batches
+            if i + self._max_tokens_per_batch < total_tokens:
+                await asyncio.sleep(self._soft_msg_break_s)
+        
+        self._log(f"_resubscribe_all_tokens: Completed resubscription of {total_tokens} tokens in {(total_tokens + self._max_tokens_per_batch - 1) // self._max_tokens_per_batch} batches.", "INFO")
 
     def stop(self):
         self._log("stop: Stopping Events module...", "INFO")
@@ -229,6 +208,10 @@ class Events:
         self._log("stop: Events module stopped.", "INFO")
 
     def _clean_up(self):
+        if self._market_found_callback_handle is not None:
+            self._orderbook_registry.unregister_market_found_callback(self._market_found_callback_handle)
+            self._market_found_callback_handle = None
+        
         if self._token_delete_callback_handle is not None:
             self._orderbook_registry.unregister_delete_callback(self._token_delete_callback_handle)
             self._token_delete_callback_handle = None
@@ -238,16 +221,20 @@ class Events:
         for task in self._running_db_tasks.values():
             if not task.done(): task.cancel()
         self._running_db_tasks.clear()
-        
-        for task in self._running_internal_tasks.values():
-            if not task.done(): task.cancel()
-        self._running_internal_tasks.clear()
 
     def _on_connect(self, task_offset: int) -> bool:
         self._log(f"on_connect: Task {task_offset}: Successfully connected.", "INFO")
         self._connection_rows.append((time.time_ns() // 1_000_000, True, None))
         self._connection_flag.set()
-        self._reconnected_event.set()
+        
+        # Resubscribe to all active tokens from the registry after reconnection
+        active_tokens = self._orderbook_registry.get_all_tokens()
+        if active_tokens:
+            self._log(f"on_connect: Resubscribing to {len(active_tokens)} active tokens from registry.", "INFO")
+            asyncio.create_task(self._resubscribe_all_tokens(active_tokens))
+        else:
+            self._log(f"on_connect: No active tokens yet, skipping resubscription.", "INFO")
+        
         return True
 
     def _on_connect_failure(self, task_offset: int, exception: Exception, url: str, payload: str) -> bool:
@@ -259,11 +246,8 @@ class Events:
         return True
 
     def _token_delete_callback(self, token: str) -> bool:
-        if token in self._active_tokens:
-            self._active_tokens.remove(token)
-            self._pending_unsubscribes.add(token)
-            self._cleanup_event.set()
-            self._log(f"token_delete_callback: Scheduled unsubscription for {token}", "INFO")
+        # Token deletion is handled by the registry, no local tracking needed
+        # This callback is kept for potential future use
         
         if self._orderbook_registry.get_token_count() == 0:
             self._log("token_delete_callback: All tokens removed. Stopping module.", "WARNING")
@@ -278,22 +262,23 @@ class Events:
             "last_trade_price_rows": len(self._last_trade_price_rows),
             "tick_change_rows": len(self._tick_change_rows),
             "connection_rows": len(self._connection_rows),
+            "subscribe_buffer": len(self._subscribe_buffer),
+            "unsubscribe_buffer": len(self._unsubscribe_buffer),
         }
 
     def task_summary(self) -> dict:
         db_tasks_running = len(self._running_db_tasks)
-        internal_tasks_running = len(self._running_internal_tasks)
         wss_stats = self._wss_cli.get_all_stats()
         connection_summary = wss_stats.get("connection_summary", {})
         active_wss_tasks = connection_summary.get("connected", 0) + connection_summary.get("connecting", 0)
-        total_running_tasks = db_tasks_running + internal_tasks_running + active_wss_tasks
+        total_running_tasks = db_tasks_running + active_wss_tasks
         
         return {
             "total_running_tasks": total_running_tasks,
             "db_tasks": {"count": db_tasks_running, "tasks": list(self._running_db_tasks.keys())},
-            "internal_tasks": {"count": internal_tasks_running, "tasks": list(self._running_internal_tasks.keys())},
             "websocket_client": wss_stats,
-            "active_subscriptions": len(self._active_tokens)
+            "subscribe_task_queued": self._subscribe_task_queued,
+            "unsubscribe_task_queued": self._unsubscribe_task_queued,
         }
 
     def _start_db_inserters(self):

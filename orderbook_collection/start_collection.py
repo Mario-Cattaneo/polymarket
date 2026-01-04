@@ -69,20 +69,20 @@ CREATE TABLE IF NOT EXISTS events (
     message jsonb
 );
 
--- UPDATED: markets_4 table, lighter and references the events table
-CREATE TABLE IF NOT EXISTS markets_4 (
+-- markets_5 table: lighter and references the events table
+CREATE TABLE IF NOT EXISTS markets_5 (
     token_id TEXT PRIMARY KEY,
     market_id TEXT,
     condition_id TEXT,
     question_id TEXT,
-    event_id TEXT REFERENCES events(event_id),
+    event_id TEXT,
     found_index BIGINT,
     found_time_ms BIGINT,
     closed_time_ms BIGINT DEFAULT NULL,
-    exhaustion_cycle BIGINT,
+    cycle BIGINT,
     missed_before_gone BIGINT DEFAULT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_markets_4_event_id ON markets_4(event_id);
+CREATE INDEX IF NOT EXISTS idx_markets_5_event_id ON markets_5(event_id);
 
 -- Buffer tables (Partitioned by time)
 CREATE TABLE IF NOT EXISTS buffer_books_2 (found_index BIGINT, found_time_ms BIGINT, server_time_ms BIGINT, asset_id TEXT, message jsonb ) PARTITION BY RANGE (found_time_ms);
@@ -145,7 +145,7 @@ $$;
 
 TEARDOWN_SCHEMA_STMT = """
     DROP TABLE IF EXISTS
-        markets_4, events, -- Updated tables
+        markets_5, events,
         buffer_books_2, buffer_price_changes_2, buffer_last_trade_prices_2,
         buffer_tick_changes_2, buffer_server_book_2, buffer_markets_rtt_2,
         buffer_analytics_rtt_2, buffer_events_connections_2,
@@ -300,7 +300,7 @@ async def start_collection():
         print("[INFO] Modules initialized. Starting services...")
         
         await _markets.start(restore=not RESET)
-        await _events.start(markets_exhausted=_markets.markets_exhausted)
+        await _events.start()
         await _analytics.start()
         
         print("[INFO] System running.")

@@ -27,7 +27,7 @@ GAMMA_MARKETS_FILE = Path(CSV_DIR) / 'gamma_markets.csv'
 
 # --- Table & Contract Config ---
 
-FORK_MARKET_TABLE = "markets_3"
+FORK_MARKET_TABLE = "markets_5"
 ADDR = {
     'negrisk_exchange': "0xc5d563a36ae78145c45a50134d48a1215220f80a".lower(),
     'ctfe_exchange': "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e".lower(),

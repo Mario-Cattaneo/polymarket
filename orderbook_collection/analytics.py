@@ -14,8 +14,7 @@ SERVER_BOOK_INSERTER_ID = "server_book_inserter"
 RTT_INSERTER_ID = "analytics_rtt_inserter"
 
 MISSED_UPDATER_ID = "missed_count_updater"
-# *** CORRECTED LINE: Updated to use 'markets_4' and 'token_id' ***
-MISSED_UPDATE_STMT = "UPDATE markets_4 SET missed_before_gone = $1 WHERE token_id = $2"
+MISSED_UPDATE_STMT = "UPDATE markets_5 SET missed_before_gone = $1 WHERE token_id = $2"
 
 SERIALIZER_ID = "serializer"
 

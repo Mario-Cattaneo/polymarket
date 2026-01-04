@@ -6,10 +6,8 @@ class OrderbookRegistry:
     
     This registry manages a central set of tokens and provides callback mechanisms
     for other modules to react to the insertion or deletion of tokens.
-    It also tracks tokens added within a single "exhaustion cycle" for batch processing.
     """
     _tokens: Set[str] = set()
-    _exhaustion_cycle_batch: List[str] = []  # NEW: Tracks tokens for the current cycle
     _removed_tokens = 0
     _inserted_tokens = 0
     
@@ -17,6 +15,7 @@ class OrderbookRegistry:
     _next_callback_handle = 0
     _delete_callbacks: Dict[Callback_handle, Callable[[str], None]] = {}
     _insert_callbacks: Dict[Callback_handle, Callable[[str], None]] = {}
+    _market_found_callbacks: Dict[Callback_handle, Callable[[str, str], None]] = {}
 
     @classmethod
     def lifetime_removed(cls) -> int:
@@ -42,6 +41,11 @@ class OrderbookRegistry:
         return cls._register_callback(cls._insert_callbacks, insert_callback)
 
     @classmethod
+    def register_market_found_callback(cls, market_found_callback: Callable[[str, str], None]) -> int:
+        """Register a callback that receives (token_id_1, token_id_2) when a new market is found."""
+        return cls._register_callback(cls._market_found_callbacks, market_found_callback)
+
+    @classmethod
     def unregister_delete_callback(cls, handle: int):
         cls._delete_callbacks.pop(handle, None)
 
@@ -50,12 +54,15 @@ class OrderbookRegistry:
         cls._insert_callbacks.pop(handle, None)
 
     @classmethod
+    def unregister_market_found_callback(cls, handle: int):
+        cls._market_found_callbacks.pop(handle, None)
+
+    @classmethod
     def insert_token(cls, token: str) -> bool:
         if token in cls._tokens:
             return False
         
         cls._tokens.add(token)
-        cls._exhaustion_cycle_batch.append(token) # MODIFIED: Add to cycle batch
         cls._inserted_tokens += 1
         
         for call_back in list(cls._insert_callbacks.values()):
@@ -75,6 +82,12 @@ class OrderbookRegistry:
         return True
     
     @classmethod
+    def on_market_found(cls, token_id_1: str, token_id_2: str):
+        """Called synchronously when a new market is found with both token IDs."""
+        for callback in list(cls._market_found_callbacks.values()):
+            callback(token_id_1, token_id_2)
+    
+    @classmethod
     def iterate_over_tokens(cls, on_iteration: Callable[[str], bool]):
         for token in list(cls._tokens):
             if not on_iteration(token):
@@ -83,21 +96,18 @@ class OrderbookRegistry:
     @classmethod
     def get_token_count(cls) -> int:
         return len(cls._tokens)
+    
+    @classmethod
+    def get_all_tokens(cls) -> List[str]:
+        """Returns a list of all currently active tokens."""
+        return list(cls._tokens)
+    
+    @classmethod
+    def has_token(cls, token: str) -> bool:
+        """Check if a token is currently active."""
+        return token in cls._tokens
 
     @classmethod
     def get_all_tokens(cls) -> List[str]:
         """Returns a list of all current tokens for full reserialization."""
         return list(cls._tokens)
-
-    @classmethod
-    def consume_exhaustion_cycle_batch(cls) -> List[str]:
-        """
-        NEW: Atomically retrieves and clears the list of tokens from the last cycle.
-        This is the primary method for the Events module to get new tokens.
-        """
-        if not cls._exhaustion_cycle_batch:
-            return []
-        
-        batch_to_return = list(cls._exhaustion_cycle_batch)
-        cls._exhaustion_cycle_batch.clear()
-        return batch_to_return
