@@ -8,6 +8,7 @@ import logging
 import time
 from datetime import datetime, timezone, timedelta
 import numpy as np
+from scipy import stats
 
 # ----------------------------------------------------------------
 # 1. SETUP & CONFIGURATION
@@ -172,6 +173,12 @@ def analyze_timing_custom(df_matched_all, timestamp_col, timestamp_name):
     min_diff_sec = df_matched_all['time_diff_sec'].min()
     max_diff_sec = df_matched_all['time_diff_sec'].max()
     
+    # Calculate Skewness (normalized third moment - measures asymmetry)
+    skewness = stats.skew(df_matched_all['time_diff_sec'].dropna())
+    
+    # Calculate Kurtosis (excess kurtosis - measures heavy tailness)
+    kurtosis = stats.kurtosis(df_matched_all['time_diff_sec'].dropna(), fisher=True)
+    
     logger.info(f"\n--- Timing Analysis (Event Preparation T2 - {timestamp_name} T1) ---")
     print(f"Total Matched Events: {total_count:,}")
     print("\n--- Probability Analysis ---")
@@ -179,11 +186,13 @@ def analyze_timing_custom(df_matched_all, timestamp_col, timestamp_name):
     print(f"P(T2 = T1) [Event AT {timestamp_name}]: {p_t2_eq_t1:.2f}% ({count_t2_eq_t1:,} events)")
     print(f"P(T2 < T1) [Event BEFORE {timestamp_name}]: {p_t2_lt_t1:.2f}% ({count_t2_lt_t1:,} events)")
     
-    print(f"\n--- Range, Mean and Standard Deviation ---")
+    print(f"\n--- Range, Mean, Standard Deviation, and Distribution Shape ---")
     print(f"Min Difference: {format_timedelta(min_diff_sec)} ({min_diff_sec:.2f} seconds)")
     print(f"Max Difference: {format_timedelta(max_diff_sec)} ({max_diff_sec:.2f} seconds)")
     print(f"E(T2 - T1) [Average Delay]: {format_timedelta(avg_diff_sec)} ({avg_diff_sec:.2f} seconds)")
     print(f"StdDev(T2 - T1) [Standard Deviation]: {format_timedelta(std_diff_sec)} ({std_diff_sec:.2f} seconds)")
+    print(f"Skewness (Normalized 3rd Moment - Asymmetry): {skewness:.4f}")
+    print(f"Kurtosis Excess (Heavy Tailness): {kurtosis:.4f}")
     
     # Per-oracle statistics
     print(f"\n--- Per-Oracle Timing Statistics ({timestamp_name}) ---")
