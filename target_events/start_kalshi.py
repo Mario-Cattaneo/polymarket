@@ -42,31 +42,43 @@ WS_URL_SUFFIX = "/trade-api/ws/v2"
 KALSHI_WSS_URL = WS_BASE_URL + WS_URL_SUFFIX
 MONITORING_INTERVAL_SECONDS = 15  # How often to log market statistics
 
-# --- Database Schema Definition (with message columns and indexes) ---
+# --- Database Schema Definition (simplified with JSON storage) ---
 CREATE_TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS kalshi_markets_3 (
     market_ticker TEXT PRIMARY KEY,
     found_time_ms BIGINT NOT NULL,
-    market JSONB NOT NULL
-);
-CREATE TABLE IF NOT EXISTS kalshi_trades_3 (
-    market_ticker TEXT PRIMARY KEY,
-    timestamp BIGINT NOT NULL,
-    price BIGINT NOT NULL,
-    quantity BIGINT NOT NULL,
-    taker_side TEXT NOT NULL,
     message JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_kalshi_trades_3_timestamp ON kalshi_trades_3(timestamp);
+CREATE INDEX IF NOT EXISTS idx_kalshi_markets_3_found_time ON kalshi_markets_3(found_time_ms);
+
+CREATE TABLE IF NOT EXISTS kalshi_trades_3 (
+    id SERIAL PRIMARY KEY,
+    market_ticker TEXT NOT NULL,
+    found_time_ms BIGINT NOT NULL,
+    message JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kalshi_trades_3_found_time ON kalshi_trades_3(found_time_ms);
+CREATE INDEX IF NOT EXISTS idx_kalshi_trades_3_market ON kalshi_trades_3(market_ticker);
 
 CREATE TABLE IF NOT EXISTS kalshi_orderbook_updates_3 (
-    market_ticker TEXT PRIMARY KEY,
-    timestamp BIGINT NOT NULL,
-    update_type TEXT NOT NULL,
+    id SERIAL PRIMARY KEY,
+    market_ticker TEXT NOT NULL,
+    found_time_ms BIGINT NOT NULL,
     message JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_kalshi_orderbook_updates_3_timestamp ON kalshi_orderbook_updates_3(timestamp);
-CREATE INDEX IF NOT EXISTS idx_kalshi_orderbook_updates_3_type ON kalshi_orderbook_updates_3(update_type);
+CREATE INDEX IF NOT EXISTS idx_kalshi_orderbook_updates_3_found_time ON kalshi_orderbook_updates_3(found_time_ms);
+CREATE INDEX IF NOT EXISTS idx_kalshi_orderbook_updates_3_market ON kalshi_orderbook_updates_3(market_ticker);
+
+CREATE TABLE IF NOT EXISTS kalshi_market_lifecycle_3 (
+    id SERIAL PRIMARY KEY,
+    market_ticker TEXT NOT NULL,
+    found_time_ms BIGINT NOT NULL,
+    event_type TEXT NOT NULL,
+    message JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kalshi_market_lifecycle_3_found_time ON kalshi_market_lifecycle_3(found_time_ms);
+CREATE INDEX IF NOT EXISTS idx_kalshi_market_lifecycle_3_market ON kalshi_market_lifecycle_3(market_ticker);
+CREATE INDEX IF NOT EXISTS idx_kalshi_market_lifecycle_3_event_type ON kalshi_market_lifecycle_3(event_type);
 """
 
 # --- Helper & Auth Functions ---
@@ -138,43 +150,40 @@ async def init_db(pool):
     logger.info("Database initialized.")
 
 async def upsert_market(pool, market_json):
-    """Inserts or updates a market in the kalshi_markets_2 table."""
+    """Inserts or updates a market in the kalshi_markets_3 table."""
     ticker = market_json.get('ticker_name') or market_json.get('ticker')
     if not ticker:
         logger.warning(f"Market JSON missing ticker field: {market_json}")
         return
     
     await pool.execute("""
-        INSERT INTO kalshi_markets_3 (market_ticker, found_time_ms, market)
+        INSERT INTO kalshi_markets_3 (market_ticker, found_time_ms, message)
         VALUES ($1, $2, $3)
         ON CONFLICT (market_ticker) DO UPDATE SET
             found_time_ms = EXCLUDED.found_time_ms,
-            market = EXCLUDED.market;
+            message = EXCLUDED.message;
     """, ticker, int(time.time() * 1000), json.dumps(market_json))
 
 async def insert_trade(pool, trade_data):
     """Inserts a trade record into the kalshi_trades_3 table."""
     await pool.execute("""
-        INSERT INTO kalshi_trades_3 (market_ticker, timestamp, price, quantity, taker_side, message)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (market_ticker) DO UPDATE SET
-            timestamp = EXCLUDED.timestamp,
-            price = EXCLUDED.price,
-            quantity = EXCLUDED.quantity,
-            taker_side = EXCLUDED.taker_side,
-            message = EXCLUDED.message;
-    """, trade_data['market_ticker'], trade_data['ts'] * 1_000_000_000, trade_data['yes_price'], trade_data['count'], trade_data['taker_side'], json.dumps(trade_data))
+        INSERT INTO kalshi_trades_3 (market_ticker, found_time_ms, message)
+        VALUES ($1, $2, $3)
+    """, trade_data['market_ticker'], int(time.time() * 1000), json.dumps(trade_data))
 
-async def insert_orderbook_update(pool, ob_data, update_type='delta'):
-    """Inserts an order book update record (delta or snapshot) into the kalshi_orderbook_updates_3 table."""
+async def insert_orderbook_update(pool, ob_data):
+    """Inserts an order book update record into the kalshi_orderbook_updates_3 table."""
     await pool.execute("""
-        INSERT INTO kalshi_orderbook_updates_3 (market_ticker, timestamp, update_type, message)
+        INSERT INTO kalshi_orderbook_updates_3 (market_ticker, found_time_ms, message)
+        VALUES ($1, $2, $3)
+    """, ob_data['market_ticker'], int(time.time() * 1000), json.dumps(ob_data))
+
+async def insert_market_lifecycle(pool, lifecycle_data):
+    """Inserts a market lifecycle event into the kalshi_market_lifecycle_3 table."""
+    await pool.execute("""
+        INSERT INTO kalshi_market_lifecycle_3 (market_ticker, found_time_ms, event_type, message)
         VALUES ($1, $2, $3, $4)
-        ON CONFLICT (market_ticker) DO UPDATE SET
-            timestamp = EXCLUDED.timestamp,
-            update_type = EXCLUDED.update_type,
-            message = EXCLUDED.message;
-    """, ob_data['market_ticker'], int(time.time() * 1_000_000_000), update_type, json.dumps(ob_data))
+    """, lifecycle_data['market_ticker'], int(time.time() * 1000), lifecycle_data['event_type'], json.dumps(lifecycle_data))
 
 # --- Main Logic ---
 
@@ -276,31 +285,67 @@ async def websocket_listener(initial_tickers, pool):
                             
                             elif msg_type == 'orderbook_snapshot':
                                 ob_msg = msg['msg']
-                                await insert_orderbook_update(pool, ob_msg, update_type='snapshot')
+                                await insert_orderbook_update(pool, ob_msg)
                                 increment_message_stat(ob_msg['market_ticker'], 'orderbook_snapshot')
                             
                             elif msg_type == 'orderbook_delta':
                                 ob_msg = msg['msg']
-                                await insert_orderbook_update(pool, ob_msg, update_type='delta')
+                                await insert_orderbook_update(pool, ob_msg)
                                 increment_message_stat(ob_msg['market_ticker'], 'orderbook_delta')
 
-                            elif msg_type == 'market_lifecycle_v2' and msg['msg']['event_type'] == 'created':
-                                new_ticker = msg['msg']['market_ticker']
-                                if is_target_market(new_ticker) and new_ticker not in tracked_tickers:
-                                    logger.info(f"New target market created: {new_ticker}. Fetching details...")
-                                    market_details = await get_market_details_v2(session, new_ticker)
-                                    if market_details:
-                                        await upsert_market(pool, market_details)
-                                        tracked_tickers.add(new_ticker)
-                                        
-                                        new_sub = {
-                                            "id": msg_id_counter, "cmd": "subscribe",
-                                            "params": {"channels": ["trade", "orderbook_delta"], "market_tickers": [new_ticker]}
+                            elif msg_type == 'market_lifecycle_v2':
+                                lifecycle_msg = msg['msg']
+                                event_type = lifecycle_msg['event_type']
+                                market_ticker = lifecycle_msg['market_ticker']
+                                
+                                # Only process and store lifecycle events for target markets
+                                if not is_target_market(market_ticker):
+                                    continue
+                                
+                                # Store lifecycle events for target markets
+                                await insert_market_lifecycle(pool, lifecycle_msg)
+                                increment_message_stat(market_ticker, f'lifecycle_{event_type}')
+                                
+                                if event_type == 'created':
+                                    if market_ticker not in tracked_tickers:
+                                        logger.info(f"New target market created: {market_ticker}. Fetching details...")
+                                        market_details = await get_market_details_v2(session, market_ticker)
+                                        if market_details:
+                                            await upsert_market(pool, market_details)
+                                            tracked_tickers.add(market_ticker)
+                                            
+                                            new_sub = {
+                                                "id": msg_id_counter, "cmd": "subscribe",
+                                                "params": {"channels": ["trade", "orderbook_delta"], "market_tickers": [market_ticker]}
+                                            }
+                                            await websocket.send(json.dumps(new_sub))
+                                            logger.info(f"Subscribed to new market {market_ticker}")
+                                            msg_id_counter += 1
+                                
+                                elif event_type in ['determined', 'settled']:
+                                    # Unsubscribe from determined or settled markets
+                                    if market_ticker in tracked_tickers:
+                                        logger.info(f"Market {market_ticker} {event_type}. Unsubscribing...")
+                                        unsub = {
+                                            "id": msg_id_counter, "cmd": "unsubscribe",
+                                            "params": {"channels": ["trade", "orderbook_delta"], "market_tickers": [market_ticker]}
                                         }
-                                        await websocket.send(json.dumps(new_sub))
+                                        await websocket.send(json.dumps(unsub))
+                                        tracked_tickers.remove(market_ticker)
+                                        logger.info(f"Unsubscribed from {market_ticker}")
                                         msg_id_counter += 1
-                        except (json.JSONDecodeError, KeyError):
-                            logger.warning(f"Received message with unexpected format: {message}")
+                                
+                                elif event_type == 'activated':
+                                    logger.info(f"Market {market_ticker} activated")
+                                
+                                elif event_type == 'deactivated':
+                                    logger.info(f"Market {market_ticker} deactivated")
+                                
+                                elif event_type == 'close_date_updated':
+                                    logger.info(f"Market {market_ticker} close date updated")
+                                    
+                        except (json.JSONDecodeError, KeyError) as e:
+                            logger.warning(f"Received message with unexpected format: {message}. Error: {e}")
 
         except websockets.exceptions.InvalidStatusCode as e:
             logger.error(f"WebSocket connection failed: {e.status_code}. Check credentials.", exc_info=True)

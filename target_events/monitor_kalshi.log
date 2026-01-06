@@ -1,25 +1,9 @@
-=== Market Statistics Report - 2026-01-06 10:13:05 ===
-Tracking 76 markets
-
-KXBTC15M-26JAN060515-15
-  Total: 148
-  orderbook_delta: 144, orderbook_snapshot: 1, trade: 3
-
-KXBTC15M-26JAN060530-30
-  Total: 1
-  orderbook_snapshot: 1
-
-KXBTC15M-26JAN060545-45
-  Total: 1
-  orderbook_snapshot: 1
-
-KXBTC15M-26JAN060600-00
-  Total: 1
-  orderbook_snapshot: 1
+=== Market Statistics Report - 2026-01-06 11:04:17 ===
+Tracking 72 markets
 
 KXBTC15M-26JAN060615-15
-  Total: 1
-  orderbook_snapshot: 1
+  Total: 184
+  orderbook_delta: 166, orderbook_snapshot: 1, trade: 17
 
 KXBTC15M-26JAN060630-30
   Total: 1
