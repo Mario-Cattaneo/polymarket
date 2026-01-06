@@ -25,12 +25,22 @@ KALSHI_PRIVATE_KEY_PATH = os.path.expanduser("~/.keys/kalshi_private.pem")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 logger = logging.getLogger()
 
+# --- Monitor Logger Setup (dedicated file) ---
+monitor_logger = logging.getLogger('monitor')
+monitor_logger.setLevel(logging.INFO)
+monitor_log_path = os.path.join(os.path.dirname(__file__), "monitor_kalshi.log")
+# File handler will be recreated each monitoring cycle to clear the file
+
+# --- Message Statistics Tracking ---
+message_stats = {}  # {market_ticker: {message_type: count}}
+
 # --- Kalshi API Configuration ---
 KALSHI_V1_REST_URL = "https://api.elections.kalshi.com/v1"
 KALSHI_V2_REST_URL = "https://api.elections.kalshi.com/trade-api/v2"
 WS_BASE_URL = "wss://api.elections.kalshi.com"
 WS_URL_SUFFIX = "/trade-api/ws/v2"
 KALSHI_WSS_URL = WS_BASE_URL + WS_URL_SUFFIX
+MONITORING_INTERVAL_SECONDS = 15  # How often to log market statistics
 
 # --- Database Schema Definition (with message columns and indexes) ---
 CREATE_TABLES_SQL = """
@@ -92,6 +102,14 @@ def is_target_market(market_ticker):
     ticker_upper = market_ticker.upper()
     return ticker_upper.startswith('KXBTC15M')
 
+def increment_message_stat(market_ticker, message_type):
+    """Increments the message count for a specific market and message type."""
+    if market_ticker not in message_stats:
+        message_stats[market_ticker] = {}
+    if message_type not in message_stats[market_ticker]:
+        message_stats[market_ticker][message_type] = 0
+    message_stats[market_ticker][message_type] += 1
+
 async def get_market_details_v2(session, ticker):
     """Fetches full market details from the V2 endpoint, which requires auth."""
     path = f"/trade-api/v2/markets/{ticker}"
@@ -117,7 +135,7 @@ async def init_db(pool):
     """Initializes the database by creating tables if they don't exist."""
     async with pool.acquire() as connection:
         await connection.execute(CREATE_TABLES_SQL)
-    logger.info("Database tables and indexes initialized successfully.")
+    logger.info("Database initialized.")
 
 async def upsert_market(pool, market_json):
     """Inserts or updates a market in the kalshi_markets_2 table."""
@@ -133,7 +151,6 @@ async def upsert_market(pool, market_json):
             found_time_ms = EXCLUDED.found_time_ms,
             market = EXCLUDED.market;
     """, ticker, int(time.time() * 1000), json.dumps(market_json))
-    logger.info(f"Upserted market '{ticker}' into the database.")
 
 async def insert_trade(pool, trade_data):
     """Inserts a trade record into the kalshi_trades_3 table."""
@@ -161,9 +178,37 @@ async def insert_orderbook_update(pool, ob_data, update_type='delta'):
 
 # --- Main Logic ---
 
+async def log_market_statistics(tracked_tickers):
+    """Periodically logs statistics about subscribed markets and their message counts."""
+    while True:
+        await asyncio.sleep(MONITORING_INTERVAL_SECONDS)
+        
+        # Clear and write to monitor.log
+        with open(monitor_log_path, 'w') as f:
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"=== Market Statistics Report - {timestamp} ===\n")
+            
+            if not tracked_tickers:
+                f.write("No markets currently tracked.\n")
+            else:
+                f.write(f"Tracking {len(tracked_tickers)} markets\n\n")
+                
+                # Sort by ticker for consistent ordering
+                for ticker in sorted(tracked_tickers):
+                    if ticker in message_stats:
+                        stats = message_stats[ticker]
+                        total = sum(stats.values())
+                        stats_str = ", ".join([f"{msg_type}: {count}" for msg_type, count in sorted(stats.items())])
+                        f.write(f"{ticker}\n")
+                        f.write(f"  Total: {total}\n")
+                        f.write(f"  {stats_str}\n\n")
+                    else:
+                        f.write(f"{ticker}\n")
+                        f.write(f"  No messages yet\n\n")
+
 async def find_initial_markets(session, pool):
     """Finds all existing open markets via HTTP and stores them in the DB."""
-    logger.info("--- Starting Initial Market Scan (HTTP V1 Endpoint) ---")
+    logger.info("Starting initial market scan...")
     target_series = ['KXBTC15M']
     initial_tickers = []
 
@@ -188,12 +233,11 @@ async def find_initial_markets(session, pool):
                 logger.error(f"Client error during initial scan for {series}: {e}")
                 break
     
-    logger.info(f"--- Initial Scan Complete. Found {len(initial_tickers)} markets. ---")
+    logger.info(f"Initial scan complete. Found {len(initial_tickers)} markets.")
     return initial_tickers
 
 async def websocket_listener(initial_tickers, pool):
     """Connects to the WebSocket to listen for real-time events."""
-    logger.info("--- Starting Real-Time Market Listener (WebSocket) ---")
     tracked_tickers = set(initial_tickers)
     msg_id_counter = 2 
 
@@ -203,25 +247,21 @@ async def websocket_listener(initial_tickers, pool):
             if not auth_headers: break
 
             async with websockets.connect(KALSHI_WSS_URL, additional_headers=auth_headers) as websocket:
-                logger.info("WebSocket connection established successfully!")
+                logger.info("WebSocket connected.")
                 
                 # Always subscribe to market lifecycle channel
                 lifecycle_sub = {"id": 1, "cmd": "subscribe", "params": {"channels": ["market_lifecycle_v2"]}}
                 await websocket.send(json.dumps(lifecycle_sub))
-                logger.info("Subscribed to market_lifecycle_v2 channel.")
 
                 # Resubscribe to all tracked tickers (trade and orderbook_delta) after connection/reconnection
                 if tracked_tickers:
-                    logger.info(f"Resubscribing to {len(tracked_tickers)} tracked markets for trade and orderbook_delta...")
                     trade_sub = {
                         "id": msg_id_counter, "cmd": "subscribe", 
                         "params": {"channels": ["trade", "orderbook_delta"], "market_tickers": list(tracked_tickers)}
                     }
                     await websocket.send(json.dumps(trade_sub))
-                    logger.info(f"Resubscribed to {len(tracked_tickers)} markets.")
+                    logger.info(f"Subscribed to {len(tracked_tickers)} markets.")
                     msg_id_counter += 1
-                else:
-                    logger.info("No tracked markets yet, skipping trade/orderbook subscription.")
 
                 async with aiohttp.ClientSession() as session:
                     async for message in websocket:
@@ -230,13 +270,19 @@ async def websocket_listener(initial_tickers, pool):
                             msg_type = msg.get('type')
 
                             if msg_type == 'trade':
-                                await insert_trade(pool, msg['msg'])
+                                trade_msg = msg['msg']
+                                await insert_trade(pool, trade_msg)
+                                increment_message_stat(trade_msg['market_ticker'], 'trade')
                             
                             elif msg_type == 'orderbook_snapshot':
-                                await insert_orderbook_update(pool, msg['msg'], update_type='snapshot')
+                                ob_msg = msg['msg']
+                                await insert_orderbook_update(pool, ob_msg, update_type='snapshot')
+                                increment_message_stat(ob_msg['market_ticker'], 'orderbook_snapshot')
                             
                             elif msg_type == 'orderbook_delta':
-                                await insert_orderbook_update(pool, msg['msg'], update_type='delta')
+                                ob_msg = msg['msg']
+                                await insert_orderbook_update(pool, ob_msg, update_type='delta')
+                                increment_message_stat(ob_msg['market_ticker'], 'orderbook_delta')
 
                             elif msg_type == 'market_lifecycle_v2' and msg['msg']['event_type'] == 'created':
                                 new_ticker = msg['msg']['market_ticker']
@@ -271,23 +317,29 @@ async def main():
         logger.error("One or more required environment variables are not set.")
         return
 
+    logger.info(f"Monitor log: {monitor_log_path}")
+    
     pool = None
     try:
         pool = await asyncpg.create_pool(user=DB_USER, password=DB_PASS, database=DB_NAME, host=PG_HOST, port=PG_PORT)
-        logger.info("Successfully connected to PostgreSQL database.")
+        logger.info("Database connected.")
         await init_db(pool)
         
         async with aiohttp.ClientSession() as session:
             initial_tickers = await find_initial_markets(session, pool)
         
-        await websocket_listener(initial_tickers, pool)
+        # Start monitoring task and websocket listener concurrently
+        monitored_tickers = set(initial_tickers)
+        await asyncio.gather(
+            log_market_statistics(monitored_tickers),
+            websocket_listener(initial_tickers, pool)
+        )
 
     except Exception as e:
         logger.critical(f"A critical error occurred in the main function: {e}", exc_info=True)
     finally:
         if pool:
             await pool.close()
-            logger.info("Database connection pool closed.")
 
 if __name__ == "__main__":
     asyncio.run(main())
