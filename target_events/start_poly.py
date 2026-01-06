@@ -39,73 +39,79 @@ FETCH_LIMIT = 500
 CREATE_TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS poly_markets (
     market_id TEXT PRIMARY KEY,
-    found_time_ms BIGINT NOT NULL,
+    found_time_us BIGINT NOT NULL,
     message JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_poly_markets_found_time ON poly_markets(found_time_ms);
 
 CREATE TABLE IF NOT EXISTS poly_new_market (
     id SERIAL PRIMARY KEY,
     market_id TEXT NOT NULL,
-    found_time_ms BIGINT NOT NULL,
+    found_time_us BIGINT NOT NULL,
+    server_time_us BIGINT NOT NULL,
     message JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_poly_new_market_found_time ON poly_new_market(found_time_ms);
-CREATE INDEX IF NOT EXISTS idx_poly_new_market_id ON poly_new_market(market_id);
+CREATE INDEX IF NOT EXISTS idx_poly_new_market_market_id ON poly_new_market(market_id);
+CREATE INDEX IF NOT EXISTS idx_poly_new_market_server_time ON poly_new_market(server_time_us);
 
 CREATE TABLE IF NOT EXISTS poly_market_resolved (
     id SERIAL PRIMARY KEY,
     market_id TEXT NOT NULL,
-    found_time_ms BIGINT NOT NULL,
+    found_time_us BIGINT NOT NULL,
+    server_time_us BIGINT NOT NULL,
     message JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_poly_market_resolved_found_time ON poly_market_resolved(found_time_ms);
-CREATE INDEX IF NOT EXISTS idx_poly_market_resolved_id ON poly_market_resolved(market_id);
+CREATE INDEX IF NOT EXISTS idx_poly_market_resolved_market_id ON poly_market_resolved(market_id);
+CREATE INDEX IF NOT EXISTS idx_poly_market_resolved_server_time ON poly_market_resolved(server_time_us);
 
 CREATE TABLE IF NOT EXISTS poly_price_change (
     id SERIAL PRIMARY KEY,
-    market_address TEXT NOT NULL,
-    found_time_ms BIGINT NOT NULL,
+    asset_id TEXT NOT NULL,
+    found_time_us BIGINT NOT NULL,
+    server_time_us BIGINT NOT NULL,
     message JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_poly_price_change_found_time ON poly_price_change(found_time_ms);
-CREATE INDEX IF NOT EXISTS idx_poly_price_change_market ON poly_price_change(market_address);
+CREATE INDEX IF NOT EXISTS idx_poly_price_change_asset_id ON poly_price_change(asset_id);
+CREATE INDEX IF NOT EXISTS idx_poly_price_change_server_time ON poly_price_change(server_time_us);
 
 CREATE TABLE IF NOT EXISTS poly_best_bid_ask (
     id SERIAL PRIMARY KEY,
-    market_address TEXT NOT NULL,
-    found_time_ms BIGINT NOT NULL,
+    asset_id TEXT NOT NULL,
+    found_time_us BIGINT NOT NULL,
+    server_time_us BIGINT NOT NULL,
     message JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_poly_best_bid_ask_found_time ON poly_best_bid_ask(found_time_ms);
-CREATE INDEX IF NOT EXISTS idx_poly_best_bid_ask_market ON poly_best_bid_ask(market_address);
+CREATE INDEX IF NOT EXISTS idx_poly_best_bid_ask_asset_id ON poly_best_bid_ask(asset_id);
+CREATE INDEX IF NOT EXISTS idx_poly_best_bid_ask_server_time ON poly_best_bid_ask(server_time_us);
 
 CREATE TABLE IF NOT EXISTS poly_book (
     id SERIAL PRIMARY KEY,
-    market_address TEXT NOT NULL,
-    found_time_ms BIGINT NOT NULL,
+    asset_id TEXT NOT NULL,
+    found_time_us BIGINT NOT NULL,
+    server_time_us BIGINT NOT NULL,
     message JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_poly_book_found_time ON poly_book(found_time_ms);
-CREATE INDEX IF NOT EXISTS idx_poly_book_market ON poly_book(market_address);
+CREATE INDEX IF NOT EXISTS idx_poly_book_asset_id ON poly_book(asset_id);
+CREATE INDEX IF NOT EXISTS idx_poly_book_server_time ON poly_book(server_time_us);
 
 CREATE TABLE IF NOT EXISTS poly_last_trade_price (
     id SERIAL PRIMARY KEY,
-    market_address TEXT NOT NULL,
-    found_time_ms BIGINT NOT NULL,
+    asset_id TEXT NOT NULL,
+    found_time_us BIGINT NOT NULL,
+    server_time_us BIGINT NOT NULL,
     message JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_poly_last_trade_price_found_time ON poly_last_trade_price(found_time_ms);
-CREATE INDEX IF NOT EXISTS idx_poly_last_trade_price_market ON poly_last_trade_price(market_address);
+CREATE INDEX IF NOT EXISTS idx_poly_last_trade_price_asset_id ON poly_last_trade_price(asset_id);
+CREATE INDEX IF NOT EXISTS idx_poly_last_trade_price_server_time ON poly_last_trade_price(server_time_us);
 
 CREATE TABLE IF NOT EXISTS poly_tick_size_change (
     id SERIAL PRIMARY KEY,
-    market_address TEXT NOT NULL,
-    found_time_ms BIGINT NOT NULL,
+    asset_id TEXT NOT NULL,
+    found_time_us BIGINT NOT NULL,
+    server_time_us BIGINT NOT NULL,
     message JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_poly_tick_size_change_found_time ON poly_tick_size_change(found_time_ms);
-CREATE INDEX IF NOT EXISTS idx_poly_tick_size_change_market ON poly_tick_size_change(market_address);
+CREATE INDEX IF NOT EXISTS idx_poly_tick_size_change_asset_id ON poly_tick_size_change(asset_id);
+CREATE INDEX IF NOT EXISTS idx_poly_tick_size_change_server_time ON poly_tick_size_change(server_time_us);
 """
 
 # --- Helper Functions ---
@@ -173,62 +179,78 @@ async def upsert_market(pool, market_json):
         return
     
     await pool.execute("""
-        INSERT INTO poly_markets (market_id, found_time_ms, message)
+        INSERT INTO poly_markets (market_id, found_time_us, message)
         VALUES ($1, $2, $3)
         ON CONFLICT (market_id) DO UPDATE SET
-            found_time_ms = EXCLUDED.found_time_ms,
+            found_time_us = EXCLUDED.found_time_us,
             message = EXCLUDED.message;
-    """, market_id, int(time.time() * 1000), json.dumps(market_json))
+    """, market_id, int(time.time() * 1_000_000), json.dumps(market_json))
     logger.info(f"Upserted market '{market_id}' - '{market_json.get('question', '')}' into the database.")
 
 async def insert_new_market(pool, msg):
     """Inserts a new_market message into the poly_new_market table."""
+    server_time_us = int(msg.get('timestamp', 0)) * 1000  # Convert ms to us
     await pool.execute("""
-        INSERT INTO poly_new_market (market_id, found_time_ms, message)
-        VALUES ($1, $2, $3)
-    """, msg.get('id'), int(time.time() * 1000), json.dumps(msg))
+        INSERT INTO poly_new_market (market_id, found_time_us, server_time_us, message)
+        VALUES ($1, $2, $3, $4)
+    """, msg.get('id'), int(time.time() * 1_000_000), server_time_us, json.dumps(msg))
 
 async def insert_market_resolved(pool, msg):
     """Inserts a market_resolved message into the poly_market_resolved table."""
+    server_time_us = int(msg.get('timestamp', 0)) * 1000  # Convert ms to us
     await pool.execute("""
-        INSERT INTO poly_market_resolved (market_id, found_time_ms, message)
-        VALUES ($1, $2, $3)
-    """, msg.get('id'), int(time.time() * 1000), json.dumps(msg))
+        INSERT INTO poly_market_resolved (market_id, found_time_us, server_time_us, message)
+        VALUES ($1, $2, $3, $4)
+    """, msg.get('id'), int(time.time() * 1_000_000), server_time_us, json.dumps(msg))
 
 async def insert_price_change(pool, msg):
-    """Inserts a price_change message into the poly_price_change table."""
-    await pool.execute("""
-        INSERT INTO poly_price_change (market_address, found_time_ms, message)
-        VALUES ($1, $2, $3)
-    """, msg.get('market', ''), int(time.time() * 1000), json.dumps(msg))
+    """Inserts price_change messages into the poly_price_change table.
+    
+    The price_change message contains an array of price_changes, each with its own asset_id.
+    We store each individual price change as a separate row.
+    """
+    server_time_us = int(msg.get('timestamp', 0)) * 1000  # Convert ms to us
+    price_changes = msg.get('price_changes', [])
+    
+    for price_change in price_changes:
+        asset_id = price_change.get('asset_id', '')
+        if asset_id:
+            await pool.execute("""
+                INSERT INTO poly_price_change (asset_id, found_time_us, server_time_us, message)
+                VALUES ($1, $2, $3, $4)
+            """, asset_id, int(time.time() * 1_000_000), server_time_us, json.dumps(price_change))
 
 async def insert_best_bid_ask(pool, msg):
     """Inserts a best_bid_ask message into the poly_best_bid_ask table."""
+    server_time_us = int(msg.get('timestamp', 0)) * 1000  # Convert ms to us
     await pool.execute("""
-        INSERT INTO poly_best_bid_ask (market_address, found_time_ms, message)
-        VALUES ($1, $2, $3)
-    """, msg.get('market', ''), int(time.time() * 1000), json.dumps(msg))
+        INSERT INTO poly_best_bid_ask (asset_id, found_time_us, server_time_us, message)
+        VALUES ($1, $2, $3, $4)
+    """, msg.get('asset_id', ''), int(time.time() * 1_000_000), server_time_us, json.dumps(msg))
 
 async def insert_book(pool, msg):
     """Inserts a book message into the poly_book table."""
+    server_time_us = int(msg.get('timestamp', 0)) * 1000  # Convert ms to us
     await pool.execute("""
-        INSERT INTO poly_book (market_address, found_time_ms, message)
-        VALUES ($1, $2, $3)
-    """, msg.get('market', ''), int(time.time() * 1000), json.dumps(msg))
+        INSERT INTO poly_book (asset_id, found_time_us, server_time_us, message)
+        VALUES ($1, $2, $3, $4)
+    """, msg.get('asset_id', ''), int(time.time() * 1_000_000), server_time_us, json.dumps(msg))
 
 async def insert_last_trade_price(pool, msg):
     """Inserts a last_trade_price message into the poly_last_trade_price table."""
+    server_time_us = int(msg.get('timestamp', 0)) * 1000  # Convert ms to us
     await pool.execute("""
-        INSERT INTO poly_last_trade_price (market_address, found_time_ms, message)
-        VALUES ($1, $2, $3)
-    """, msg.get('market', ''), int(time.time() * 1000), json.dumps(msg))
+        INSERT INTO poly_last_trade_price (asset_id, found_time_us, server_time_us, message)
+        VALUES ($1, $2, $3, $4)
+    """, msg.get('asset_id', ''), int(time.time() * 1_000_000), server_time_us, json.dumps(msg))
 
 async def insert_tick_size_change(pool, msg):
     """Inserts a tick_size_change message into the poly_tick_size_change table."""
+    server_time_us = int(msg.get('timestamp', 0)) * 1000  # Convert ms to us
     await pool.execute("""
-        INSERT INTO poly_tick_size_change (market_address, found_time_ms, message)
-        VALUES ($1, $2, $3)
-    """, msg.get('market', ''), int(time.time() * 1000), json.dumps(msg))
+        INSERT INTO poly_tick_size_change (asset_id, found_time_us, server_time_us, message)
+        VALUES ($1, $2, $3, $4)
+    """, msg.get('asset_id', ''), int(time.time() * 1_000_000), server_time_us, json.dumps(msg))
 
 # --- Main Logic ---
 

@@ -1,53 +1,49 @@
-=== Market Statistics Report - 2026-01-06 17:43:49 ===
-Tracking 46 markets
-
-KXBTC15M-26JAN061245-45
-  Total: 76
-  orderbook_delta: 71, orderbook_snapshot: 1, trade: 4
+=== Market Statistics Report - 2026-01-06 20:21:29 ===
+Tracking 45 markets
 
 KXBTC15M-26JAN061300-00
-  Total: 1
-  orderbook_snapshot: 1
+  Total: 229
+  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 213, orderbook_snapshot: 2, trade: 12
 
 KXBTC15M-26JAN061315-15
-  Total: 1
-  orderbook_snapshot: 1
+  Total: 17509
+  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 17101, orderbook_snapshot: 2, trade: 404
 
 KXBTC15M-26JAN061330-30
-  Total: 1
-  orderbook_snapshot: 1
+  Total: 20707
+  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 20250, orderbook_snapshot: 2, trade: 453
 
 KXBTC15M-26JAN061345-45
-  Total: 1
-  orderbook_snapshot: 1
+  Total: 16088
+  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 15744, orderbook_snapshot: 2, trade: 340
 
 KXBTC15M-26JAN061400-00
-  Total: 1
-  orderbook_snapshot: 1
+  Total: 14738
+  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 13848, orderbook_snapshot: 2, trade: 886
 
 KXBTC15M-26JAN061415-15
-  Total: 1
-  orderbook_snapshot: 1
+  Total: 14798
+  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 14325, orderbook_snapshot: 2, trade: 469
 
 KXBTC15M-26JAN061430-30
-  Total: 1
-  orderbook_snapshot: 1
+  Total: 15026
+  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 14576, orderbook_snapshot: 2, trade: 446
 
 KXBTC15M-26JAN061445-45
-  Total: 1
-  orderbook_snapshot: 1
+  Total: 9691
+  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 9387, orderbook_snapshot: 2, trade: 300
 
 KXBTC15M-26JAN061500-00
-  Total: 1
-  orderbook_snapshot: 1
+  Total: 17263
+  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 16842, orderbook_snapshot: 2, trade: 417
 
 KXBTC15M-26JAN061515-15
-  Total: 1
-  orderbook_snapshot: 1
+  Total: 5532
+  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 5226, orderbook_snapshot: 2, trade: 302
 
 KXBTC15M-26JAN061530-30
-  Total: 1
-  orderbook_snapshot: 1
+  Total: 5198
+  orderbook_delta: 5080, orderbook_snapshot: 1, trade: 117
 
 KXBTC15M-26JAN061545-45
   Total: 1
