@@ -21,6 +21,16 @@ DB_PASS = os.getenv("POLY_DB_CLI_PASS")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 logger = logging.getLogger()
 
+# --- Monitor Logger Setup (dedicated file) ---
+monitor_logger = logging.getLogger('monitor')
+monitor_logger.setLevel(logging.INFO)
+monitor_log_path = os.path.join(os.path.dirname(__file__), "monitor_poly.log")
+# File handler will be recreated each monitoring cycle to clear the file
+
+# --- Message Statistics Tracking ---
+asset_stats = {}  # {asset_id: {'market_id': id, 'question': q, 'outcome': o, 'counts': {msg_type: count}}}
+market_to_assets = {}  # {market_id: [asset_ids]}
+
 # --- Polymarket API Configuration ---
 POLY_REST_URL = "https://gamma-api.polymarket.com/markets"
 POLY_WSS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
@@ -101,9 +111,17 @@ CREATE INDEX IF NOT EXISTS idx_poly_tick_size_change_market ON poly_tick_size_ch
 
 # --- Helper Functions ---
 
-def is_ethereum_15min_market(question: str) -> bool:
-    """Check if a market question matches the Ethereum Up or Down 15-minute format."""
-    pattern = r"^Ethereum Up or Down\s*-\s*\w+\s+\d+,\s+\d+:\d+[AP]M-\d+:\d+[AP]M\s+ET$"
+def increment_message_stat(asset_id, message_type):
+    """Increments the message count for a specific asset and message type."""
+    if asset_id not in asset_stats:
+        asset_stats[asset_id] = {'counts': {}}
+    if message_type not in asset_stats[asset_id]['counts']:
+        asset_stats[asset_id]['counts'][message_type] = 0
+    asset_stats[asset_id]['counts'][message_type] += 1
+
+def is_Bitcoin_15min_market(question: str) -> bool:
+    """Check if a market question matches the Bitcoin Up or Down 15-minute format."""
+    pattern = r"^Bitcoin Up or Down\s*-\s*\w+\s+\d+,\s+\d+:\d+[AP]M-\d+:\d+[AP]M\s+ET$"
     return bool(re.match(pattern, question, re.IGNORECASE))
 
 # --- Database Functions ---
@@ -181,8 +199,56 @@ async def insert_tick_size_change(pool, msg):
 
 # --- Main Logic ---
 
+MONITORING_INTERVAL_SECONDS = 15  # How often to log market statistics
+
+async def log_market_statistics(tracked_markets):
+    """Periodically logs statistics about subscribed markets and their message counts."""
+    while True:
+        await asyncio.sleep(MONITORING_INTERVAL_SECONDS)
+        
+        # Clear and write to monitor_poly.log
+        with open(monitor_log_path, 'w') as f:
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"=== Market Statistics Report - {timestamp} ===\n")
+            
+            if not tracked_markets:
+                f.write("No markets currently tracked.\n")
+            else:
+                f.write(f"Tracking {len(tracked_markets)} markets ({len(asset_stats)} assets with messages)\n\n")
+                
+                # Group stats by market_id
+                market_stats = {}
+                for asset_id, stats in asset_stats.items():
+                    market_id = stats.get('market_id', 'unknown')
+                    if market_id not in market_stats:
+                        market_stats[market_id] = {
+                            'question': stats.get('question', 'unknown'),
+                            'assets': []
+                        }
+                    market_stats[market_id]['assets'].append({
+                        'asset_id': asset_id,
+                        'outcome': stats.get('outcome', 'unknown'),
+                        'counts': stats['counts']
+                    })
+                
+                # Sort by market_id for consistent ordering
+                for market_id in sorted(tracked_markets.keys()):
+                    question = tracked_markets[market_id].get('question', 'unknown')
+                    f.write(f"Market {market_id}: {question[:60]}...\n")
+                    
+                    if market_id in market_stats:
+                        for asset_info in market_stats[market_id]['assets']:
+                            outcome = asset_info['outcome']
+                            counts = asset_info['counts']
+                            total = sum(counts.values())
+                            stats_str = ", ".join([f"{msg_type}: {count}" for msg_type, count in sorted(counts.items())])
+                            f.write(f"  {outcome}: Total={total}, {stats_str}\n")
+                    else:
+                        f.write(f"  No messages yet\n")
+                    f.write(f"\n")
+
 async def fetch_initial_markets(session, pool):
-    """Fetches all Ethereum 15-min markets that are not closed."""
+    """Fetches all Bitcoin 15-min markets that are not closed."""
     logger.info("--- Starting Initial Market Scan (HTTP Endpoint) ---")
     offset = 0
     tracked_markets = {}  # key: market_id, value: {clobTokenIds: [...], market_address: ...}
@@ -207,18 +273,54 @@ async def fetch_initial_markets(session, pool):
                     question = market.get('question', '')
                     closed = market.get('closed', False)
                     
-                    # Filter: Ethereum 15-min markets that are not closed
-                    if is_ethereum_15min_market(question) and not closed:
+                    # Filter: Bitcoin 15-min markets that are not closed
+                    if is_Bitcoin_15min_market(question) and not closed:
                         await upsert_market(pool, market)
                         market_id = market.get('id')
-                        clob_token_ids = market.get('clobTokenIds', [])
+                        clob_token_ids_raw = market.get('clobTokenIds', '[]')
                         market_address = market.get('conditionId', '')
+                        outcomes_raw = market.get('outcomes', '[]')
+                        
+                        # Parse clobTokenIds - it's a JSON string containing an array
+                        try:
+                            if isinstance(clob_token_ids_raw, str):
+                                clob_token_ids = json.loads(clob_token_ids_raw)
+                            else:
+                                clob_token_ids = clob_token_ids_raw
+                        except json.JSONDecodeError:
+                            logger.error(f"Failed to parse clobTokenIds for market {market_id}: {clob_token_ids_raw}")
+                            clob_token_ids = []
+                        
+                        # Parse outcomes - also a JSON string
+                        try:
+                            if isinstance(outcomes_raw, str):
+                                outcomes = json.loads(outcomes_raw)
+                            else:
+                                outcomes = outcomes_raw
+                        except json.JSONDecodeError:
+                            logger.error(f"Failed to parse outcomes for market {market_id}: {outcomes_raw}")
+                            outcomes = []
                         
                         if market_id and clob_token_ids:
                             tracked_markets[market_id] = {
                                 'clobTokenIds': clob_token_ids,
-                                'market_address': market_address
+                                'market_address': market_address,
+                                'question': question,
+                                'outcomes': outcomes
                             }
+                            market_to_assets[market_id] = clob_token_ids
+                            
+                            # Register each asset_id with its market info
+                            for i, asset_id in enumerate(clob_token_ids):
+                                outcome = outcomes[i] if i < len(outcomes) else f"Outcome{i}"
+                                asset_stats[asset_id] = {
+                                    'market_id': market_id,
+                                    'question': question,
+                                    'outcome': outcome,
+                                    'counts': {}
+                                }
+                            
+                            logger.info(f"Market {market_id} ({question[:50]}...) - Assets: {clob_token_ids}")
                 
                 logger.info(f"Processed {len(markets)} markets (total tracked so far: {len(tracked_markets)})")
                 
@@ -232,7 +334,7 @@ async def fetch_initial_markets(session, pool):
             logger.error(f"Error fetching markets at offset {offset}: {e}")
             break
     
-    logger.info(f"--- Initial Scan Complete. Found {len(tracked_markets)} Ethereum 15-min markets. ---")
+    logger.info(f"--- Initial Scan Complete. Found {len(tracked_markets)} Bitcoin 15-min markets. ---")
     return tracked_markets
 
 async def send_ping(websocket: websockets.WebSocketClientProtocol, interval=5):
@@ -269,18 +371,34 @@ async def receive_messages(websocket: websockets.WebSocketClientProtocol, pool, 
             try:
                 if event_type == "new_market":
                     question = msg.get('question', '')
-                    if is_ethereum_15min_market(question):
-                        logger.info(f"New Ethereum 15-min market: {msg.get('id')} - {question}")
+                    if is_Bitcoin_15min_market(question):
+                        market_id = msg.get('id')
+                        logger.info(f"New Bitcoin 15-min market: {market_id} - {question}")
                         await insert_new_market(pool, msg)
                         
                         # Subscribe to this new market
-                        market_id = msg.get('id')
                         assets_ids = msg.get('assets_ids', [])
+                        outcomes = msg.get('outcomes', [])
                         if assets_ids:
                             tracked_markets[market_id] = {
                                 'clobTokenIds': assets_ids,
-                                'market_address': msg.get('market', '')
+                                'market_address': msg.get('market', ''),
+                                'question': question,
+                                'outcomes': outcomes
                             }
+                            market_to_assets[market_id] = assets_ids
+                            
+                            # Register each asset_id
+                            for i, asset_id in enumerate(assets_ids):
+                                outcome = outcomes[i] if i < len(outcomes) else f"Outcome{i}"
+                                asset_stats[asset_id] = {
+                                    'market_id': market_id,
+                                    'question': question,
+                                    'outcome': outcome,
+                                    'counts': {}
+                                }
+                                increment_message_stat(asset_id, 'new_market')
+                            
                             await websocket.send(json.dumps({
                                 "operation": "subscribe",
                                 "assets_ids": assets_ids,
@@ -295,6 +413,11 @@ async def receive_messages(websocket: websockets.WebSocketClientProtocol, pool, 
                         logger.info(f"Market resolved: {market_id} - {msg.get('question', '')}")
                         await insert_market_resolved(pool, msg)
                         
+                        # Increment stats for all assets in this market
+                        if market_id in market_to_assets:
+                            for asset_id in market_to_assets[market_id]:
+                                increment_message_stat(asset_id, 'market_resolved')
+                        
                         # Unsubscribe from resolved market
                         assets_ids = msg.get('assets_ids', [])
                         if assets_ids:
@@ -306,36 +429,41 @@ async def receive_messages(websocket: websockets.WebSocketClientProtocol, pool, 
                             logger.info(f"Unsubscribed from resolved market {market_id}")
                             # Remove from tracked markets
                             del tracked_markets[market_id]
+                            del market_to_assets[market_id]
                 
                 elif event_type == "price_change":
-                    # Only store if it's a tracked market
-                    market_address = msg.get('market', '')
-                    if any(m['market_address'] == market_address for m in tracked_markets.values()):
-                        await insert_price_change(pool, msg)
+                    # Each price_change contains an array of changes, one per asset
+                    price_changes = msg.get('price_changes', [])
+                    for change in price_changes:
+                        asset_id = change.get('asset_id')
+                        if asset_id and asset_id in asset_stats:
+                            await insert_price_change(pool, msg)
+                            increment_message_stat(asset_id, 'price_change')
+                            break  # Only insert once per message
                 
                 elif event_type == "best_bid_ask":
-                    # Only store if it's a tracked market
-                    market_address = msg.get('market', '')
-                    if any(m['market_address'] == market_address for m in tracked_markets.values()):
+                    asset_id = msg.get('asset_id')
+                    if asset_id and asset_id in asset_stats:
                         await insert_best_bid_ask(pool, msg)
+                        increment_message_stat(asset_id, 'best_bid_ask')
                 
                 elif event_type == "book":
-                    # Only store if it's a tracked market
-                    market_address = msg.get('market', '')
-                    if any(m['market_address'] == market_address for m in tracked_markets.values()):
+                    asset_id = msg.get('asset_id')
+                    if asset_id and asset_id in asset_stats:
                         await insert_book(pool, msg)
+                        increment_message_stat(asset_id, 'book')
                 
                 elif event_type == "last_trade_price":
-                    # Only store if it's a tracked market
-                    market_address = msg.get('market', '')
-                    if any(m['market_address'] == market_address for m in tracked_markets.values()):
+                    asset_id = msg.get('asset_id')
+                    if asset_id and asset_id in asset_stats:
                         await insert_last_trade_price(pool, msg)
+                        increment_message_stat(asset_id, 'last_trade_price')
                 
                 elif event_type == "tick_size_change":
-                    # Only store if it's a tracked market
-                    market_address = msg.get('market', '')
-                    if any(m['market_address'] == market_address for m in tracked_markets.values()):
+                    asset_id = msg.get('asset_id')
+                    if asset_id and asset_id in asset_stats:
                         await insert_tick_size_change(pool, msg)
+                        increment_message_stat(asset_id, 'tick_size_change')
                 
             except Exception as e:
                 logger.error(f"Error processing {event_type} message: {e}", exc_info=True)
@@ -360,17 +488,23 @@ async def websocket_listener(tracked_markets, pool):
             ) as websocket:
                 logger.info("WebSocket connection established successfully!")
                 
-                # Initial subscription message with custom_feature_enabled
+                # Collect all asset IDs from all tracked markets
                 all_assets_ids = []
                 for market_data in tracked_markets.values():
                     all_assets_ids.extend(market_data['clobTokenIds'])
                 
+                # Send subscription message with all assets at once
                 initial_sub = {
+                    "operation": "subscribe",
+                    "assets_ids": all_assets_ids,
                     "custom_feature_enabled": True,
-                    "assets_ids": all_assets_ids
                 }
+                
+                logger.info(f"Sending subscription for {len(tracked_markets)} markets with {len(all_assets_ids)} total assets")
+                logger.info(f"Subscription message: {json.dumps(initial_sub)[:500]}...")  # Log first 500 chars
+                
                 await websocket.send(json.dumps(initial_sub))
-                logger.info(f"Subscribed to {len(tracked_markets)} markets with {len(all_assets_ids)} assets.")
+                logger.info(f"Subscription sent successfully.")
                 
                 ping_task = asyncio.create_task(send_ping(websocket), name="ping")
                 recv_task = asyncio.create_task(receive_messages(websocket, pool, tracked_markets), name="recv")
@@ -401,6 +535,8 @@ async def main():
         logger.error("One or more required environment variables are not set.")
         return
     
+    logger.info(f"Monitor log: {monitor_log_path}")
+    
     pool = None
     try:
         pool = await asyncpg.create_pool(
@@ -416,7 +552,11 @@ async def main():
         async with aiohttp.ClientSession() as session:
             tracked_markets = await fetch_initial_markets(session, pool)
         
-        await websocket_listener(tracked_markets, pool)
+        # Start monitoring task and websocket listener concurrently
+        await asyncio.gather(
+            log_market_statistics(tracked_markets),
+            websocket_listener(tracked_markets, pool)
+        )
     
     except Exception as e:
         logger.critical(f"A critical error occurred in the main function: {e}", exc_info=True)
