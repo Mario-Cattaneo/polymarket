@@ -46,39 +46,38 @@ MONITORING_INTERVAL_SECONDS = 15  # How often to log market statistics
 CREATE_TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS kalshi_markets_3 (
     market_ticker TEXT PRIMARY KEY,
-    found_time_ms BIGINT NOT NULL,
+    found_time_us BIGINT NOT NULL,
     message JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_kalshi_markets_3_found_time ON kalshi_markets_3(found_time_ms);
 
 CREATE TABLE IF NOT EXISTS kalshi_trades_3 (
     id SERIAL PRIMARY KEY,
     market_ticker TEXT NOT NULL,
-    found_time_ms BIGINT NOT NULL,
+    found_time_us BIGINT NOT NULL,
+    server_time_us BIGINT NOT NULL,
     message JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_kalshi_trades_3_found_time ON kalshi_trades_3(found_time_ms);
-CREATE INDEX IF NOT EXISTS idx_kalshi_trades_3_market ON kalshi_trades_3(market_ticker);
+CREATE INDEX IF NOT EXISTS idx_kalshi_trades_3_ticker ON kalshi_trades_3(market_ticker);
+CREATE INDEX IF NOT EXISTS idx_kalshi_trades_3_server_time ON kalshi_trades_3(server_time_us);
 
 CREATE TABLE IF NOT EXISTS kalshi_orderbook_updates_3 (
     id SERIAL PRIMARY KEY,
     market_ticker TEXT NOT NULL,
-    found_time_ms BIGINT NOT NULL,
+    found_time_us BIGINT NOT NULL,
+    server_time_us BIGINT NOT NULL,
     message JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_kalshi_orderbook_updates_3_found_time ON kalshi_orderbook_updates_3(found_time_ms);
-CREATE INDEX IF NOT EXISTS idx_kalshi_orderbook_updates_3_market ON kalshi_orderbook_updates_3(market_ticker);
+CREATE INDEX IF NOT EXISTS idx_kalshi_orderbook_updates_3_ticker ON kalshi_orderbook_updates_3(market_ticker);
+CREATE INDEX IF NOT EXISTS idx_kalshi_orderbook_updates_3_server_time ON kalshi_orderbook_updates_3(server_time_us);
 
 CREATE TABLE IF NOT EXISTS kalshi_market_lifecycle_3 (
     id SERIAL PRIMARY KEY,
     market_ticker TEXT NOT NULL,
-    found_time_ms BIGINT NOT NULL,
+    found_time_us BIGINT NOT NULL,
     event_type TEXT NOT NULL,
     message JSONB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_kalshi_market_lifecycle_3_found_time ON kalshi_market_lifecycle_3(found_time_ms);
-CREATE INDEX IF NOT EXISTS idx_kalshi_market_lifecycle_3_market ON kalshi_market_lifecycle_3(market_ticker);
-CREATE INDEX IF NOT EXISTS idx_kalshi_market_lifecycle_3_event_type ON kalshi_market_lifecycle_3(event_type);
+CREATE INDEX IF NOT EXISTS idx_kalshi_market_lifecycle_3_ticker ON kalshi_market_lifecycle_3(market_ticker);
 """
 
 # --- Helper & Auth Functions ---
@@ -157,33 +156,55 @@ async def upsert_market(pool, market_json):
         return
     
     await pool.execute("""
-        INSERT INTO kalshi_markets_3 (market_ticker, found_time_ms, message)
+        INSERT INTO kalshi_markets_3 (market_ticker, found_time_us, message)
         VALUES ($1, $2, $3)
         ON CONFLICT (market_ticker) DO UPDATE SET
-            found_time_ms = EXCLUDED.found_time_ms,
+            found_time_us = EXCLUDED.found_time_us,
             message = EXCLUDED.message;
-    """, ticker, int(time.time() * 1000), json.dumps(market_json))
+    """, ticker, int(time.time() * 1_000_000), json.dumps(market_json))
 
 async def insert_trade(pool, trade_data):
     """Inserts a trade record into the kalshi_trades_3 table."""
+    # Trade ts is in seconds, convert to microseconds
+    server_time_us = trade_data['ts'] * 1_000_000
     await pool.execute("""
-        INSERT INTO kalshi_trades_3 (market_ticker, found_time_ms, message)
-        VALUES ($1, $2, $3)
-    """, trade_data['market_ticker'], int(time.time() * 1000), json.dumps(trade_data))
+        INSERT INTO kalshi_trades_3 (market_ticker, found_time_us, server_time_us, message)
+        VALUES ($1, $2, $3, $4)
+    """, trade_data['market_ticker'], int(time.time() * 1_000_000), server_time_us, json.dumps(trade_data))
 
-async def insert_orderbook_update(pool, ob_data):
+async def insert_orderbook_update(pool, complete_msg):
     """Inserts an order book update record into the kalshi_orderbook_updates_3 table."""
+    market_ticker = complete_msg['msg']['market_ticker']
+    found_time_us = int(time.time() * 1_000_000)
+    
+    # Extract server time based on message type (stored in microseconds)
+    if complete_msg['type'] == 'orderbook_snapshot':
+        # Snapshots don't have ts, use found_time_us
+        server_time_us = found_time_us
+    elif complete_msg['type'] == 'orderbook_delta':
+        # Delta has ISO 8601 timestamp string with microsecond precision, parse it
+        ts_str = complete_msg['msg'].get('ts')
+        if ts_str:
+            # Parse ISO 8601: "2026-01-06T16:41:16.613685Z"
+            from datetime import datetime
+            dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+            server_time_us = int(dt.timestamp() * 1_000_000)
+        else:
+            server_time_us = found_time_us
+    else:
+        server_time_us = found_time_us
+    
     await pool.execute("""
-        INSERT INTO kalshi_orderbook_updates_3 (market_ticker, found_time_ms, message)
-        VALUES ($1, $2, $3)
-    """, ob_data['market_ticker'], int(time.time() * 1000), json.dumps(ob_data))
+        INSERT INTO kalshi_orderbook_updates_3 (market_ticker, found_time_us, server_time_us, message)
+        VALUES ($1, $2, $3, $4)
+    """, market_ticker, found_time_us, server_time_us, json.dumps(complete_msg))
 
 async def insert_market_lifecycle(pool, lifecycle_data):
     """Inserts a market lifecycle event into the kalshi_market_lifecycle_3 table."""
     await pool.execute("""
-        INSERT INTO kalshi_market_lifecycle_3 (market_ticker, found_time_ms, event_type, message)
+        INSERT INTO kalshi_market_lifecycle_3 (market_ticker, found_time_us, event_type, message)
         VALUES ($1, $2, $3, $4)
-    """, lifecycle_data['market_ticker'], int(time.time() * 1000), lifecycle_data['event_type'], json.dumps(lifecycle_data))
+    """, lifecycle_data['market_ticker'], int(time.time() * 1_000_000), lifecycle_data['event_type'], json.dumps(lifecycle_data))
 
 # --- Main Logic ---
 
@@ -284,14 +305,14 @@ async def websocket_listener(initial_tickers, pool):
                                 increment_message_stat(trade_msg['market_ticker'], 'trade')
                             
                             elif msg_type == 'orderbook_snapshot':
-                                ob_msg = msg['msg']
-                                await insert_orderbook_update(pool, ob_msg)
-                                increment_message_stat(ob_msg['market_ticker'], 'orderbook_snapshot')
+                                # Store the complete message including type, sid, seq, msg
+                                await insert_orderbook_update(pool, msg)
+                                increment_message_stat(msg['msg']['market_ticker'], 'orderbook_snapshot')
                             
                             elif msg_type == 'orderbook_delta':
-                                ob_msg = msg['msg']
-                                await insert_orderbook_update(pool, ob_msg)
-                                increment_message_stat(ob_msg['market_ticker'], 'orderbook_delta')
+                                # Store the complete message including type, sid, seq, msg
+                                await insert_orderbook_update(pool, msg)
+                                increment_message_stat(msg['msg']['market_ticker'], 'orderbook_delta')
 
                             elif msg_type == 'market_lifecycle_v2':
                                 lifecycle_msg = msg['msg']
