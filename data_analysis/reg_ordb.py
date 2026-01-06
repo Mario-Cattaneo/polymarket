@@ -80,15 +80,25 @@ async def fetch_token_registered_events(pool, table_name: str):
     logger.info(f"Processed {len(events):,} events from '{table_name}'.")
     return events
 
-def plot_registration_cdf(data_dict: dict, title: str, filename: str):
+def find_cutoff_point(order_book_timestamps, ctfe_timestamps):
+    """
+    Returns the hardcoded cutoff point from ob_v_reg2.py analysis.
+    Cutoff: 2025-12-17 20:43:53 UTC (densest window of unmatched markets)
+    """
+    # Hardcoded cutoff from ob_v_reg2.py analysis
+    cutoff_time = pd.Timestamp('2025-12-17 20:43:53', tz='UTC')
+    logger.info(f"Using hardcoded cutoff point: {cutoff_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    return cutoff_time
+
+def plot_registration_cdf(data_dict: dict, title: str, filename: str, order_book_timestamps=None, ctfe_timestamps=None):
     """Generates and saves a single cumulative distribution function (CDF) plot."""
     plt.style.use('seaborn-v0_8-whitegrid')
     fig, ax = plt.subplots(figsize=(18, 10))
     style_map = {
-        "Order Book Creations": {"color": "black", "linestyle": "-", "linewidth": 3.0, "zorder": 10},
-        "Base CTFE Registrations": {"color": "dodgerblue", "linestyle": "--", "linewidth": 2.0},
-        "NR CTFE Registrations": {"color": "darkorange", "linestyle": ":", "linewidth": 2.0},
-        "Combined CTFE Registrations": {"color": "green", "linestyle": "-.", "linewidth": 2.5},
+        "Order Book Creations": {"color": "#2C2C2C", "linestyle": "-", "linewidth": 3.5, "zorder": 3},
+        "Base CTFE Registrations": {"color": "#FF8C00", "linestyle": "--", "linewidth": 2.8, "zorder": 2},
+        "NR CTFE Registrations": {"color": "#00CC00", "linestyle": ":", "linewidth": 2.8, "zorder": 1},
+        "Combined CTFE Registrations": {"color": "#FFD700", "linestyle": "-.", "linewidth": 3.2, "zorder": 5},
     }
     for label, timestamps in data_dict.items():
         if not timestamps: continue
@@ -96,6 +106,16 @@ def plot_registration_cdf(data_dict: dict, title: str, filename: str):
         if not sorted_dates: continue
         yvals = np.arange(1, len(sorted_dates) + 1)
         ax.plot(sorted_dates, yvals, label=f"{label} (Total: {len(sorted_dates):,})", **style_map.get(label, {}))
+    
+    # Find and draw cutoff point LAST so it's in front (very high zorder)
+    if order_book_timestamps is not None and ctfe_timestamps is not None:
+        cutoff_time = find_cutoff_point(order_book_timestamps, ctfe_timestamps)
+        if cutoff_time is not None:
+            ax.axvline(x=cutoff_time, color='#FF0000', linestyle='--', linewidth=3.5, zorder=999, 
+                      label=f"Cutoff Point: {cutoff_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info(f"Cutoff line drawn at: {cutoff_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        else:
+            logger.warning("Could not determine cutoff point")    
     ax.set_title(title, fontsize=20, pad=20)
     ax.set_xlabel("Date", fontsize=15)
     ax.set_ylabel("Cumulative Count of Unique Markets", fontsize=15)
@@ -154,7 +174,7 @@ async def main():
         "Combined CTFE Registrations": sorted(all_ctfe_timestamps)
     }
     title = f"Cumulative Markets: Order Books vs. CTFE Registrations\n(Range: {min_dt.date()} to {max_dt.date()})"
-    plot_registration_cdf(combined_plot_data, title, "ctfe_registrations_cdf.png")
+    plot_registration_cdf(combined_plot_data, title, "ctfe_registrations_cdf.png", order_book_timestamps, all_ctfe_timestamps)
 
 if __name__ == "__main__":
     asyncio.run(main())

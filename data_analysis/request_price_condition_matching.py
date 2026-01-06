@@ -8,6 +8,7 @@ from typing import Dict, List
 from hexbytes import HexBytes
 from eth_abi import decode as abi_decode
 from datetime import timedelta
+import numpy as np
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -43,6 +44,9 @@ ORACLE_ALIASES = {
 # Specific addresses for the new analysis
 MOOV2_REQ_TABLE = 'events_managed_oracle'
 MOOV2_ADAPTER_ORACLE = "0x65070be91477460d8a7aeeb94ef92fe056c2f2a7"
+
+# Percentiles to calculate (as requested)
+PERCENTILES_TO_CALCULATE = [0.01, 0.50, 0.99]
 
 # RequestPrice Event Definition
 REQUEST_PRICE_EVENT = {
@@ -319,20 +323,30 @@ async def main():
                 oracle_alias = ORACLE_ALIASES.get(row['oracle'], row['oracle'])
                 logger.info(f"    - Oracle {oracle_alias}: {row['match_count']:,}")
         
-        # 7. Comprehensive Timing Analysis (Min, Max, Mean, Std, Skew, Kurtosis)
+        # 7. Comprehensive Timing Analysis (Min, Max, Mean, Std, Skew, Kurtosis, Percentiles)
         
         # Calculate time difference: Delta T = T_prep - T_req (in seconds)
         df_final_match['time_diff_sec'] = (df_final_match['prep_timestamp_ms'] - df_final_match['req_timestamp_ms']) / 1000
         
-        # Group by the two columns and calculate all required statistics
+        # Step 7.1: Calculate Moments (Count, Min, Max, Mean, Std, Skew, Kurtosis)
         timing_stats = df_final_match.groupby(['req_table', 'oracle'])['time_diff_sec'].agg(
             ['count', 'min', 'max', 'mean', 'std', 'skew', pd.Series.kurt]
         ).reset_index()
-        
-        # Rename kurtosis column for clarity
         timing_stats = timing_stats.rename(columns={'kurt': 'kurtosis'})
         
+        # Step 7.2: Calculate Percentiles
+        quantile_stats = df_final_match.groupby(['req_table', 'oracle'])['time_diff_sec'].quantile(PERCENTILES_TO_CALCULATE).unstack()
+        
+        # Rename columns for clarity (e.g., 0.01 -> p1, 0.5 -> p50)
+        quantile_stats.columns = [f'p{int(p*100)}' for p in PERCENTILES_TO_CALCULATE]
+        quantile_stats = quantile_stats.reset_index()
+        
+        # Step 7.3: Merge all statistics
+        timing_stats = pd.merge(timing_stats, quantile_stats, on=['req_table', 'oracle'], how='left')
+        
         logger.info("\n--- Comprehensive Timing Analysis (T_prep - T_req) on Matched Pairs ---")
+        
+        MIN_COUNT_FOR_MOMENTS = 5 # Threshold to print Skewness/Kurtosis
         
         for index, row in timing_stats.iterrows():
             req_table = row['req_table']
@@ -346,8 +360,20 @@ async def main():
             logger.info(f"  Max Time Difference: {format_timedelta(row['max'])} ({row['max']:.2f} seconds)")
             logger.info(f"  Mean Time Difference: {format_timedelta(row['mean'])} ({row['mean']:.2f} seconds)")
             logger.info(f"  Standard Deviation (Std): {row['std']:.2f} seconds")
-            logger.info(f"  Skewness (Normalized 3rd Moment): {row['skew']:.4f} (Asymmetry)")
-            logger.info(f"  Kurtosis (Heavy-Tailedness): {row['kurtosis']:.4f} (Leptokurtic > 0)")
+            
+            # Print moments only if count is sufficient and values are not NaN
+            if row['count'] >= MIN_COUNT_FOR_MOMENTS and not np.isnan(row['skew']):
+                logger.info(f"  Skewness (Normalized 3rd Moment - Asymmetry): {row['skew']:.4f}")
+                logger.info(f"  Kurtosis (Heavy-Tailedness): {row['kurtosis']:.4f}")
+            else:
+                logger.info(f"  Skewness/Kurtosis: N/A (Insufficient data points or calculation failed)")
+            
+            # Print Percentiles
+            logger.info("  --- Percentiles ---")
+            for p in PERCENTILES_TO_CALCULATE:
+                col_name = f'p{int(p*100)}'
+                value = row[col_name]
+                logger.info(f"  {p*100:.0f}th Percentile: {format_timedelta(value)} ({value:.2f} seconds)")
             
         # 8. Specific MOOV2/MOOV2 Adapter Non-Zero Difference Count
         

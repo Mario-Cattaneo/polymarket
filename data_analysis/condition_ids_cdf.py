@@ -49,6 +49,10 @@ END_TIME = None
 # Define the desired bin width (step size) in seconds for the PMF plot
 PMF_BIN_WIDTH_SEC = 60 # 10 minute step size
 
+# --- Percentiles Configuration ---
+# Define percentiles to compute and display in timing analysis
+PERCENTILES = [0.001, 0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99, 0.999]
+
 # ----------------------------------------------------------------
 # 2. DATA FETCHING & LOADING
 # ----------------------------------------------------------------
@@ -194,6 +198,13 @@ def analyze_timing_custom(df_matched_all, timestamp_col, timestamp_name):
     print(f"Skewness (Normalized 3rd Moment - Asymmetry): {skewness:.4f}")
     print(f"Kurtosis Excess (Heavy Tailness): {kurtosis:.4f}")
     
+    # Calculate and print percentiles
+    print(f"\n--- Percentiles ---")
+    for p in PERCENTILES:
+        percentile_val = df_matched_all['time_diff_sec'].quantile(p)
+        percentile_label = f"{p*100:.1f}th"
+        print(f"{percentile_label} Percentile: {format_timedelta(percentile_val)} ({percentile_val:.2f} seconds)")
+    
     # Per-oracle statistics
     print(f"\n--- Per-Oracle Timing Statistics ({timestamp_name}) ---")
     for oracle_addr, alias in ORACLE_ALIASES.items():
@@ -201,10 +212,19 @@ def analyze_timing_custom(df_matched_all, timestamp_col, timestamp_name):
         if not oracle_data.empty:
             oracle_mean = oracle_data['time_diff_sec'].mean()
             oracle_std = oracle_data['time_diff_sec'].std()
+            oracle_skewness = stats.skew(oracle_data['time_diff_sec'].dropna())
+            oracle_kurtosis = stats.kurtosis(oracle_data['time_diff_sec'].dropna(), fisher=True)
             oracle_count = len(oracle_data)
             print(f"\n{alias} ({oracle_count:,} events):")
             print(f"  E(T2 - T1): {format_timedelta(oracle_mean)} ({oracle_mean:.2f} seconds)")
             print(f"  StdDev(T2 - T1): {format_timedelta(oracle_std)} ({oracle_std:.2f} seconds)")
+            print(f"  Skewness: {oracle_skewness:.4f}")
+            print(f"  Kurtosis Excess: {oracle_kurtosis:.4f}")
+            print(f"  Percentiles:")
+            for p in PERCENTILES:
+                percentile_val = oracle_data['time_diff_sec'].quantile(p)
+                percentile_label = f"{p*100:.1f}th"
+                print(f"    {percentile_label}: {format_timedelta(percentile_val)} ({percentile_val:.2f} seconds)")
     
     logger.info("------------------------------------------------------------------")
 

@@ -1,0 +1,4 @@
+/home/mario_cattaneo/polymarket/target_events/poly2.py:6: DeprecationWarning: websockets.WebSocketClientProtocol is deprecated
+  async def send_ping(websocket: websockets.WebSocketClientProtocol, interval=5):
+/home/mario_cattaneo/polymarket/target_events/poly2.py:19: DeprecationWarning: websockets.WebSocketClientProtocol is deprecated
+  async def receive_messages(ws: websockets.WebSocketClientProtocol):
