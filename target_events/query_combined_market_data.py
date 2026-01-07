@@ -280,7 +280,7 @@ async def main():
     import sys
     
     # Test with Jan 6 18:00 UTC
-    test_utc_time = "2026-01-06 18:30:00"
+    test_utc_time = "2026-01-06 20:30:00"
     
     pool = await connect_db()
     try:

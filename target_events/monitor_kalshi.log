@@ -1,183 +1,343 @@
-=== Market Statistics Report - 2026-01-06 20:21:29 ===
-Tracking 45 markets
+=== Market Statistics Report - 2026-01-07 07:58:51 ===
+Tracking 85 markets
 
-KXBTC15M-26JAN061300-00
-  Total: 229
-  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 213, orderbook_snapshot: 2, trade: 12
+KXBTC15M-26JAN070300-00
+  Total: 6059
+  orderbook_delta: 5646, orderbook_snapshot: 1, trade: 412
 
-KXBTC15M-26JAN061315-15
-  Total: 17509
-  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 17101, orderbook_snapshot: 2, trade: 404
-
-KXBTC15M-26JAN061330-30
-  Total: 20707
-  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 20250, orderbook_snapshot: 2, trade: 453
-
-KXBTC15M-26JAN061345-45
-  Total: 16088
-  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 15744, orderbook_snapshot: 2, trade: 340
-
-KXBTC15M-26JAN061400-00
-  Total: 14738
-  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 13848, orderbook_snapshot: 2, trade: 886
-
-KXBTC15M-26JAN061415-15
-  Total: 14798
-  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 14325, orderbook_snapshot: 2, trade: 469
-
-KXBTC15M-26JAN061430-30
-  Total: 15026
-  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 14576, orderbook_snapshot: 2, trade: 446
-
-KXBTC15M-26JAN061445-45
-  Total: 9691
-  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 9387, orderbook_snapshot: 2, trade: 300
-
-KXBTC15M-26JAN061500-00
-  Total: 17263
-  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 16842, orderbook_snapshot: 2, trade: 417
-
-KXBTC15M-26JAN061515-15
-  Total: 5532
-  lifecycle_determined: 1, lifecycle_settled: 1, orderbook_delta: 5226, orderbook_snapshot: 2, trade: 302
-
-KXBTC15M-26JAN061530-30
-  Total: 5198
-  orderbook_delta: 5080, orderbook_snapshot: 1, trade: 117
-
-KXBTC15M-26JAN061545-45
+KXBTC15M-26JAN070315-15
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN061600-00
+KXBTC15M-26JAN070330-30
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN061615-15
+KXBTC15M-26JAN070345-45
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN061630-30
+KXBTC15M-26JAN070400-00
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN061645-45
+KXBTC15M-26JAN070415-15
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN061700-00
+KXBTC15M-26JAN070430-30
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN061715-15
+KXBTC15M-26JAN070445-45
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN061730-30
+KXBTC15M-26JAN070500-00
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN061745-45
+KXBTC15M-26JAN070515-15
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN061800-00
+KXBTC15M-26JAN070530-30
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN061815-15
+KXBTC15M-26JAN070545-45
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN061830-30
+KXBTC15M-26JAN070600-00
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN061845-45
+KXBTC15M-26JAN070615-15
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN061900-00
+KXBTC15M-26JAN070630-30
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN061915-15
+KXBTC15M-26JAN070645-45
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN061930-30
+KXBTC15M-26JAN070700-00
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN061945-45
+KXBTC15M-26JAN070715-15
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN062000-00
+KXBTC15M-26JAN070730-30
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN062015-15
+KXBTC15M-26JAN070745-45
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN062030-30
+KXBTC15M-26JAN070800-00
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN062045-45
+KXBTC15M-26JAN070815-15
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN062100-00
+KXBTC15M-26JAN070830-30
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN062115-15
+KXBTC15M-26JAN070845-45
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN062130-30
+KXBTC15M-26JAN070900-00
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN062145-45
+KXBTC15M-26JAN070915-15
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN062200-00
+KXBTC15M-26JAN070930-30
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN062215-15
+KXBTC15M-26JAN070945-45
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN062230-30
+KXBTC15M-26JAN071000-00
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN062245-45
+KXBTC15M-26JAN071015-15
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN062300-00
+KXBTC15M-26JAN071030-30
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN062315-15
+KXBTC15M-26JAN071045-45
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN062330-30
+KXBTC15M-26JAN071100-00
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN062345-45
+KXBTC15M-26JAN071115-15
   Total: 1
   orderbook_snapshot: 1
 
-KXBTC15M-26JAN070000-00
+KXBTC15M-26JAN071130-30
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071145-45
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071200-00
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071215-15
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071230-30
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071245-45
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071300-00
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071315-15
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071330-30
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071345-45
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071400-00
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071415-15
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071430-30
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071445-45
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071500-00
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071515-15
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071530-30
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071545-45
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071600-00
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071615-15
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071630-30
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071645-45
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071700-00
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071715-15
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071730-30
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071745-45
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071800-00
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071815-15
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071830-30
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071845-45
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071900-00
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071915-15
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071930-30
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN071945-45
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN072000-00
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN072015-15
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN072030-30
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN072045-45
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN072100-00
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN072115-15
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN072130-30
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN072145-45
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN072200-00
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN072215-15
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN072230-30
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN072245-45
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN072300-00
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN072315-15
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN072330-30
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN072345-45
+  Total: 1
+  orderbook_snapshot: 1
+
+KXBTC15M-26JAN080000-00
   Total: 1
   orderbook_snapshot: 1
 

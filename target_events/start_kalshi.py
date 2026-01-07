@@ -163,14 +163,19 @@ async def upsert_market(pool, market_json):
             message = EXCLUDED.message;
     """, ticker, int(time.time() * 1_000_000), json.dumps(market_json))
 
-async def insert_trade(pool, trade_data):
+async def insert_trade(pool, complete_msg):
     """Inserts a trade record into the kalshi_trades_3 table."""
+    # Extract trade data from msg field
+    trade_data = complete_msg['msg']
+    market_ticker = trade_data['market_ticker']
+    found_time_us = int(time.time() * 1_000_000)
     # Trade ts is in seconds, convert to microseconds
     server_time_us = trade_data['ts'] * 1_000_000
+    # Store the complete message (with type, sid, msg fields)
     await pool.execute("""
         INSERT INTO kalshi_trades_3 (market_ticker, found_time_us, server_time_us, message)
         VALUES ($1, $2, $3, $4)
-    """, trade_data['market_ticker'], int(time.time() * 1_000_000), server_time_us, json.dumps(trade_data))
+    """, market_ticker, found_time_us, server_time_us, json.dumps(complete_msg))
 
 async def insert_orderbook_update(pool, complete_msg):
     """Inserts an order book update record into the kalshi_orderbook_updates_3 table."""
@@ -300,9 +305,9 @@ async def websocket_listener(initial_tickers, pool):
                             msg_type = msg.get('type')
 
                             if msg_type == 'trade':
-                                trade_msg = msg['msg']
-                                await insert_trade(pool, trade_msg)
-                                increment_message_stat(trade_msg['market_ticker'], 'trade')
+                                # Store the complete message including type, sid, msg
+                                await insert_trade(pool, msg)
+                                increment_message_stat(msg['msg']['market_ticker'], 'trade')
                             
                             elif msg_type == 'orderbook_snapshot':
                                 # Store the complete message including type, sid, seq, msg
