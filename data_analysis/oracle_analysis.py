@@ -89,40 +89,60 @@ async def fetch_all_prepared_conditions(pool):
     return df
 
 async def fetch_token_registered_events(pool, token_ids):
-    """Fetch TokenRegistered events matching token_ids (as token0 or token1)."""
+    """Fetch TokenRegistered events matching token_ids (as token0 or token1).
+    
+    Uses CREATE TEMP TABLE for faster matching than IN clause with hundreds of thousands of values.
+    """
     if not token_ids:
         return []
     
-    query = """
-        SELECT 
-            LOWER(topics[1]) as token0,
-            LOWER(topics[2]) as token1,
-            topics[3] as condition_id,
-            LOWER(contract_address) as contract,
-            transaction_hash,
-            timestamp_ms
-        FROM events_ctf_exchange
-        WHERE event_name = 'TokenRegistered'
-        AND (LOWER(topics[1]) IN (SELECT LOWER(UNNEST($1::text[]))) 
-             OR LOWER(topics[2]) IN (SELECT LOWER(UNNEST($1::text[]))))
-        UNION ALL
-        SELECT 
-            LOWER(topics[1]) as token0,
-            LOWER(topics[2]) as token1,
-            topics[3] as condition_id,
-            LOWER(contract_address) as contract,
-            transaction_hash,
-            timestamp_ms
-        FROM events_neg_risk_exchange
-        WHERE event_name = 'TokenRegistered'
-        AND (LOWER(topics[1]) IN (SELECT LOWER(UNNEST($1::text[]))) 
-             OR LOWER(topics[2]) IN (SELECT LOWER(UNNEST($1::text[]))))
-    """
-    
     async with pool.acquire() as conn:
-        rows = await conn.fetch(query, token_ids)
-    
-    return rows
+        # Create temp table with token IDs
+        await conn.execute("""
+            CREATE TEMP TABLE IF NOT EXISTS token_id_lookup (token_id TEXT PRIMARY KEY);
+        """)
+        
+        # Insert token IDs
+        await conn.executemany(
+            "INSERT INTO token_id_lookup (token_id) VALUES ($1) ON CONFLICT DO NOTHING",
+            [(tid,) for tid in token_ids]
+        )
+        
+        # Query using JOIN instead of IN clause
+        query = """
+            SELECT 
+                LOWER(topics[1]) as token0,
+                LOWER(topics[2]) as token1,
+                topics[3] as condition_id,
+                LOWER(contract_address) as contract,
+                transaction_hash,
+                timestamp_ms,
+                'ctfe' as exchange_type
+            FROM events_ctf_exchange
+            WHERE event_name = 'TokenRegistered'
+            AND (LOWER(topics[1]) IN (SELECT token_id FROM token_id_lookup)
+                 OR LOWER(topics[2]) IN (SELECT token_id FROM token_id_lookup))
+            UNION ALL
+            SELECT 
+                LOWER(topics[1]) as token0,
+                LOWER(topics[2]) as token1,
+                topics[3] as condition_id,
+                LOWER(contract_address) as contract,
+                transaction_hash,
+                timestamp_ms,
+                'negrisk' as exchange_type
+            FROM events_neg_risk_exchange
+            WHERE event_name = 'TokenRegistered'
+            AND (LOWER(topics[1]) IN (SELECT token_id FROM token_id_lookup)
+                 OR LOWER(topics[2]) IN (SELECT token_id FROM token_id_lookup))
+        """
+        
+        rows = await conn.fetch(query)
+        
+        # Clean up
+        await conn.execute("DROP TABLE IF EXISTS token_id_lookup")
+        
+        return rows
 
 # ----------------------------------------------------------------
 # CSV LOADING
@@ -167,33 +187,31 @@ async def main():
         
         logger.info(f"CSV contains {len(csv_condition_map):,} unique condition_ids")
         
-        # Initialize results structure
-        results = {}
-        
         # ====================================================================
-        # STEP 1: Get prepared condition IDs per oracle
+        # STEP 1: Fetch ALL ConditionPreparation events and deduplicate
         # ====================================================================
         logger.info("\n" + "=" * 80)
-        logger.info("STEP 1: Prepared Condition IDs by Oracle")
+        logger.info("STEP 1: Fetch ALL ConditionPreparation Events (Deduplicated)")
         logger.info("=" * 80)
         
-        for oracle_addr, oracle_name in ORACLE_ADDRESSES.items():
-            logger.info(f"\nFetching conditions for {oracle_name} ({oracle_addr})...")
-            prepared_conds = await fetch_all_prepared_conditions(pool, oracle_addr)
-            
-            logger.info(f"  Found {len(prepared_conds):,} prepared condition IDs")
-            
-            results[oracle_name] = {
-                'oracle_addr': oracle_addr,
-                'prepared_condition_ids': set(prepared_conds),
-                'prepared_count': len(prepared_conds),
-                'csv_matches': [],
-                'csv_match_count': 0,
-                'token_matches': [],
-                'token_match_count': 0,
-                'ctfe_count': 0,
-                'negrisk_count': 0,
-            }
+        logger.info("\nFetching all ConditionPreparation events...")
+        df_all_prepared = await fetch_all_prepared_conditions(pool)
+        
+        logger.info(f"Total events fetched: {len(df_all_prepared):,}")
+        
+        # Deduplicate by condition_id, keeping first event per condition
+        df_all_prepared['timestamp'] = pd.to_datetime(df_all_prepared['timestamp'], unit='ms', utc=True)
+        df_prepared_dedup = df_all_prepared.sort_values('timestamp').drop_duplicates(subset='condition_id', keep='first')
+        
+        logger.info(f"After deduplication by condition_id: {len(df_prepared_dedup):,}")
+        
+        # Count by oracle
+        logger.info("\nAll Prepared Conditions by Oracle:")
+        oracle_totals = df_prepared_dedup.groupby('oracle').size()
+        for oracle_addr in sorted(ORACLE_ADDRESSES.keys()):
+            count = oracle_totals.get(oracle_addr, 0)
+            alias = ORACLE_ADDRESSES.get(oracle_addr, oracle_addr)
+            logger.info(f"  {alias}: {count:,}")
         
         # ====================================================================
         # STEP 2: Match prepared conditions to CSV rows
@@ -202,24 +220,24 @@ async def main():
         logger.info("STEP 2: Match Prepared Conditions to CSV Rows")
         logger.info("=" * 80)
         
-        for oracle_name, data in results.items():
-            prepared_set = data['prepared_condition_ids']
-            matched_conditions = []
-            
-            for cond_id in prepared_set:
-                if cond_id in csv_condition_map:
-                    matched_conditions.append({
-                        'condition_id': cond_id,
-                        'token_id1': csv_condition_map[cond_id]['token_id1'],
-                        'token_id2': csv_condition_map[cond_id]['token_id2'],
-                    })
-            
-            data['csv_matches'] = matched_conditions
-            data['csv_match_count'] = len(matched_conditions)
-            
-            logger.info(f"\n{oracle_name}:")
-            logger.info(f"  Prepared Condition IDs: {data['prepared_count']:,}")
-            logger.info(f"  Matched to CSV: {data['csv_match_count']:,}")
+        # Find which prepared conditions match the CSV
+        prepared_cond_ids = set(df_prepared_dedup['condition_id'].unique())
+        csv_cond_ids = set(csv_condition_map.keys())
+        matching_cond_ids = prepared_cond_ids & csv_cond_ids
+        
+        logger.info(f"\nPrepared conditions in DB: {len(prepared_cond_ids):,}")
+        logger.info(f"Conditions in CSV: {len(csv_cond_ids):,}")
+        logger.info(f"Matching conditions: {len(matching_cond_ids):,}")
+        
+        # Get prepared events that match CSV
+        df_matched_prepared = df_prepared_dedup[df_prepared_dedup['condition_id'].isin(matching_cond_ids)].copy()
+        
+        logger.info("\nPrepared Conditions Matched to CSV by Oracle:")
+        matched_by_oracle = df_matched_prepared.groupby('oracle').size()
+        for oracle_addr in sorted(ORACLE_ADDRESSES.keys()):
+            count = matched_by_oracle.get(oracle_addr, 0)
+            alias = ORACLE_ADDRESSES.get(oracle_addr, oracle_addr)
+            logger.info(f"  {alias}: {count:,}")
         
         # ====================================================================
         # STEP 3: Match token_ids to TokenRegistered events
@@ -228,70 +246,98 @@ async def main():
         logger.info("STEP 3: Match Token IDs to TokenRegistered Events")
         logger.info("=" * 80)
         
-        for oracle_name, data in results.items():
-            # Collect all token_ids from matched CSV rows
-            token_ids = set()
-            for match in data['csv_matches']:
-                token_ids.add(match['token_id1'])
-                token_ids.add(match['token_id2'])
+        # Collect all token_ids from matched prepared conditions' CSV rows
+        token_ids = set()
+        for cond_id in matching_cond_ids:
+            if cond_id in csv_condition_map:
+                token_ids.add(csv_condition_map[cond_id]['token_id1'])
+                token_ids.add(csv_condition_map[cond_id]['token_id2'])
+        
+        logger.info(f"\nUnique token_ids to search: {len(token_ids):,}")
+        
+        # Fetch TokenRegistered events for these token_ids
+        logger.info("Fetching TokenRegistered events for these token_ids...")
+        token_reg_events = await fetch_token_registered_events(pool, list(token_ids))
+        
+        logger.info(f"TokenRegistered events found: {len(token_reg_events):,}")
+        
+        # Convert to DataFrame for easier analysis
+        df_token_events = pd.DataFrame([dict(row) for row in token_reg_events])
+        
+        if df_token_events.empty:
+            logger.warning("No TokenRegistered events found")
+        else:
+            logger.info(f"\nTokenRegistered Events by Exchange:")
+            logger.info(f"  CTFE: {(df_token_events['exchange_type'] == 'ctfe').sum():,}")
+            logger.info(f"  NegRisk: {(df_token_events['exchange_type'] == 'negrisk').sum():,}")
+        
+        # ====================================================================
+        # STEP 4: Build comprehensive summary per oracle
+        # ====================================================================
+        logger.info("\n" + "=" * 80)
+        logger.info("STEP 4: Comprehensive Summary by Oracle")
+        logger.info("=" * 80)
+        
+        results = []
+        
+        for oracle_addr, oracle_name in sorted(ORACLE_ADDRESSES.items()):
+            # Prepared conditions
+            prepared_count = len(df_prepared_dedup[df_prepared_dedup['oracle'] == oracle_addr])
+            
+            # Matched conditions (to CSV)
+            matched_count = len(df_matched_prepared[df_matched_prepared['oracle'] == oracle_addr])
+            
+            # Get token_ids for this oracle's matched conditions
+            oracle_matched_conds = set(df_matched_prepared[df_matched_prepared['oracle'] == oracle_addr]['condition_id'])
+            oracle_token_ids = set()
+            for cond_id in oracle_matched_conds:
+                if cond_id in csv_condition_map:
+                    oracle_token_ids.add(csv_condition_map[cond_id]['token_id1'])
+                    oracle_token_ids.add(csv_condition_map[cond_id]['token_id2'])
+            
+            # Find TokenRegistered events for this oracle's token_ids
+            if df_token_events.empty or len(oracle_token_ids) == 0:
+                ctfe_count = 0
+                negrisk_count = 0
+                total_token_count = 0
+            else:
+                # Check if token0 or token1 matches oracle's token_ids
+                mask_token0 = df_token_events['token0'].isin(oracle_token_ids)
+                mask_token1 = df_token_events['token1'].isin(oracle_token_ids)
+                mask_oracle_tokens = mask_token0 | mask_token1
+                
+                df_oracle_tokens = df_token_events[mask_oracle_tokens]
+                
+                ctfe_count = ((df_oracle_tokens['exchange'] == 'CTFE').sum())
+                negrisk_count = ((df_oracle_tokens['exchange'] == 'NegRisk').sum())
+                total_token_count = len(df_oracle_tokens)
             
             logger.info(f"\n{oracle_name}:")
-            logger.info(f"  Unique token_ids to search: {len(token_ids):,}")
+            logger.info(f"  Prepared Conditions: {prepared_count:,}")
+            logger.info(f"  Matched to CSV: {matched_count:,}")
+            logger.info(f"  Unique Token IDs: {len(oracle_token_ids):,}")
+            logger.info(f"  TokenRegistered Events: {total_token_count:,}")
+            logger.info(f"    ├─ CTFE: {ctfe_count:,}")
+            logger.info(f"    └─ NegRisk: {negrisk_count:,}")
             
-            if not token_ids:
-                logger.info("  No token_ids to search")
-                continue
-            
-            # Fetch TokenRegistered events for these token_ids
-            token_reg_events = await fetch_token_registered_events(pool, list(token_ids))
-            
-            # Categorize by exchange
-            ctfe_events = [e for e in token_reg_events if e['contract'] == '0x4d97dcd97ec945f40cf65f87097ace5ea0476045']
-            negrisk_events = [e for e in token_reg_events if e['contract'] != '0x4d97dcd97ec945f40cf65f87097ace5ea0476045']
-            
-            data['token_matches'] = token_reg_events
-            data['token_match_count'] = len(token_reg_events)
-            data['ctfe_count'] = len(ctfe_events)
-            data['negrisk_count'] = len(negrisk_events)
-            
-            logger.info(f"  TokenRegistered events found: {len(token_reg_events):,}")
-            logger.info(f"    - CTFE: {len(ctfe_events):,}")
-            logger.info(f"    - NegRisk: {len(negrisk_events):,}")
-        
-        # ====================================================================
-        # STEP 4: Summary Report
-        # ====================================================================
-        logger.info("\n" + "=" * 80)
-        logger.info("SUMMARY REPORT")
-        logger.info("=" * 80)
-        
-        for oracle_name, data in results.items():
-            logger.info(f"\n{oracle_name} ({data['oracle_addr']}):")
-            logger.info(f"  ├─ Prepared Condition IDs: {data['prepared_count']:,}")
-            logger.info(f"  ├─ Matched to CSV: {data['csv_match_count']:,}")
-            logger.info(f"  └─ TokenRegistered Events: {data['token_match_count']:,}")
-            logger.info(f"     ├─ CTFE: {data['ctfe_count']:,}")
-            logger.info(f"     └─ NegRisk: {data['negrisk_count']:,}")
-        
-        # ====================================================================
-        # DETAILED BREAKDOWN TABLE
-        # ====================================================================
-        logger.info("\n" + "=" * 80)
-        logger.info("DETAILED BREAKDOWN TABLE")
-        logger.info("=" * 80)
-        
-        summary_data = []
-        for oracle_name, data in results.items():
-            summary_data.append({
+            results.append({
                 'Oracle': oracle_name,
-                'Prepared Conditions': f"{data['prepared_count']:,}",
-                'CSV Matches': f"{data['csv_match_count']:,}",
-                'Token Events': f"{data['token_match_count']:,}",
-                'CTFE': f"{data['ctfe_count']:,}",
-                'NegRisk': f"{data['negrisk_count']:,}",
+                'Prepared': f"{prepared_count:,}",
+                'CSV Matches': f"{matched_count:,}",
+                'Unique Tokens': f"{len(oracle_token_ids):,}",
+                'Token Events': f"{total_token_count:,}",
+                'CTFE': f"{ctfe_count:,}",
+                'NegRisk': f"{negrisk_count:,}",
             })
         
-        summary_df = pd.DataFrame(summary_data)
+        # ====================================================================
+        # STEP 5: Summary Table
+        # ====================================================================
+        logger.info("\n" + "=" * 80)
+        logger.info("SUMMARY TABLE")
+        logger.info("=" * 80)
+        
+        summary_df = pd.DataFrame(results)
         logger.info("\n" + summary_df.to_string(index=False))
         
     finally:

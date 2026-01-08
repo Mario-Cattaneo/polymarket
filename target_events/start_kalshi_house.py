@@ -225,9 +225,16 @@ async def insert_orderbook_update(pool, complete_msg):
     else:
         server_time_us = found_time_us
     
-    # Determine outcome from contract_symbol if present
-    contract_symbol = complete_msg['msg'].get('contract_symbol', '')
-    outcome = get_outcome_from_symbol(contract_symbol)
+    # Determine outcome from message type:
+    # - orderbook_delta has a "side" field
+    # - orderbook_snapshot has both "yes" and "no" sides, so we don't track by outcome
+    outcome = 'Unknown'
+    if complete_msg['type'] == 'orderbook_delta':
+        side = complete_msg['msg'].get('side', '')
+        outcome = 'Yes' if side == 'yes' else ('No' if side == 'no' else 'Unknown')
+    elif complete_msg['type'] == 'orderbook_snapshot':
+        # Snapshots contain both yes/no - use a generic outcome
+        outcome = 'Full'
     
     await pool.execute("""
         INSERT INTO kalshi_orderbook_updates_house (market_ticker, outcome, found_time_us, server_time_us, message)
@@ -255,8 +262,11 @@ async def log_market_statistics():
             ticker = TARGET_MARKET['ticker']
             f.write(f"Market {ticker}: {TARGET_MARKET['title']}\n")
             
+            # Show statistics for target outcomes plus Full (for snapshots)
+            outcomes_to_show = TARGET_MARKET['outcomes'] + ['Full']
+            
             if ticker in message_stats:
-                for outcome in TARGET_MARKET['outcomes']:
+                for outcome in outcomes_to_show:
                     f.write(f"  [{outcome}]:\n")
                     
                     if outcome in message_stats[ticker]:
@@ -316,16 +326,14 @@ async def websocket_listener(pool):
                             elif msg_type == 'orderbook_snapshot':
                                 market_ticker = msg['msg']['market_ticker']
                                 if market_ticker == TARGET_MARKET['ticker']:
-                                    contract_symbol = msg['msg'].get('contract_symbol', '')
-                                    outcome = get_outcome_from_symbol(contract_symbol)
                                     await insert_orderbook_update(pool, msg)
-                                    increment_message_stat(market_ticker, outcome, 'orderbook_snapshot')
+                                    increment_message_stat(market_ticker, 'Full', 'orderbook_snapshot')
                             
                             elif msg_type == 'orderbook_delta':
                                 market_ticker = msg['msg']['market_ticker']
                                 if market_ticker == TARGET_MARKET['ticker']:
-                                    contract_symbol = msg['msg'].get('contract_symbol', '')
-                                    outcome = get_outcome_from_symbol(contract_symbol)
+                                    side = msg['msg'].get('side', '')
+                                    outcome = 'Yes' if side == 'yes' else ('No' if side == 'no' else 'Unknown')
                                     await insert_orderbook_update(pool, msg)
                                     increment_message_stat(market_ticker, outcome, 'orderbook_delta')
 

@@ -26,7 +26,8 @@ monitor_logger.setLevel(logging.INFO)
 monitor_log_path = os.path.join(os.path.dirname(__file__), "monitor_poly_house.log")
 
 # --- Message Statistics Tracking (per market, per outcome) ---
-message_stats = {}  # {market_id: {outcome: {message_type: count}}}
+message_stats = {}  # {market_id: {outcome: {message_type: count}}} for websocket events
+orderbook_responses = {}  # {market_id: {outcome: count}} for HTTPS book state responses
 
 # --- Target Markets Configuration ---
 TARGET_MARKETS = {
@@ -169,7 +170,7 @@ def get_market_and_outcome_for_asset(asset_id: str) -> tuple:
     return None, None
 
 def increment_message_stat(market_id, outcome, message_type):
-    """Increments the message count for a specific market, outcome, and message type."""
+    """Increments the message count for a specific market, outcome, and message type (websocket events only)."""
     if market_id not in message_stats:
         message_stats[market_id] = {}
     if outcome not in message_stats[market_id]:
@@ -177,6 +178,14 @@ def increment_message_stat(market_id, outcome, message_type):
     if message_type not in message_stats[market_id][outcome]:
         message_stats[market_id][outcome][message_type] = 0
     message_stats[market_id][outcome][message_type] += 1
+
+def increment_orderbook_response(market_id, outcome):
+    """Increments the orderbook response count for a specific market and outcome."""
+    if market_id not in orderbook_responses:
+        orderbook_responses[market_id] = {}
+    if outcome not in orderbook_responses[market_id]:
+        orderbook_responses[market_id][outcome] = 0
+    orderbook_responses[market_id][outcome] += 1
 
 # --- Database Functions ---
 
@@ -264,20 +273,25 @@ async def log_market_statistics():
                 market_info = TARGET_MARKETS[market_id]
                 f.write(f"Market {market_id}: {market_info['question']}\n")
                 
-                if market_id in message_stats:
-                    for outcome in market_info['outcomes']:
-                        f.write(f"  [{outcome}]:\n")
-                        
-                        if outcome in message_stats[market_id]:
-                            stats = message_stats[market_id][outcome]
-                            total = sum(stats.values())
-                            stats_str = ", ".join([f"{msg_type}: {count}" for msg_type, count in sorted(stats.items())])
-                            f.write(f"    Total: {total}\n")
-                            f.write(f"    {stats_str}\n")
-                        else:
-                            f.write(f"    No messages yet\n")
-                else:
-                    f.write(f"  No activity yet\n")
+                for outcome in market_info['outcomes']:
+                    f.write(f"  [{outcome}]:\n")
+                    
+                    # Websocket events
+                    if market_id in message_stats and outcome in message_stats[market_id]:
+                        stats = message_stats[market_id][outcome]
+                        total = sum(stats.values())
+                        stats_str = ", ".join([f"{msg_type}: {count}" for msg_type, count in sorted(stats.items())])
+                        f.write(f"    Websocket Events Total: {total}\n")
+                        f.write(f"    {stats_str}\n")
+                    else:
+                        f.write(f"    Websocket Events Total: 0\n")
+                    
+                    # Orderbook responses
+                    orderbook_count = 0
+                    if market_id in orderbook_responses and outcome in orderbook_responses[market_id]:
+                        orderbook_count = orderbook_responses[market_id][outcome]
+                    f.write(f"    Orderbook Responses: {orderbook_count}\n")
+                    f.write(f"\n")
                 
                 f.write(f"\n")
 
@@ -327,6 +341,7 @@ async def poll_book_state(session, pool):
                                 market_id, outcome = asset_to_market_outcome[asset_id]
                                 try:
                                     await insert_book_state(pool, market_id, outcome, asset_id, book_msg)
+                                    increment_orderbook_response(market_id, outcome)
                                     inserted_count += 1
                                 except Exception as e:
                                     logger.warning(f"Failed to insert book state for {asset_id}: {e}")
