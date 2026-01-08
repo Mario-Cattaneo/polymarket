@@ -1,391 +1,379 @@
-=== Market Statistics Report - 2026-01-08 09:07:41 ===
-Tracking 97 markets
+=== Market Statistics Report - 2026-01-08 10:00:12 ===
+Tracking 94 markets
 
 Market 1126037: Bitcoin Up or Down - January 7, 7:15PM-7:30PM ET...
   Total: 173718
   best_bid_ask: 9906, book: 9376, last_trade_price: 4668, price_change: 149764, tick_size_change: 4
 
-Market 1128016: Bitcoin Up or Down - January 8, 4:00AM-4:15AM ET...
-  Total: 253567
-  best_bid_ask: 11426, book: 10728, last_trade_price: 5331, price_change: 226082
-
-Market 1128030: Bitcoin Up or Down - January 8, 4:15AM-4:30AM ET...
-  Total: 9568
-  best_bid_ask: 110, book: 108, last_trade_price: 54, price_change: 9296
-
-Market 1128114: Bitcoin Up or Down - January 8, 4:30AM-4:45AM ET...
-  Total: 4369
-  best_bid_ask: 36, book: 34, last_trade_price: 17, price_change: 4282
-
 Market 1128136: Bitcoin Up or Down - January 8, 4:45AM-5:00AM ET...
-  Total: 2815
-  best_bid_ask: 12, book: 10, last_trade_price: 5, price_change: 2788
+  Total: 325359
+  best_bid_ask: 15468, book: 14420, last_trade_price: 7157, price_change: 288310, tick_size_change: 4
 
 Market 1128175: Bitcoin Up or Down - January 8, 5:00AM-5:15AM ET...
-  Total: 4724
-  best_bid_ask: 22, book: 20, last_trade_price: 10, price_change: 4672
+  Total: 19036
+  best_bid_ask: 500, book: 484, last_trade_price: 242, price_change: 17810
 
 Market 1128188: Bitcoin Up or Down - January 8, 5:15AM-5:30AM ET...
-  Total: 3903
-  best_bid_ask: 38, book: 34, last_trade_price: 17, price_change: 3814
+  Total: 5714
+  best_bid_ask: 80, book: 76, last_trade_price: 38, price_change: 5520
 
 Market 1128275: Bitcoin Up or Down - January 8, 5:30AM-5:45AM ET...
-  Total: 4058
-  best_bid_ask: 22, book: 20, last_trade_price: 10, price_change: 4006
+  Total: 5674
+  best_bid_ask: 38, book: 36, last_trade_price: 18, price_change: 5582
 
 Market 1128285: Bitcoin Up or Down - January 8, 5:45AM-6:00AM ET...
-  Total: 3821
-  best_bid_ask: 20, book: 18, last_trade_price: 9, price_change: 3774
+  Total: 5182
+  best_bid_ask: 30, book: 28, last_trade_price: 14, price_change: 5110
 
 Market 1128369: Bitcoin Up or Down - January 8, 6:00AM-6:15AM ET...
-  Total: 4880
-  best_bid_ask: 26, book: 24, last_trade_price: 12, price_change: 4818
+  Total: 6411
+  best_bid_ask: 40, book: 38, last_trade_price: 19, price_change: 6314
 
 Market 1128391: Bitcoin Up or Down - January 8, 6:15AM-6:30AM ET...
-  Total: 4041
-  best_bid_ask: 16, book: 14, last_trade_price: 7, price_change: 4004
+  Total: 5481
+  best_bid_ask: 24, book: 22, last_trade_price: 11, price_change: 5424
 
 Market 1128477: Bitcoin Up or Down - January 8, 6:30AM-6:45AM ET...
-  Total: 3743
-  best_bid_ask: 8, book: 6, last_trade_price: 3, price_change: 3726
+  Total: 5196
+  best_bid_ask: 10, book: 8, last_trade_price: 4, price_change: 5174
 
 Market 1128492: Bitcoin Up or Down - January 8, 6:45AM-7:00AM ET...
-  Total: 3865
-  best_bid_ask: 18, book: 14, last_trade_price: 7, price_change: 3826
+  Total: 5109
+  best_bid_ask: 26, book: 22, last_trade_price: 11, price_change: 5050
 
 Market 1128612: Bitcoin Up or Down - January 8, 7:00AM-7:15AM ET...
-  Total: 3649
-  best_bid_ask: 4, book: 2, last_trade_price: 1, price_change: 3642
+  Total: 4794
+  best_bid_ask: 6, book: 4, last_trade_price: 2, price_change: 4782
 
 Market 1128633: Bitcoin Up or Down - January 8, 7:15AM-7:30AM ET...
-  Total: 4597
-  best_bid_ask: 12, book: 10, last_trade_price: 5, price_change: 4570
+  Total: 5684
+  best_bid_ask: 14, book: 12, last_trade_price: 6, price_change: 5652
 
 Market 1128719: Bitcoin Up or Down - January 8, 7:30AM-7:45AM ET...
-  Total: 3826
-  best_bid_ask: 10, book: 8, last_trade_price: 4, price_change: 3804
+  Total: 5115
+  best_bid_ask: 12, book: 10, last_trade_price: 5, price_change: 5088
 
 Market 1128735: Bitcoin Up or Down - January 8, 7:45AM-8:00AM ET...
-  Total: 3997
-  best_bid_ask: 12, book: 10, last_trade_price: 5, price_change: 3970
+  Total: 5234
+  best_bid_ask: 18, book: 16, last_trade_price: 8, price_change: 5192
 
 Market 1128784: Bitcoin Up or Down - January 8, 8:00AM-8:15AM ET...
-  Total: 5180
-  best_bid_ask: 10, book: 8, last_trade_price: 4, price_change: 5158
+  Total: 6596
+  best_bid_ask: 10, book: 8, last_trade_price: 4, price_change: 6574
 
 Market 1128798: Bitcoin Up or Down - January 8, 8:15AM-8:30AM ET...
-  Total: 3776
-  best_bid_ask: 2, price_change: 3774
+  Total: 4940
+  best_bid_ask: 2, price_change: 4938
 
 Market 1128882: Bitcoin Up or Down - January 8, 8:30AM-8:45AM ET...
-  Total: 3630
-  best_bid_ask: 2, price_change: 3628
+  Total: 4828
+  best_bid_ask: 2, price_change: 4826
 
 Market 1128897: Bitcoin Up or Down - January 8, 8:45AM-9:00AM ET...
-  Total: 3584
-  best_bid_ask: 2, price_change: 3582
+  Total: 4556
+  best_bid_ask: 2, price_change: 4554
 
 Market 1128927: Bitcoin Up or Down - January 8, 9:00AM-9:15AM ET...
-  Total: 4503
-  best_bid_ask: 46, book: 38, last_trade_price: 19, price_change: 4400
+  Total: 5737
+  best_bid_ask: 70, book: 54, last_trade_price: 27, price_change: 5586
 
 Market 1128954: Bitcoin Up or Down - January 8, 9:15AM-9:30AM ET...
-  Total: 3302
-  best_bid_ask: 2, price_change: 3300
+  Total: 4604
+  best_bid_ask: 2, price_change: 4602
 
 Market 1129037: Bitcoin Up or Down - January 8, 9:30AM-9:45AM ET...
-  Total: 3418
-  best_bid_ask: 6, book: 4, last_trade_price: 2, price_change: 3406
+  Total: 4576
+  best_bid_ask: 6, book: 4, last_trade_price: 2, price_change: 4564
 
 Market 1129054: Bitcoin Up or Down - January 8, 9:45AM-10:00AM ET...
-  Total: 3840
-  best_bid_ask: 2, price_change: 3838
+  Total: 4926
+  best_bid_ask: 2, price_change: 4924
 
 Market 1129150: Bitcoin Up or Down - January 8, 10:00AM-10:15AM ET...
-  Total: 3856
-  best_bid_ask: 2, price_change: 3854
+  Total: 4858
+  best_bid_ask: 2, price_change: 4856
 
 Market 1129175: Bitcoin Up or Down - January 8, 10:15AM-10:30AM ET...
-  Total: 3990
-  best_bid_ask: 2, price_change: 3988
+  Total: 5154
+  best_bid_ask: 2, price_change: 5152
 
 Market 1129260: Bitcoin Up or Down - January 8, 10:30AM-10:45AM ET...
-  Total: 2644
-  best_bid_ask: 2, price_change: 2642
+  Total: 3386
+  best_bid_ask: 2, price_change: 3384
 
 Market 1129275: Bitcoin Up or Down - January 8, 10:45AM-11:00AM ET...
-  Total: 3554
-  best_bid_ask: 2, price_change: 3552
+  Total: 4604
+  best_bid_ask: 2, price_change: 4602
 
 Market 1129307: Bitcoin Up or Down - January 8, 11:00AM-11:15AM ET...
-  Total: 4150
-  price_change: 4150
+  Total: 5196
+  price_change: 5196
 
 Market 1129327: Bitcoin Up or Down - January 8, 11:15AM-11:30AM ET...
-  Total: 4020
-  price_change: 4020
+  Total: 5062
+  price_change: 5062
 
 Market 1129513: Bitcoin Up or Down - January 8, 11:30AM-11:45AM ET...
-  Total: 3774
-  price_change: 3774
+  Total: 4740
+  price_change: 4740
 
 Market 1129522: Bitcoin Up or Down - January 8, 11:45AM-12:00PM ET...
-  Total: 3440
-  price_change: 3440
+  Total: 4466
+  price_change: 4466
 
 Market 1129668: Bitcoin Up or Down - January 8, 12:00PM-12:15PM ET...
-  Total: 3690
-  price_change: 3690
+  Total: 4748
+  price_change: 4748
 
 Market 1129701: Bitcoin Up or Down - January 8, 12:15PM-12:30PM ET...
-  Total: 3166
-  price_change: 3166
+  Total: 4278
+  price_change: 4278
 
 Market 1129873: Bitcoin Up or Down - January 8, 12:30PM-12:45PM ET...
-  Total: 5198
-  price_change: 5198
+  Total: 6200
+  price_change: 6200
 
 Market 1129952: Bitcoin Up or Down - January 8, 12:45PM-1:00PM ET...
-  Total: 5228
-  price_change: 5228
+  Total: 6308
+  price_change: 6308
 
 Market 1130053: Bitcoin Up or Down - January 8, 1:00PM-1:15PM ET...
-  Total: 3446
-  price_change: 3446
+  Total: 4472
+  price_change: 4472
 
 Market 1130079: Bitcoin Up or Down - January 8, 1:15PM-1:30PM ET...
-  Total: 3330
-  price_change: 3330
+  Total: 4376
+  price_change: 4376
 
 Market 1130289: Bitcoin Up or Down - January 8, 1:30PM-1:45PM ET...
-  Total: 2924
-  price_change: 2924
+  Total: 3900
+  price_change: 3900
 
 Market 1130302: Bitcoin Up or Down - January 8, 1:45PM-2:00PM ET...
-  Total: 3596
-  price_change: 3596
+  Total: 4654
+  price_change: 4654
 
 Market 1130358: Bitcoin Up or Down - January 8, 2:00PM-2:15PM ET...
-  Total: 3424
-  price_change: 3424
+  Total: 4382
+  price_change: 4382
 
 Market 1130436: Bitcoin Up or Down - January 8, 2:15PM-2:30PM ET...
-  Total: 2804
-  price_change: 2804
+  Total: 3752
+  price_change: 3752
 
 Market 1130789: Bitcoin Up or Down - January 8, 2:30PM-2:45PM ET...
-  Total: 2376
-  price_change: 2376
+  Total: 3236
+  price_change: 3236
 
 Market 1130828: Bitcoin Up or Down - January 8, 2:45PM-3:00PM ET...
-  Total: 2952
-  price_change: 2952
+  Total: 3974
+  price_change: 3974
 
 Market 1130849: Bitcoin Up or Down - January 8, 3:00PM-3:15PM ET...
-  Total: 3980
-  price_change: 3980
+  Total: 5065
+  best_bid_ask: 2, book: 2, last_trade_price: 1, price_change: 5060
 
 Market 1130898: Bitcoin Up or Down - January 8, 3:15PM-3:30PM ET...
-  Total: 3153
-  new_market: 1, price_change: 3152
+  Total: 4081
+  new_market: 1, price_change: 4080
 
 Market 1131160: Bitcoin Up or Down - January 8, 3:30PM-3:45PM ET...
-  Total: 3121
-  new_market: 1, price_change: 3120
+  Total: 4093
+  new_market: 1, price_change: 4092
 
 Market 1131173: Bitcoin Up or Down - January 8, 3:45PM-4:00PM ET...
-  Total: 3149
-  new_market: 1, price_change: 3148
+  Total: 4089
+  new_market: 1, price_change: 4088
 
 Market 1131196: Bitcoin Up or Down - January 8, 4:00PM-4:15PM ET...
-  Total: 4021
-  best_bid_ask: 2, new_market: 1, price_change: 4018
+  Total: 5095
+  best_bid_ask: 2, new_market: 1, price_change: 5092
 
 Market 1131223: Bitcoin Up or Down - January 8, 4:15PM-4:30PM ET...
-  Total: 3449
-  new_market: 1, price_change: 3448
+  Total: 4527
+  new_market: 1, price_change: 4526
 
 Market 1131449: Bitcoin Up or Down - January 8, 4:30PM-4:45PM ET...
-  Total: 4063
-  new_market: 1, price_change: 4062
+  Total: 5191
+  new_market: 1, price_change: 5190
 
 Market 1131465: Bitcoin Up or Down - January 8, 4:45PM-5:00PM ET...
-  Total: 4879
-  new_market: 1, price_change: 4878
+  Total: 6143
+  new_market: 1, price_change: 6142
 
 Market 1131502: Bitcoin Up or Down - January 8, 5:00PM-5:15PM ET...
-  Total: 3605
-  best_bid_ask: 6, new_market: 1, price_change: 3598
+  Total: 4595
+  best_bid_ask: 6, new_market: 1, price_change: 4588
 
 Market 1131523: Bitcoin Up or Down - January 8, 5:15PM-5:30PM ET...
-  Total: 3713
-  best_bid_ask: 4, new_market: 1, price_change: 3708
+  Total: 4767
+  best_bid_ask: 4, new_market: 1, price_change: 4762
 
 Market 1131788: Bitcoin Up or Down - January 8, 5:30PM-5:45PM ET...
-  Total: 3313
-  best_bid_ask: 4, book: 4, last_trade_price: 2, new_market: 1, price_change: 3302
+  Total: 4179
+  best_bid_ask: 4, book: 4, last_trade_price: 2, new_market: 1, price_change: 4168
 
 Market 1131843: Bitcoin Up or Down - January 8, 5:45PM-6:00PM ET...
-  Total: 3905
-  best_bid_ask: 10, book: 8, last_trade_price: 4, new_market: 1, price_change: 3882
+  Total: 4970
+  best_bid_ask: 16, book: 14, last_trade_price: 7, new_market: 1, price_change: 4932
 
 Market 1131898: Bitcoin Up or Down - January 8, 6:00PM-6:15PM ET...
-  Total: 4667
-  best_bid_ask: 20, new_market: 1, price_change: 4646
+  Total: 5663
+  best_bid_ask: 20, new_market: 1, price_change: 5642
 
 Market 1131923: Bitcoin Up or Down - January 8, 6:15PM-6:30PM ET...
-  Total: 3829
-  new_market: 1, price_change: 3828
+  Total: 4827
+  new_market: 1, price_change: 4826
 
 Market 1132174: Bitcoin Up or Down - January 8, 6:30PM-6:45PM ET...
-  Total: 3791
-  best_bid_ask: 6, book: 4, last_trade_price: 2, new_market: 1, price_change: 3778
+  Total: 4853
+  best_bid_ask: 6, book: 4, last_trade_price: 2, new_market: 1, price_change: 4840
 
 Market 1132184: Bitcoin Up or Down - January 8, 6:45PM-7:00PM ET...
-  Total: 3387
-  new_market: 1, price_change: 3386
+  Total: 4427
+  new_market: 1, price_change: 4426
 
 Market 1132229: Bitcoin Up or Down - January 8, 7:00PM-7:15PM ET...
-  Total: 3803
-  best_bid_ask: 4, new_market: 1, price_change: 3798
+  Total: 4829
+  best_bid_ask: 4, new_market: 1, price_change: 4824
 
 Market 1132247: Bitcoin Up or Down - January 8, 7:15PM-7:30PM ET...
-  Total: 3087
-  new_market: 1, price_change: 3086
+  Total: 4009
+  new_market: 1, price_change: 4008
 
 Market 1132467: Bitcoin Up or Down - January 8, 7:30PM-7:45PM ET...
-  Total: 3559
-  best_bid_ask: 6, new_market: 1, price_change: 3552
+  Total: 4599
+  best_bid_ask: 6, new_market: 1, price_change: 4592
 
 Market 1132504: Bitcoin Up or Down - January 8, 7:45PM-8:00PM ET...
-  Total: 3431
-  best_bid_ask: 2, new_market: 1, price_change: 3428
+  Total: 4385
+  best_bid_ask: 2, new_market: 1, price_change: 4382
 
 Market 1132556: Bitcoin Up or Down - January 8, 8:00PM-8:15PM ET...
-  Total: 3877
-  best_bid_ask: 10, book: 4, last_trade_price: 2, new_market: 1, price_change: 3860
+  Total: 4917
+  best_bid_ask: 10, book: 4, last_trade_price: 2, new_market: 1, price_change: 4900
 
 Market 1132586: Bitcoin Up or Down - January 8, 8:15PM-8:30PM ET...
-  Total: 3589
-  new_market: 1, price_change: 3588
+  Total: 4553
+  new_market: 1, price_change: 4552
 
 Market 1132790: Bitcoin Up or Down - January 8, 8:30PM-8:45PM ET...
-  Total: 3443
-  best_bid_ask: 2, new_market: 1, price_change: 3440
+  Total: 4415
+  best_bid_ask: 2, new_market: 1, price_change: 4412
 
 Market 1132812: Bitcoin Up or Down - January 8, 8:45PM-9:00PM ET...
-  Total: 3029
-  new_market: 1, price_change: 3028
+  Total: 3907
+  new_market: 1, price_change: 3906
 
 Market 1132869: Bitcoin Up or Down - January 8, 9:00PM-9:15PM ET...
-  Total: 3853
-  best_bid_ask: 6, new_market: 1, price_change: 3846
+  Total: 4879
+  best_bid_ask: 6, new_market: 1, price_change: 4872
 
 Market 1132895: Bitcoin Up or Down - January 8, 9:15PM-9:30PM ET...
-  Total: 3351
-  best_bid_ask: 8, new_market: 1, price_change: 3342
+  Total: 4337
+  best_bid_ask: 8, new_market: 1, price_change: 4328
 
 Market 1133095: Bitcoin Up or Down - January 8, 9:30PM-9:45PM ET...
-  Total: 3666
-  best_bid_ask: 2, book: 2, last_trade_price: 1, new_market: 1, price_change: 3660
+  Total: 4630
+  best_bid_ask: 2, book: 2, last_trade_price: 1, new_market: 1, price_change: 4624
 
 Market 1133108: Bitcoin Up or Down - January 8, 9:45PM-10:00PM ET...
-  Total: 3476
-  best_bid_ask: 2, book: 2, last_trade_price: 1, new_market: 1, price_change: 3470
+  Total: 4376
+  best_bid_ask: 2, book: 2, last_trade_price: 1, new_market: 1, price_change: 4370
 
 Market 1133133: Bitcoin Up or Down - January 8, 10:00PM-10:15PM ET...
-  Total: 3898
-  best_bid_ask: 6, book: 2, last_trade_price: 1, new_market: 1, price_change: 3888
+  Total: 4794
+  best_bid_ask: 6, book: 2, last_trade_price: 1, new_market: 1, price_change: 4784
 
 Market 1133150: Bitcoin Up or Down - January 8, 10:15PM-10:30PM ET...
-  Total: 3512
-  best_bid_ask: 4, book: 2, last_trade_price: 1, new_market: 1, price_change: 3504
+  Total: 4360
+  best_bid_ask: 4, book: 2, last_trade_price: 1, new_market: 1, price_change: 4352
 
 Market 1133327: Bitcoin Up or Down - January 8, 10:30PM-10:45PM ET...
-  Total: 3497
-  best_bid_ask: 10, book: 8, last_trade_price: 4, new_market: 1, price_change: 3474
+  Total: 4388
+  best_bid_ask: 12, book: 10, last_trade_price: 5, new_market: 1, price_change: 4360
 
 Market 1133339: Bitcoin Up or Down - January 8, 10:45PM-11:00PM ET...
-  Total: 3955
-  best_bid_ask: 14, new_market: 1, price_change: 3940
+  Total: 5071
+  best_bid_ask: 14, new_market: 1, price_change: 5056
 
 Market 1133364: Bitcoin Up or Down - January 8, 11:00PM-11:15PM ET...
-  Total: 3478
-  best_bid_ask: 14, book: 2, last_trade_price: 1, new_market: 1, price_change: 3460
+  Total: 4412
+  best_bid_ask: 14, book: 2, last_trade_price: 1, new_market: 1, price_change: 4394
 
 Market 1133390: Bitcoin Up or Down - January 8, 11:15PM-11:30PM ET...
-  Total: 3504
-  best_bid_ask: 2, book: 2, last_trade_price: 1, new_market: 1, price_change: 3498
+  Total: 4506
+  best_bid_ask: 2, book: 2, last_trade_price: 1, new_market: 1, price_change: 4500
 
 Market 1133552: Bitcoin Up or Down - January 8, 11:30PM-11:45PM ET...
-  Total: 3564
-  best_bid_ask: 2, book: 2, last_trade_price: 1, new_market: 1, price_change: 3558
+  Total: 4474
+  best_bid_ask: 2, book: 2, last_trade_price: 1, new_market: 1, price_change: 4468
 
 Market 1133569: Bitcoin Up or Down - January 8, 11:45PM-12:00AM ET...
-  Total: 3466
-  best_bid_ask: 6, book: 2, last_trade_price: 1, new_market: 1, price_change: 3456
+  Total: 4420
+  best_bid_ask: 6, book: 2, last_trade_price: 1, new_market: 1, price_change: 4410
 
 Market 1133629: Bitcoin Up or Down - January 9, 12:00AM-12:15AM ET...
-  Total: 3473
-  best_bid_ask: 10, new_market: 1, price_change: 3462
+  Total: 4557
+  best_bid_ask: 10, new_market: 1, price_change: 4546
 
 Market 1133725: Bitcoin Up or Down - January 9, 12:15AM-12:30AM ET...
-  Total: 3389
-  best_bid_ask: 20, new_market: 1, price_change: 3368
+  Total: 4283
+  best_bid_ask: 20, new_market: 1, price_change: 4262
 
 Market 1133932: Bitcoin Up or Down - January 9, 12:30AM-12:45AM ET...
-  Total: 3267
-  best_bid_ask: 6, new_market: 1, price_change: 3260
+  Total: 4371
+  best_bid_ask: 6, new_market: 1, price_change: 4364
 
 Market 1133949: Bitcoin Up or Down - January 9, 12:45AM-1:00AM ET...
-  Total: 3341
-  new_market: 1, price_change: 3340
+  Total: 4303
+  new_market: 1, price_change: 4302
 
 Market 1133981: Bitcoin Up or Down - January 9, 1:00AM-1:15AM ET...
-  Total: 3293
-  best_bid_ask: 10, new_market: 1, price_change: 3282
+  Total: 4261
+  best_bid_ask: 10, new_market: 1, price_change: 4250
 
 Market 1134042: Bitcoin Up or Down - January 9, 1:15AM-1:30AM ET...
-  Total: 3388
-  best_bid_ask: 2, book: 2, last_trade_price: 1, new_market: 1, price_change: 3382
+  Total: 4414
+  best_bid_ask: 2, book: 2, last_trade_price: 1, new_market: 1, price_change: 4408
 
 Market 1134216: Bitcoin Up or Down - January 9, 1:30AM-1:45AM ET...
-  Total: 3915
-  best_bid_ask: 10, book: 4, last_trade_price: 2, new_market: 1, price_change: 3898
+  Total: 4906
+  best_bid_ask: 12, book: 6, last_trade_price: 3, new_market: 1, price_change: 4884
 
 Market 1134227: Bitcoin Up or Down - January 9, 1:45AM-2:00AM ET...
-  Total: 3418
-  best_bid_ask: 2, book: 2, last_trade_price: 1, new_market: 1, price_change: 3412
+  Total: 4248
+  best_bid_ask: 2, book: 2, last_trade_price: 1, new_market: 1, price_change: 4242
 
 Market 1134254: Bitcoin Up or Down - January 9, 2:00AM-2:15AM ET...
-  Total: 1030
-  best_bid_ask: 16, book: 2, last_trade_price: 1, new_market: 1, price_change: 1010
+  Total: 1248
+  best_bid_ask: 16, book: 2, last_trade_price: 1, new_market: 1, price_change: 1228
 
 Market 1134450: Bitcoin Up or Down - January 9, 2:15AM-2:30AM ET...
-  Total: 911
-  best_bid_ask: 10, new_market: 1, price_change: 900
+  Total: 1199
+  best_bid_ask: 10, new_market: 1, price_change: 1188
 
 Market 1134451: Bitcoin Up or Down - January 9, 2:30AM-2:45AM ET...
-  Total: 665
-  best_bid_ask: 8, new_market: 1, price_change: 656
+  Total: 899
+  best_bid_ask: 8, new_market: 1, price_change: 890
 
 Market 1134459: Bitcoin Up or Down - January 9, 2:45AM-3:00AM ET...
-  Total: 628
-  best_bid_ask: 14, book: 2, last_trade_price: 1, new_market: 1, price_change: 610
+  Total: 818
+  best_bid_ask: 14, book: 2, last_trade_price: 1, new_market: 1, price_change: 800
 
 Market 1134478: Bitcoin Up or Down - January 9, 3:00AM-3:15AM ET...
-  Total: 860
-  best_bid_ask: 10, book: 2, last_trade_price: 1, new_market: 1, price_change: 846
+  Total: 1206
+  best_bid_ask: 10, book: 2, last_trade_price: 1, new_market: 1, price_change: 1192
 
 Market 1134489: Bitcoin Up or Down - January 9, 3:15AM-3:30AM ET...
-  Total: 792
-  best_bid_ask: 2, book: 2, last_trade_price: 1, new_market: 1, price_change: 786
+  Total: 1032
+  best_bid_ask: 2, book: 2, last_trade_price: 1, new_market: 1, price_change: 1026
 
 Market 1134663: Bitcoin Up or Down - January 9, 3:30AM-3:45AM ET...
-  Total: 580
-  best_bid_ask: 4, book: 2, last_trade_price: 1, new_market: 1, price_change: 572
+  Total: 888
+  best_bid_ask: 4, book: 2, last_trade_price: 1, new_market: 1, price_change: 880
 
 Market 1134680: Bitcoin Up or Down - January 9, 3:45AM-4:00AM ET...
-  Total: 544
-  best_bid_ask: 4, book: 2, last_trade_price: 1, new_market: 1, price_change: 536
+  Total: 848
+  best_bid_ask: 4, book: 2, last_trade_price: 1, new_market: 1, price_change: 840
 

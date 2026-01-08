@@ -183,7 +183,7 @@ async def main():
                         logger.info(f"      Matched fields: {', '.join(match_type)}")
                         logger.info(f"      TX: {event['transaction_hash']}")
                         logger.info(f"      Timestamp (MS): {event['timestamp_ms']}")
-                        logger.info()
+                        logger.info("")
         else:
             logger.warning("⚠️  No TokenRegistered events found matching the target asset IDs")
         
