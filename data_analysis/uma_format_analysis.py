@@ -145,6 +145,8 @@ async def fetch_and_analyze_uma_format():
     total_events = 0
     sample_ancillary_data = None
     sample_event_with_missing_keys = None
+    ancillary_samples_with_expiration = []
+    ancillary_samples_without_expiration = []
 
     try:
         # Analyze oov2 table
@@ -215,6 +217,15 @@ async def fetch_and_analyze_uma_format():
                             missing = expected_keys - found_keys
                             if missing and sample_event_with_missing_keys is None:
                                 sample_event_with_missing_keys = (ancillary_str, missing, found_keys)
+                            
+                            # Collect samples with and without expiration keywords
+                            expiration_keywords = ['expir', 'expire', 'exping', 'expiration']
+                            has_expiration = any(kw.lower() in ancillary_str.lower() for kw in expiration_keywords)
+                            
+                            if has_expiration and len(ancillary_samples_with_expiration) < 2:
+                                ancillary_samples_with_expiration.append(ancillary_str)
+                            elif not has_expiration and len(ancillary_samples_without_expiration) < 1:
+                                ancillary_samples_without_expiration.append(ancillary_str)
                             
                             for key in keys:
                                 ancillary_keys_counts[key] += 1
@@ -292,6 +303,15 @@ async def fetch_and_analyze_uma_format():
                                 if missing and sample_event_with_missing_keys is None:
                                     sample_event_with_missing_keys = (ancillary_str, missing, found_keys)
                                 
+                                # Collect samples with and without expiration keywords
+                                expiration_keywords = ['expir', 'expire', 'exping', 'expiration']
+                                has_expiration = any(kw.lower() in ancillary_str.lower() for kw in expiration_keywords)
+                                
+                                if has_expiration and len(ancillary_samples_with_expiration) < 2:
+                                    ancillary_samples_with_expiration.append(ancillary_str)
+                                elif not has_expiration and len(ancillary_samples_without_expiration) < 1:
+                                    ancillary_samples_without_expiration.append(ancillary_str)
+                                
                                 for key in keys:
                                     ancillary_keys_counts[key] += 1
                     
@@ -354,6 +374,35 @@ async def fetch_and_analyze_uma_format():
         print(f"Missing: {missing_keys}")
         print(f"Found: {found_keys}")
         print(f"Data sample:\n{data[:1500]}...\n")
+    
+    print("=" * 70)
+    print("THREE FULL DECODED ANCILLARY DATA SAMPLES")
+    print("=" * 70)
+    
+    sample_count = 0
+    
+    # Print samples with expiration
+    for i, sample in enumerate(ancillary_samples_with_expiration, 1):
+        sample_count += 1
+        print(f"\nSample {sample_count} (WITH EXPIRATION-RELATED KEYWORDS):")
+        print("-" * 70)
+        print(sample)
+        print()
+    
+    # Print samples without expiration
+    for i, sample in enumerate(ancillary_samples_without_expiration, 1):
+        sample_count += 1
+        print(f"\nSample {sample_count} (WITHOUT EXPIRATION-RELATED KEYWORDS):")
+        print("-" * 70)
+        print(sample)
+        print()
+    
+    if sample_count < 3:
+        print(f"\nNote: Only {sample_count} samples collected (expected 3)")
+        if len(ancillary_samples_with_expiration) < 2:
+            print(f"  - With expiration keywords: {len(ancillary_samples_with_expiration)}/2")
+        if len(ancillary_samples_without_expiration) < 1:
+            print(f"  - Without expiration keywords: {len(ancillary_samples_without_expiration)}/1")
     
     print("=" * 70)
 

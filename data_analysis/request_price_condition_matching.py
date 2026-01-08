@@ -48,6 +48,12 @@ MOOV2_ADAPTER_ORACLE = "0x65070be91477460d8a7aeeb94ef92fe056c2f2a7"
 # Percentiles to calculate (as requested)
 PERCENTILES_TO_CALCULATE = [0.01, 0.50, 0.99]
 
+# Percentiles for non-zero differences analysis
+PERCENTILES_NON_ZERO = [0.1, 10, 33.3, 50, 66.6, 90, 99.9]
+
+# Top N tags to display
+TOP_TAGS_COUNT = 15
+
 # RequestPrice Event Definition
 REQUEST_PRICE_EVENT = {
     "signature": "RequestPrice(address,bytes32,uint256,bytes,address,uint256,uint256)",
@@ -90,12 +96,22 @@ def extract_market_id(ancillary_data_str: str) -> int:
 def format_timedelta(seconds):
     """Helper to format seconds into a readable timedelta string."""
     if pd.isna(seconds): return "N/A"
-    td = timedelta(seconds=abs(seconds))
+    
     sign = "-" if seconds < 0 else ""
-    # Format as H:MM:SS
-    hours, remainder = divmod(td.seconds, 3600)
-    minutes, seconds_part = divmod(remainder, 60)
-    return f"{sign}{hours:02d}:{minutes:02d}:{seconds_part:02d}"
+    total_seconds = int(abs(seconds))
+    
+    # Calculate days, hours, minutes, seconds
+    days = total_seconds // 86400
+    remaining = total_seconds % 86400
+    hours = remaining // 3600
+    remaining = remaining % 3600
+    minutes = remaining // 60
+    secs = remaining % 60
+    
+    if days > 0:
+        return f"{sign}{days}d {hours:02d}:{minutes:02d}:{secs:02d}"
+    else:
+        return f"{sign}{hours:02d}:{minutes:02d}:{secs:02d}"
 
 # ----------------------------------------------------------------
 # 2. DATABASE FUNCTIONS
@@ -208,15 +224,31 @@ async def fetch_condition_preparation_events(pool) -> List[Dict]:
 # ----------------------------------------------------------------
 
 def load_market_mapping(csv_path: str) -> pd.DataFrame:
-    """Load market_id ('id') and conditionId mapping from CSV."""
+    """Load market_id ('id'), conditionId mapping, and tags from CSV."""
     logger.info(f"Loading market mapping from {csv_path}...")
     try:
-        df = pd.read_csv(csv_path, usecols=['id', 'conditionId'], low_memory=False)
+        df = pd.read_csv(csv_path, usecols=['id', 'conditionId', 'tags'], low_memory=False)
         
         df = df.rename(columns={'id': 'market_id'})
         
         df['market_id'] = df['market_id'].astype(int)
         df['conditionId'] = df['conditionId'].astype(str).str.lower()
+        
+        # Parse tags column (it's a string representation of a list)
+        def parse_tags(tag_str):
+            if pd.isna(tag_str):
+                return []
+            if isinstance(tag_str, str):
+                try:
+                    import ast
+                    tags_list = ast.literal_eval(tag_str)
+                    return tags_list if isinstance(tags_list, list) else []
+                except:
+                    return []
+            return []
+        
+        # Parse tags
+        df['tags'] = df['tags'].apply(parse_tags)
         
         # Deduplicate by conditionId, keeping the first market_id
         df_unique = df.sort_values('market_id').drop_duplicates(subset='conditionId', keep='first')
@@ -375,28 +407,95 @@ async def main():
                 value = row[col_name]
                 logger.info(f"  {p*100:.0f}th Percentile: {format_timedelta(value)} ({value:.2f} seconds)")
             
-        # 8. Specific MOOV2/MOOV2 Adapter Non-Zero Difference Count
+        # 8. Zero/Non-Zero Difference Analysis for ALL Combinations with Tag Analysis
         
-        # Filter for the specific pair
-        df_moov2_moov2 = df_final_match[
-            (df_final_match['req_table'] == MOOV2_REQ_TABLE) & 
-            (df_final_match['oracle'] == MOOV2_ADAPTER_ORACLE)
-        ].copy()
+        logger.info("\n--- Zero/Non-Zero Time Difference Analysis for All Combinations ---")
         
-        total_moov2_moov2 = len(df_moov2_moov2)
-        
-        if total_moov2_moov2 > 0:
-            # Count non-zero differences
-            non_zero_diff_count = (df_moov2_moov2['time_diff_sec'] != 0).sum()
-            zero_diff_count = total_moov2_moov2 - non_zero_diff_count
+        for index, row in timing_stats.iterrows():
+            req_table = row['req_table']
+            oracle = row['oracle']
             
-            logger.info("\n--- Specific MOOV2/MOOV2 Adapter Timing Analysis ---")
-            logger.info(f"Total Matched MOOV2 RequestPrice <-> MOOV2 Adapter ConditionPreparation: {total_moov2_moov2:,}")
-            logger.info(f"Count with Non-Zero Time Difference (T_prep != T_req): {non_zero_diff_count:,}")
-            logger.info(f"Count with Zero Time Difference (T_prep = T_req): {zero_diff_count:,}")
-        else:
-            logger.info("\n--- Specific MOOV2/MOOV2 Adapter Timing Analysis ---")
-            logger.info("No matches found for MOOV2 RequestPrice <-> MOOV2 Adapter ConditionPreparation.")
+            req_alias = "MOOV2" if req_table == "events_managed_oracle" else "OOV2"
+            oracle_alias = ORACLE_ALIASES.get(oracle, oracle)
+            
+            # Filter for this specific combination
+            df_pair = df_final_match[
+                (df_final_match['req_table'] == req_table) & 
+                (df_final_match['oracle'] == oracle)
+            ].copy()
+            
+            total_pair = len(df_pair)
+            
+            if total_pair > 0:
+                # Count zero and non-zero differences
+                zero_diff_count = (df_pair['time_diff_sec'] == 0).sum()
+                non_zero_diff_count = total_pair - zero_diff_count
+                
+                logger.info(f"\n{req_alias} RequestPrice <-> {oracle_alias} ConditionPreparation")
+                logger.info(f"  Total Matches: {total_pair:,}")
+                logger.info(f"  Count with Zero Time Difference (T_prep = T_req): {zero_diff_count:,}")
+                logger.info(f"  Count with Non-Zero Time Difference (T_prep != T_req): {non_zero_diff_count:,}")
+                
+                # ===== ZERO DIFFERENCE ANALYSIS =====
+                if zero_diff_count > 0:
+                    df_zero = df_pair[df_pair['time_diff_sec'] == 0]
+                    
+                    # Extract and count tags for zero-difference matches
+                    all_tags_zero = []
+                    for tags_list in df_zero['tags']:
+                        if isinstance(tags_list, list):
+                            all_tags_zero.extend(tags_list)
+                    
+                    if all_tags_zero:
+                        from collections import Counter
+                        tag_counts_zero = Counter(all_tags_zero)
+                        top_tags_zero = tag_counts_zero.most_common(TOP_TAGS_COUNT)
+                        
+                        logger.info(f"  --- Top {TOP_TAGS_COUNT} Tags (Zero Difference, n={zero_diff_count:,}) ---")
+                        for tag, count in top_tags_zero:
+                            percentage = (count / len(all_tags_zero)) * 100
+                            logger.info(f"    {tag}: {count:,} ({percentage:.1f}%)")
+                    else:
+                        logger.info(f"  --- Top Tags (Zero Difference, n={zero_diff_count:,}) ---")
+                        logger.info(f"    No tags found for zero-difference matches")
+                
+                # ===== NON-ZERO DIFFERENCE ANALYSIS =====
+                if non_zero_diff_count > 0:
+                    df_non_zero = df_pair[df_pair['time_diff_sec'] != 0].copy()
+                    df_non_zero_times = df_non_zero['time_diff_sec']
+                    
+                    min_val = df_non_zero_times.min()
+                    max_val = df_non_zero_times.max()
+                    avg_val = df_non_zero_times.mean()
+                    std_val = df_non_zero_times.std()
+                    
+                    logger.info(f"  --- Statistics for Non-Zero Differences (n={non_zero_diff_count:,}) ---")
+                    logger.info(f"    Min: {format_timedelta(min_val)} ({min_val:.2f} seconds)")
+                    logger.info(f"    Max: {format_timedelta(max_val)} ({max_val:.2f} seconds)")
+                    logger.info(f"    Avg: {format_timedelta(avg_val)} ({avg_val:.2f} seconds)")
+                    logger.info(f"    Std: {std_val:.2f} seconds")
+                    
+                    # Calculate and print percentiles for non-zero differences
+                    logger.info(f"    --- Percentiles ---")
+                    for p in PERCENTILES_NON_ZERO:
+                        percentile_val = df_non_zero_times.quantile(p / 100.0)
+                        logger.info(f"    {p:.1f}th Percentile: {format_timedelta(percentile_val)} ({percentile_val:.2f} seconds)")
+                    
+                    # Extract and count tags for non-zero-difference matches
+                    all_tags_non_zero = []
+                    for tags_list in df_non_zero['tags']:
+                        if isinstance(tags_list, list):
+                            all_tags_non_zero.extend(tags_list)
+                    
+                    if all_tags_non_zero:
+                        from collections import Counter
+                        tag_counts_non_zero = Counter(all_tags_non_zero)
+                        top_tags_non_zero = tag_counts_non_zero.most_common(TOP_TAGS_COUNT)
+                        
+                        logger.info(f"  --- Top {TOP_TAGS_COUNT} Tags (Non-Zero Difference, n={non_zero_diff_count:,}) ---")
+                        for tag, count in top_tags_non_zero:
+                            percentage = (count / len(all_tags_non_zero)) * 100
+                            logger.info(f"    {tag}: {count:,} ({percentage:.1f}%)")
         
         logger.info("\nAnalysis complete!")
     

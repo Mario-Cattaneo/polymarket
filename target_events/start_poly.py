@@ -112,6 +112,16 @@ CREATE TABLE IF NOT EXISTS poly_tick_size_change (
 );
 CREATE INDEX IF NOT EXISTS idx_poly_tick_size_change_asset_id ON poly_tick_size_change(asset_id);
 CREATE INDEX IF NOT EXISTS idx_poly_tick_size_change_server_time ON poly_tick_size_change(server_time_us);
+
+CREATE TABLE IF NOT EXISTS poly_book_state (
+    id SERIAL PRIMARY KEY,
+    asset_id TEXT NOT NULL,
+    found_time_us BIGINT NOT NULL,
+    server_time_us BIGINT NOT NULL,
+    message JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_poly_book_state_asset_id ON poly_book_state(asset_id);
+CREATE INDEX IF NOT EXISTS idx_poly_book_state_server_time ON poly_book_state(server_time_us);
 """
 
 # --- Helper Functions ---
@@ -220,6 +230,18 @@ async def insert_price_change(pool, msg):
                 VALUES ($1, $2, $3, $4)
             """, asset_id, int(time.time() * 1_000_000), server_time_us, json.dumps(price_change))
 
+async def insert_filtered_price_changes(pool, msg, filtered_price_changes):
+    """Inserts only the filtered price_changes that match tracked assets."""
+    server_time_us = int(msg.get('timestamp', 0)) * 1000  # Convert ms to us
+    
+    for price_change in filtered_price_changes:
+        asset_id = price_change.get('asset_id', '')
+        if asset_id:
+            await pool.execute("""
+                INSERT INTO poly_price_change (asset_id, found_time_us, server_time_us, message)
+                VALUES ($1, $2, $3, $4)
+            """, asset_id, int(time.time() * 1_000_000), server_time_us, json.dumps(price_change))
+
 async def insert_best_bid_ask(pool, msg):
     """Inserts a best_bid_ask message into the poly_best_bid_ask table."""
     server_time_us = int(msg.get('timestamp', 0)) * 1000  # Convert ms to us
@@ -252,9 +274,18 @@ async def insert_tick_size_change(pool, msg):
         VALUES ($1, $2, $3, $4)
     """, msg.get('asset_id', ''), int(time.time() * 1_000_000), server_time_us, json.dumps(msg))
 
+async def insert_book_state(pool, asset_id, book_msg):
+    """Inserts a book state snapshot into the poly_book_state table."""
+    server_time_us = int(book_msg.get('timestamp', 0)) * 1000  # Convert ms to us
+    await pool.execute("""
+        INSERT INTO poly_book_state (asset_id, found_time_us, server_time_us, message)
+        VALUES ($1, $2, $3, $4)
+    """, asset_id, int(time.time() * 1_000_000), server_time_us, json.dumps(book_msg))
+
 # --- Main Logic ---
 
 MONITORING_INTERVAL_SECONDS = 15  # How often to log market statistics
+BOOK_STATE_POLL_INTERVAL_SECONDS = 0.5 # How often to fetch book state snapshots
 
 async def log_market_statistics(tracked_markets):
     """Periodically logs statistics about subscribed markets and their message counts."""
@@ -285,6 +316,104 @@ async def log_market_statistics(tracked_markets):
                     else:
                         f.write(f"  No messages yet\n")
                     f.write(f"\n")
+
+def extract_start_time_from_question(question: str) -> int:
+    """Extract start time in minutes (24h format) from market question.
+    
+    Expected format: "Bitcoin Up or Down - Month Day, HH:MMAM/PM-HH:MMAM/PM ET"
+    Returns minutes since midnight, or 999999 if parsing fails.
+    """
+    try:
+        # Match: "Bitcoin Up or Down - ... HH:MMAM/PM-..."
+        pattern = r"(\d+):(\d+)([AP]M)"
+        matches = re.findall(pattern, question)
+        if not matches:
+            return 999999
+        
+        # Get first time (start time)
+        hour = int(matches[0][0])
+        minute = int(matches[0][1])
+        ampm = matches[0][2].upper()
+        
+        # Convert to 24-hour format
+        if ampm == 'PM' and hour != 12:
+            hour += 12
+        elif ampm == 'AM' and hour == 12:
+            hour = 0
+        
+        return hour * 60 + minute
+    except:
+        return 999999
+
+async def poll_book_state(session, pool, tracked_markets):
+    """Periodically fetches and stores book state snapshots for tracked assets."""
+    logger.info("--- Starting Book State Poller ---")
+    
+    while True:
+        try:
+            await asyncio.sleep(BOOK_STATE_POLL_INTERVAL_SECONDS)
+            
+            # Get all asset IDs from tracked markets, sorted by market start time (ascending)
+            market_assets = []
+            for market_id, market_data in tracked_markets.items():
+                question = market_data.get('question', '')
+                start_time = extract_start_time_from_question(question)
+                for asset_id in market_data['clobTokenIds']:
+                    market_assets.append((start_time, asset_id, market_id))
+            
+            # Sort by start_time (ascending - lower start times have priority)
+            market_assets.sort(key=lambda x: x[0])
+            
+            # Take up to 500 asset IDs
+            selected_assets = market_assets[:500]
+            
+            if not selected_assets:
+                logger.debug("No tracked assets available for book state polling")
+                continue
+            
+            # Prepare request body
+            request_body = [{"token_id": asset_id} for _, asset_id, _ in selected_assets]
+            
+            try:
+                async with session.post(
+                    "https://clob.polymarket.com/books",
+                    json=request_body,
+                    timeout=30
+                ) as response:
+                    if response.status != 200:
+                        logger.warning(f"Book state request failed with status {response.status}")
+                        continue
+                    
+                    books = await response.json()
+                    
+                    if not isinstance(books, list):
+                        logger.warning(f"Unexpected book state response format: {type(books)}")
+                        continue
+                    
+                    # Store each book state, matching asset_id from request order
+                    inserted_count = 0
+                    for idx, book_msg in enumerate(books):
+                        if idx < len(selected_assets):
+                            _, asset_id, _ = selected_assets[idx]
+                            try:
+                                await insert_book_state(pool, asset_id, book_msg)
+                                inserted_count += 1
+                            except Exception as e:
+                                logger.warning(f"Failed to insert book state for {asset_id}: {e}")
+                    
+                    #logger.info(f"Polled book state: requested {len(selected_assets)} assets, inserted {inserted_count} snapshots")
+            
+            except asyncio.TimeoutError:
+                logger.warning("Book state request timed out")
+            except Exception as e:
+                logger.error(f"Error polling book state: {e}", exc_info=True)
+        
+        except asyncio.CancelledError:
+            logger.info("Book state poller cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Unexpected error in book state poller: {e}", exc_info=True)
+            await asyncio.sleep(5)  # Brief sleep before retry
 
 async def fetch_initial_markets(session, pool):
     """Fetches all Bitcoin 15-min markets that are not closed."""
@@ -431,51 +560,72 @@ async def receive_messages(websocket: websockets.WebSocketClientProtocol, pool, 
                     # Lookup market_id from asset_id in price_changes
                     price_changes = msg.get('price_changes', [])
                     if price_changes:
+                        # Only insert price_changes for tracked asset_ids
+                        filtered_price_changes = []
                         for change in price_changes:
                             asset_id = change.get('asset_id')
-                            # Find which market this asset belongs to
+                            # Check if this specific asset_id is tracked
                             for mid, market_data in tracked_markets.items():
                                 if asset_id in market_data['clobTokenIds']:
-                                    await insert_price_change(pool, msg)
+                                    filtered_price_changes.append(change)
                                     increment_message_stat(mid, 'price_change')
                                     break
-                            break  # Only process first asset in price_changes
+                        
+                        # Only insert if we found matching price_changes
+                        if filtered_price_changes:
+                            await insert_filtered_price_changes(pool, msg, filtered_price_changes)
                 
                 elif event_type == "best_bid_ask":
                     asset_id = msg.get('asset_id')
                     if asset_id:
+                        found = False
                         for mid, market_data in tracked_markets.items():
                             if asset_id in market_data['clobTokenIds']:
                                 await insert_best_bid_ask(pool, msg)
                                 increment_message_stat(mid, 'best_bid_ask')
+                                found = True
                                 break
+                        if not found:
+                            logger.debug(f"Received best_bid_ask for untracked asset_id: {asset_id[:30]}...")
                 
                 elif event_type == "book":
                     asset_id = msg.get('asset_id')
                     if asset_id:
+                        found = False
                         for mid, market_data in tracked_markets.items():
                             if asset_id in market_data['clobTokenIds']:
                                 await insert_book(pool, msg)
                                 increment_message_stat(mid, 'book')
+                                found = True
                                 break
+                        if not found:
+                            logger.debug(f"Received book for untracked asset_id: {asset_id[:30]}...")
                 
                 elif event_type == "last_trade_price":
                     asset_id = msg.get('asset_id')
                     if asset_id:
+                        found = False
                         for mid, market_data in tracked_markets.items():
                             if asset_id in market_data['clobTokenIds']:
                                 await insert_last_trade_price(pool, msg)
                                 increment_message_stat(mid, 'last_trade_price')
+                                found = True
                                 break
+                        if not found:
+                            logger.debug(f"Received last_trade_price for untracked asset_id: {asset_id[:30]}...")
                 
                 elif event_type == "tick_size_change":
                     asset_id = msg.get('asset_id')
                     if asset_id:
+                        found = False
                         for mid, market_data in tracked_markets.items():
                             if asset_id in market_data['clobTokenIds']:
                                 await insert_tick_size_change(pool, msg)
                                 increment_message_stat(mid, 'tick_size_change')
+                                found = True
                                 break
+                        if not found:
+                            logger.debug(f"Received tick_size_change for untracked asset_id: {asset_id[:30]}...")
                 
             except Exception as e:
                 logger.error(f"Error processing {event_type} message: {e}", exc_info=True)
@@ -563,12 +713,13 @@ async def main():
         
         async with aiohttp.ClientSession() as session:
             tracked_markets = await fetch_initial_markets(session, pool)
-        
-        # Start monitoring task and websocket listener concurrently
-        await asyncio.gather(
-            log_market_statistics(tracked_markets),
-            websocket_listener(tracked_markets, pool)
-        )
+            
+            # Start monitoring, websocket listener, and book state poller concurrently
+            await asyncio.gather(
+                log_market_statistics(tracked_markets),
+                websocket_listener(tracked_markets, pool),
+                poll_book_state(session, pool, tracked_markets)
+            )
     
     except Exception as e:
         logger.critical(f"A critical error occurred in the main function: {e}", exc_info=True)

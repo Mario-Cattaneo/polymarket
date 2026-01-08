@@ -67,35 +67,28 @@ class KalshiMarketProcessor:
         self.order_book = {'yes': OrderedDict(), 'no': OrderedDict()}
         self.volume_changes = []
         self.best_price_changes = []
-        self.last_best_prices = {'yes_bid': None, 'no_bid': None, 'yes_ask': None, 'no_ask': None}
+        self.last_best_prices = {'yes_price': None, 'no_price': None}
         self.event_counter = 0
 
     def get_best_prices(self):
-        """Calculates the best bid and ask prices from the current order book."""
-        yes_bids = self.order_book['yes']
-        no_bids = self.order_book['no']
+        """Returns the best YES and NO prices from the independent order books."""
+        yes_prices = self.order_book['yes']
+        no_prices = self.order_book['no']
 
-        best_yes_bid = max(yes_bids) if yes_bids else None
-        best_no_bid = max(no_bids) if no_bids else None
-
-        # In Kalshi, a 'no' bid at price P is equivalent to a 'yes' ask at 100-P
-        best_yes_ask = 100 - max(no_bids) if no_bids else None
-        # A 'yes' bid at price P is equivalent to a 'no' ask at 100-P
-        best_no_ask = 100 - max(yes_bids) if yes_bids else None
+        best_yes_price = max(yes_prices) if yes_prices else None
+        best_no_price = max(no_prices) if no_prices else None
         
         return {
-            'yes_bid': best_yes_bid,
-            'no_bid': best_no_bid,
-            'yes_ask': best_yes_ask,
-            'no_ask': best_no_ask
+            'yes_price': best_yes_price,
+            'no_price': best_no_price
         }
 
     def get_best_quantities(self):
         """Get quantities at best prices."""
         best = self.get_best_prices()
         return {
-            'yes_bid_qty': self.order_book['yes'].get(best['yes_bid'], None) if best['yes_bid'] else None,
-            'no_bid_qty': self.order_book['no'].get(best['no_bid'], None) if best['no_bid'] else None,
+            'yes_qty': self.order_book['yes'].get(best['yes_price'], None) if best['yes_price'] else None,
+            'no_qty': self.order_book['no'].get(best['no_price'], None) if best['no_price'] else None,
         }
 
     def log_best_prices(self, timestamp, event_num, event_type, seq=None):
@@ -104,8 +97,11 @@ class KalshiMarketProcessor:
         qty = self.get_best_quantities()
         seq_str = f"seq={seq}" if seq is not None else ""
         logging.debug(f"  Event #{event_num} ({event_type}) @ {timestamp} {seq_str}")
-        logging.debug(f"    Best Bid - YES: price={best['yes_bid']:>3}, qty={qty['yes_bid_qty']} | NO: price={best['no_bid']:>3}, qty={qty['no_bid_qty']}")
-        logging.debug(f"    Best Ask - YES: price={best['yes_ask']:>3} | NO: price={best['no_ask']:>3}")
+        yes_price_str = f"{best['yes_price']:>3}" if best['yes_price'] is not None else "  -"
+        no_price_str = f"{best['no_price']:>3}" if best['no_price'] is not None else "  -"
+        yes_qty = qty['yes_qty'] if qty['yes_qty'] is not None else 0
+        no_qty = qty['no_qty'] if qty['no_qty'] is not None else 0
+        logging.debug(f"    Best YES price: {yes_price_str} (qty={yes_qty}) | Best NO price: {no_price_str} (qty={no_qty})")
 
     def track_best_price_change(self, timestamp):
         """Checks for and records changes in the best prices."""
@@ -171,44 +167,26 @@ class KalshiMarketProcessor:
         self.log_best_prices(timestamp, self.event_counter, 'DELTA', seq)
 
     def apply_trade(self, trade_msg, timestamp, seq=None):
-        """Applies a trade to the order book and records the volume change."""
+        """Logs a trade without modifying the order book (deltas handle that)."""
         self.event_counter += 1
-        # A trade removes liquidity from the book. The taker_side indicates the aggressor.
-        # If taker_side is 'yes', they are buying 'yes' contracts, which means they are hitting the 'yes' asks.
-        # A 'yes' ask at price P is a 'no' bid at 100-P.
-        # Therefore, a 'yes' taker trade reduces the 'no' side of the order book.
-        side_to_change = 'no' if trade_msg['taker_side'] == 'yes' else 'yes'
-        price_on_book = 100 - trade_msg['yes_price']
+        taker_side = trade_msg['taker_side']
+        yes_price = trade_msg['yes_price']
         quantity = trade_msg['count']
 
         logging.debug(f"\nEvent #{self.event_counter} - TRADE @ {timestamp} [seq={seq}]")
-        logging.debug(f"  Taker side: {trade_msg['taker_side']}, Yes price: {trade_msg['yes_price']}, Count: {quantity}, Trade ID: {trade_msg.get('trade_id', 'N/A')}")
-        logging.debug(f"  Removing from {side_to_change} book @ price {price_on_book}")
-
-        current_quantity = self.order_book[side_to_change].get(price_on_book, 0)
-        new_quantity = current_quantity - quantity
-
-        logging.debug(f"  Before: qty={current_quantity}, After: qty={new_quantity}")
-        
-        if new_quantity > 0:
-            self.order_book[side_to_change][price_on_book] = new_quantity
-        else:
-            if price_on_book in self.order_book[side_to_change]:
-                del self.order_book[side_to_change][price_on_book]
-        
-        self.order_book[side_to_change] = OrderedDict(sorted(self.order_book[side_to_change].items()))
+        logging.debug(f"  Taker side: {taker_side}, Yes price: {yes_price}, Count: {quantity}, Trade ID: {trade_msg.get('trade_id', 'N/A')}")
 
         self.volume_changes.append({
             'timestamp': timestamp, 'event_type': 'trade', 'side': trade_msg['taker_side'],
             'price': trade_msg['yes_price'], 'quantity_change': -quantity
         })
-        self.track_best_price_change(timestamp)
         self.log_best_prices(timestamp, self.event_counter, 'TRADE', seq)
 
     def process_events(self, events):
-        """Processes a chronologically sorted list of market events (sorted by server_time_us, then seq)."""
+        """Processes events grouped by second with deltas before trades."""
         logging.debug("=" * 100)
-        logging.debug(f"PROCESSING {len(events)} EVENTS - SORTED BY (server_time_us, seq)")
+        logging.debug(f"PROCESSING {len(events)} EVENTS")
+        logging.debug("Sorted by (second, is_trade, seq) - deltas grouped before trades within each second")
         logging.debug("=" * 100)
         
         for event in events:
@@ -298,10 +276,12 @@ async def get_and_process_kalshi_data(pool, utc_time_str):
 
         print(f"✓ Parsed {len(orderbook_updates)} orderbook updates and {len(trades)} trades.")
 
-        # 3. Create a combined event timeline sorted by (server_time_us, seq)
+        # 3. Create a combined event timeline sorted by (time_in_seconds, is_trade, seq)
+        # This groups events by second and ensures deltas come before trades within each second
         all_events = orderbook_updates + trades
-        all_events.sort(key=lambda x: (x['server_time_us'], x['seq'] if x['seq'] is not None else 0))
-        print(f"✓ Created a combined timeline of {len(all_events)} events sorted by (server_time_us, seq).")
+        all_events.sort(key=lambda x: (x['server_time_us'] // 1_000_000, x['type'] == 'trade', x['seq'] if x['seq'] is not None else 0))
+        print(f"✓ Created a combined timeline of {len(all_events)} events.")
+        print(f"  Sorted by (second, is_trade, seq) to group deltas before trades within each second.")
 
         # Log first 30 events for debugging
         logging.debug("\n" + "=" * 100)
@@ -324,7 +304,17 @@ async def get_and_process_kalshi_data(pool, utc_time_str):
         for i, event in enumerate(all_events):
             if event['type'] == 'trade':
                 trade_time = event['server_time_us']
-                trade_msg = event['data']
+                trade_msg = event['data']['msg']
+                
+                # Determine which side was hit
+                taker_side = trade_msg['taker_side']
+                yes_price = trade_msg['yes_price']
+                if taker_side == 'yes':
+                    side_hit = 'yes'
+                    price_on_book = yes_price
+                else:
+                    side_hit = 'no'
+                    price_on_book = 100 - yes_price
                 
                 # Look for a nearby orderbook_delta
                 for j in range(max(0, i - 5), min(len(all_events), i + 5)):
@@ -337,21 +327,20 @@ async def get_and_process_kalshi_data(pool, utc_time_str):
                             delta_msg = other_event['data']['msg']
                             
                             # Check if the delta corresponds to the trade
-                            is_taker_yes = trade_msg['taker_side'] == 'yes'
-                            is_delta_no = delta_msg['side'] == 'no'
-                            is_price_match = delta_msg['price'] == 100 - trade_msg['yes_price']
+                            is_side_match = delta_msg['side'] == side_hit
+                            is_price_match = delta_msg['price'] == price_on_book
                             is_quantity_match = abs(delta_msg['delta']) == trade_msg['count']
 
-                            if is_taker_yes and is_delta_no and is_price_match and is_quantity_match:
+                            if is_side_match and is_price_match and is_quantity_match:
                                 print(f"Trade at {trade_time} appears to have a corresponding order book delta.")
-                                print(f"  - Trade: Taker='yes', Price={trade_msg['yes_price']}, Count={trade_msg['count']}")
-                                print(f"  - Delta: Side='no', Price={delta_msg['price']}, Delta={delta_msg['delta']}")
+                                print(f"  - Trade: Taker='{taker_side}', Yes_price={yes_price}, Count={trade_msg['count']}")
+                                print(f"  - Delta: Side='{delta_msg['side']}', Price={delta_msg['price']}, Delta={delta_msg['delta']}")
                                 break
 
 
 async def main():
     """Main function to query and process market data."""
-    test_utc_time = "2026-01-06 20:30:00"
+    test_utc_time = "2026-01-07 09:30:00"
     
     pool = await connect_db()
     try:

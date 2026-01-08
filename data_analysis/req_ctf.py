@@ -33,14 +33,14 @@ CTF_ADDRESS = "0x4d97dcd97ec945f40cf65f87097ace5ea0476045".lower()
 ORACLE_ALIASES = {
     "0x65070be91477460d8a7aeeb94ef92fe056c2f2a7": "MOOV2 Adapter",
     "0x58e1745bedda7312c4cddb72618923da1b90efde": "Centralized Adapter",
-    "0xd91e80cf2e7be2e162c6513ced06f1dd0da35296": "Negrisk UmaCtfAdapter",
+    "0xd91e80cf2e7be2e162c6513ced06f1dd0da35296": "Negrisk Adapter",
 }
 
 # --- Oracles of Interest (Verified from your diagnostic output) ---
 ORACLES_OF_INTEREST = {
     "0x65070be91477460d8a7aeeb94ef92fe056c2f2a7": "MOOV2 Adapter",
     "0x58e1745bedda7312c4cddb72618923da1b90efde": "Centralized Adapter",
-    "0xd91e80cf2e7be2e162c6513ced06f1dd0da35296": "Negrisk UmaCtfAdapter"
+    "0xd91e80cf2e7be2e162c6513ced06f1dd0da35296": "Negrisk Adapter"
 }
 
 # --- Dynamic Time Filtering (Will be set in main()) ---
@@ -122,7 +122,7 @@ def plot_prepared_vs_requested_cdf(plot_data: dict):
     # Extract data series
     oracle1_prepared = plot_data.get("MOOV2 Adapter", [])
     oracle2_prepared = plot_data.get("Centralized Adapter", [])
-    oracle3_prepared = plot_data.get("Negrisk UmaCtfAdapter", [])
+    oracle3_prepared = plot_data.get("Negrisk Adapter", [])
     
     moov2_requested = plot_data.get("MOOV2", [])
     oov2_requested = plot_data.get("OOV2", [])
@@ -134,7 +134,7 @@ def plot_prepared_vs_requested_cdf(plot_data: dict):
     # Log actual data for verification
     logger.info(f"\nMOOV2 Adapter: {len(oracle1_prepared):,} events")
     logger.info(f"Centralized Adapter: {len(oracle2_prepared):,} events")
-    logger.info(f"Negrisk UmaCtfAdapter: {len(oracle3_prepared):,} events")
+    logger.info(f"Negrisk Adapter: {len(oracle3_prepared):,} events")
     logger.info(f"MOOV2 Requested: {len(moov2_requested):,} events")
     logger.info(f"OOV2 Requested: {len(oov2_requested):,} events")
     
@@ -159,9 +159,9 @@ def plot_prepared_vs_requested_cdf(plot_data: dict):
                 color='#ff6b35', linewidth=3.5, linestyle='--', zorder=5)
     
     if oracle3_prepared:
-        cdf_data = prepare_cdf_data(oracle3_prepared, "Negrisk UmaCtfAdapter (Prepared)")
+        cdf_data = prepare_cdf_data(oracle3_prepared, "Negrisk Adapter (Prepared)")
         ax.plot(cdf_data['datetime'], cdf_data['count'], 
-                label=f"Negrisk UmaCtfAdapter (n={len(oracle3_prepared):,})",
+                label=f"Negrisk Adapter (n={len(oracle3_prepared):,})",
                 color='#ff8c00', linewidth=3.5, linestyle='--', zorder=6)
     
     if oracle2_prepared:

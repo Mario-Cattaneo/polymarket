@@ -32,6 +32,15 @@ ATTRIBUTES_TO_ANALYZE = {
     'bestAsk': 'cdf'
 }
 
+# Additional attributes to analyze with special categorization
+ADDITIONAL_ATTRIBUTES = {
+    'lastTradePrice_category_zero': 'pmf',  # Missing, = 0, > 0
+    'lastTradePrice_category': 'pmf',  # Missing, <= 0, > 0
+    'lastTradePrice_category_eps': 'pmf',  # Missing, <= 1e-7, > 1e-7
+}
+
+FILTER_CREATED_AT = '2025-12-17 20:43:53'
+
 def get_plot_save_path(filename: str) -> str:
     """Constructs the full save path for a plot under $POLY_PLOTS/reg_vs_orderbook."""
     base_dir = os.environ.get('POLY_PLOTS', '.')
@@ -77,9 +86,36 @@ def load_and_clean_csv(csv_path: str):
 
     if 'lastTradePrice' in df.columns:
         df['has_lastTradePrice_cleaned'] = df['lastTradePrice'].notna().astype(int)
+        
+        # Create categorized versions: Missing, = 0, > 0
+        def categorize_trade_price_zero(price):
+            if pd.isna(price):
+                return 'Missing'
+            price_val = float(price) if isinstance(price, (int, float, str)) else 0
+            return '= 0' if price_val == 0 else '> 0'
+        df['lastTradePrice_category_zero'] = df['lastTradePrice'].apply(categorize_trade_price_zero)
+        
+        # Create categorized versions: Missing, <= 0, > 0
+        def categorize_trade_price(price):
+            if pd.isna(price):
+                return 'Missing'
+            price_val = float(price) if isinstance(price, (int, float, str)) else 0
+            return '<= 0' if price_val <= 0 else '> 0'
+        df['lastTradePrice_category'] = df['lastTradePrice'].apply(categorize_trade_price)
+        
+        # Create categorized versions with epsilon: Missing, <= 1e-7, > 1e-7
+        def categorize_trade_price_epsilon(price):
+            if pd.isna(price):
+                return 'Missing'
+            price_val = float(price) if isinstance(price, (int, float, str)) else 0
+            return '<= 1e-7' if price_val <= 1e-7 else '> 1e-7'
+        df['lastTradePrice_category_eps'] = df['lastTradePrice'].apply(categorize_trade_price_epsilon)
     else:
         logger.warning("Column 'lastTradePrice' not found. Skipping its PMF analysis.")
         df['has_lastTradePrice_cleaned'] = 0
+        df['lastTradePrice_category_zero'] = 'Missing'
+        df['lastTradePrice_category'] = 'Missing'
+        df['lastTradePrice_category_eps'] = 'Missing'
 
     for attr in ['spread', 'volumeNum', 'bestAsk']:
         if attr in df.columns:
@@ -100,13 +136,31 @@ async def fetch_all_registered_ids(pool):
     logger.info(f"Found {len(all_ids):,} total unique registered condition IDs.")
     return all_ids
 
-def plot_pmf(df, attr, clean_attr):
+def plot_pmf(df, attr, clean_attr, title_suffix=""):
     """Plots a Probability Mass Function, customized for different attributes."""
     fig, ax = plt.subplots(figsize=(14, 8))
-    counts = df.groupby(['is_matched', clean_attr]).size().unstack(fill_value=0)
-    probs = counts.div(counts.sum(axis=1), axis=0)
-
-    if attr == 'outcomePrices':
+    
+    # Special handling for trade price categories
+    if attr == 'has_lastTradePrice' and clean_attr in ['lastTradePrice_category_zero', 'lastTradePrice_category', 'lastTradePrice_category_eps']:
+        counts = df.groupby(['is_matched', clean_attr]).size().unstack(fill_value=0)
+        probs = counts.div(counts.sum(axis=1), axis=0)
+        
+        # Define category order
+        if clean_attr == 'lastTradePrice_category_zero':
+            category_order = ['Missing', '= 0', '> 0']
+        elif clean_attr == 'lastTradePrice_category':
+            category_order = ['Missing', '<= 0', '> 0']
+        else:  # lastTradePrice_category_eps
+            category_order = ['Missing', '<= 1e-7', '> 1e-7']
+        
+        probs = probs.reindex(columns=category_order, fill_value=0)
+        probs.T.plot(kind='bar', ax=ax, width=0.6)
+        ax.set_xlabel("Last Trade Price Status", fontsize=12)
+        ax.tick_params(axis='x', rotation=45, labelsize=11)
+    
+    elif attr == 'outcomePrices':
+        counts = df.groupby(['is_matched', clean_attr]).size().unstack(fill_value=0)
+        probs = counts.div(counts.sum(axis=1), axis=0)
         category_order = ["[0, 0]", "[0, 1]", "[0.5, 0.5]", "[1, 1]", "Other"]
         probs = probs.reindex(columns=category_order, fill_value=0)
         probs.T.plot(kind='bar', ax=ax, width=0.8)
@@ -114,24 +168,36 @@ def plot_pmf(df, attr, clean_attr):
         ax.tick_params(axis='x', rotation=0, labelsize=11)
     
     elif attr == 'has_lastTradePrice':
+        counts = df.groupby(['is_matched', clean_attr]).size().unstack(fill_value=0)
+        probs = counts.div(counts.sum(axis=1), axis=0)
         probs = probs.reindex(columns=[0, 1], fill_value=0)
         probs.T.plot(kind='bar', ax=ax, width=0.4)
         ax.set_xlabel("Attribute Status", fontsize=12)
         ax.set_xticklabels(['Missing', 'Present'], rotation=0)
+    else:
+        counts = df.groupby(['is_matched', clean_attr]).size().unstack(fill_value=0)
+        probs = counts.div(counts.sum(axis=1), axis=0)
+        probs.T.plot(kind='bar', ax=ax, width=0.6)
 
-    ax.set_title(f"Probability of {attr} given Matched Status", fontsize=16)
+    ax.set_title(f"Probability of {attr} given Matched Status{title_suffix}", fontsize=16)
     ax.set_ylabel(f"P({attr} | Status)", fontsize=12)
     ax.legend(title='Status', labels=['Unmatched (M=0)', 'Matched (M=1)'])
     ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
     plt.tight_layout()
     
-    filename = f"pmf_{attr}.png"
+    # Generate filename - include clean_attr if it's one of the special trade price categories
+    if clean_attr in ['lastTradePrice_category_zero', 'lastTradePrice_category', 'lastTradePrice_category_eps']:
+        category_name = clean_attr.replace('lastTradePrice_', '')
+        filename = f"pmf_has_lastTradePrice_{category_name}{title_suffix.lower().replace(' ', '_').replace('>', '').strip()}.png"
+    else:
+        filename = f"pmf_{attr}{title_suffix.lower().replace(' ', '_').replace('>', '').strip()}.png"
+    
     save_path = get_plot_save_path(filename)
     plt.savefig(save_path, dpi=120)
     logger.info(f"PMF plot saved to {save_path}")
     plt.show()
 
-def plot_cdf(df, attr, clean_attr):
+def plot_cdf(df, attr, clean_attr, title_suffix=""):
     """Plots a Cumulative Distribution Function for a continuous attribute."""
     matched_data = df[df['is_matched']][clean_attr].dropna().sort_values()
     unmatched_data = df[~df['is_matched']][clean_attr].dropna().sort_values()
@@ -142,7 +208,7 @@ def plot_cdf(df, attr, clean_attr):
     if not unmatched_data.empty:
         ax.plot(unmatched_data, np.arange(1, len(unmatched_data) + 1) / len(unmatched_data), 
                 label=f'Unmatched (M=0) (n={len(unmatched_data):,})', color='red', linestyle='--')
-    ax.set_title(f"CDF of {attr} for Matched vs. Unmatched Markets", fontsize=16)
+    ax.set_title(f"CDF of {attr} for Matched vs. Unmatched Markets{title_suffix}", fontsize=16)
     ax.set_ylabel("Cumulative Probability", fontsize=12)
     ax.set_xlabel(f"{attr} Value", fontsize=12)
     
@@ -153,7 +219,7 @@ def plot_cdf(df, attr, clean_attr):
     ax.legend()
     ax.grid(True, which='both', linestyle='--', linewidth=0.5)
     plt.tight_layout()
-    filename = f"cdf_{attr}.png"
+    filename = f"cdf_{attr}{title_suffix.lower().replace(' ', '_').replace('>', '').strip()}.png"
     save_path = get_plot_save_path(filename)
     plt.savefig(save_path, dpi=120)
     logger.info(f"CDF plot saved to {save_path}")
@@ -194,6 +260,54 @@ async def main():
             plot_pmf(analysis_df, attr, clean_attr)
         elif plot_type == 'cdf':
             plot_cdf(analysis_df, attr, clean_attr)
+    
+    # Generate additional trade price category plots
+    for attr, plot_type in ADDITIONAL_ATTRIBUTES.items():
+        if attr not in analysis_df.columns or analysis_df[attr].notna().sum() == 0:
+            logger.warning(f"Skipping plot for '{attr}' as there is no valid data.")
+            continue
+        if plot_type == 'pmf':
+            plot_pmf(analysis_df, 'has_lastTradePrice', attr)
+    
+    # Generate filtered plots (createdAt > FILTER_CREATED_AT)
+    logger.info(f"\n=== Generating filtered plots (createdAt > {FILTER_CREATED_AT}) ===")
+    filter_created_at_dt = pd.to_datetime(FILTER_CREATED_AT, utc=True)
+    
+    # Filter within the same time window, but only after FILTER_CREATED_AT
+    analysis_df_filtered = df[(df['createdAt_dt'] > filter_created_at_dt) & (df['createdAt_dt'] <= end_dt)].copy()
+    logger.info(f"Filtered to {len(analysis_df_filtered):,} markets with createdAt > {FILTER_CREATED_AT} (within original time range).")
+    
+    if len(analysis_df_filtered) == 0:
+        logger.warning("No data after applying createdAt filter. Skipping filtered plots.")
+        return
+    
+    matched_count_filtered = analysis_df_filtered['is_matched'].sum()
+    logger.info(f"In filtered set: {matched_count_filtered:,} are Matched, {len(analysis_df_filtered) - matched_count_filtered:,} are Unmatched.")
+    
+    for attr, plot_type in ATTRIBUTES_TO_ANALYZE.items():
+        if attr == 'createdAt':
+            clean_attr = 'createdAt_dt'
+        else:
+            clean_attr = f"{attr}_cleaned"
+
+        if clean_attr not in analysis_df_filtered.columns or analysis_df_filtered[clean_attr].notna().sum() == 0:
+            logger.warning(f"Skipping filtered plot for '{attr}' as there is no valid data.")
+            continue
+        
+        title_suffix = f" (createdAt > {FILTER_CREATED_AT})"
+        if plot_type == 'pmf':
+            plot_pmf(analysis_df_filtered, attr, clean_attr, title_suffix)
+        elif plot_type == 'cdf':
+            plot_cdf(analysis_df_filtered, attr, clean_attr, title_suffix)
+    
+    # Generate additional trade price category plots (filtered)
+    for attr, plot_type in ADDITIONAL_ATTRIBUTES.items():
+        if attr not in analysis_df_filtered.columns or analysis_df_filtered[attr].notna().sum() == 0:
+            logger.warning(f"Skipping filtered plot for '{attr}' as there is no valid data.")
+            continue
+        title_suffix = f" (createdAt > {FILTER_CREATED_AT})"
+        if plot_type == 'pmf':
+            plot_pmf(analysis_df_filtered, 'has_lastTradePrice', attr, title_suffix)
 
 # Helper functions needed by this script
 async def get_db_pool(db_config: dict):

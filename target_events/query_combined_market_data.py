@@ -198,7 +198,7 @@ async def get_polymarket_data(pool, utc_time_str):
 async def get_kalshi_data(pool, utc_time_str):
     """
     Fetch Kalshi data for a given UTC time.
-    utc_time_str format: "2026-01-06 18:00:00"
+    utc_time_str format: "2026-01-07 11:00:00"
     """
     try:
         utc_dt = datetime.strptime(utc_time_str, "%Y-%m-%d %H:%M:%S")

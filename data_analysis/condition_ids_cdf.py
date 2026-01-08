@@ -37,7 +37,7 @@ ADDR = {
 ORACLE_ALIASES = {
     "0x65070be91477460d8a7aeeb94ef92fe056c2f2a7": "MOOV2 Adapter",
     "0x58e1745bedda7312c4cddb72618923da1b90efde": "Centralized Adapter",
-    "0xd91e80cf2e7be2e162c6513ced06f1dd0da35296": "Negrisk UmaCtfAdapter",
+    "0xd91e80cf2e7be2e162c6513ced06f1dd0da35296": "Negrisk Adapter",
 }
 
 # --- Dynamic Time Filtering (Will be set in main()) ---
@@ -52,6 +52,9 @@ PMF_BIN_WIDTH_SEC = 60 # 10 minute step size
 # --- Percentiles Configuration ---
 # Define percentiles to compute and display in timing analysis
 PERCENTILES = [0.001, 0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99, 0.999]
+
+# --- Top Tags Configuration ---
+TOP_TAGS_COUNT = 15
 
 # ----------------------------------------------------------------
 # 2. DATA FETCHING & LOADING
@@ -96,10 +99,10 @@ async def fetch_time_range(pool):
     return min_time, max_time
 
 def load_market_data(csv_path):
-    """Loads and processes market data from the CSV, including createdAt, startDate, acceptingOrdersTimestamp, and conditionId."""
+    """Loads and processes market data from the CSV, including createdAt, startDate, acceptingOrdersTimestamp, conditionId, and tags."""
     logger.info(f"Loading market data from {csv_path}...")
     try:
-        df = pd.read_csv(csv_path, usecols=['createdAt', 'startDate', 'acceptingOrdersTimestamp', 'conditionId'])
+        df = pd.read_csv(csv_path, usecols=['createdAt', 'startDate', 'acceptingOrdersTimestamp', 'conditionId', 'tags'])
         df['conditionId'] = df['conditionId'].str.lower()
         
         # FIX: Use format='ISO8601' to correctly parse timestamps with or without milliseconds/Z
@@ -107,9 +110,25 @@ def load_market_data(csv_path):
         df['startDate_dt'] = pd.to_datetime(df['startDate'], utc=True, format='ISO8601', errors='coerce')
         df['acceptingOrdersTimestamp_dt'] = pd.to_datetime(df['acceptingOrdersTimestamp'], utc=True, format='ISO8601', errors='coerce')
         
+        # Parse tags column (it's a string representation of a list)
+        def parse_tags(tag_str):
+            if pd.isna(tag_str):
+                return []
+            if isinstance(tag_str, str):
+                try:
+                    import ast
+                    tags_list = ast.literal_eval(tag_str)
+                    return tags_list if isinstance(tags_list, list) else []
+                except:
+                    return []
+            return []
+        
+        # Parse tags
+        df['tags'] = df['tags'].apply(parse_tags)
+        
         df_unique = df.sort_values('createdAt_dt').drop_duplicates(subset='conditionId', keep='first')
         logger.info(f"Loaded {len(df_unique):,} unique markets from CSV.")
-        return df_unique[['createdAt_dt', 'startDate_dt', 'acceptingOrdersTimestamp_dt', 'conditionId']]
+        return df_unique[['createdAt_dt', 'startDate_dt', 'acceptingOrdersTimestamp_dt', 'conditionId', 'tags']]
     except FileNotFoundError:
         logger.error(f"CSV file not found at {csv_path}. Please ensure POLY_CSV environment variable is set correctly.")
         return pd.DataFrame()
@@ -124,12 +143,45 @@ def load_market_data(csv_path):
 def format_timedelta(seconds):
     """Helper to format seconds into a readable timedelta string."""
     if pd.isna(seconds): return "N/A"
-    td = timedelta(seconds=abs(seconds))
+    
     sign = "-" if seconds < 0 else ""
-    # Format as H:MM:SS
-    hours, remainder = divmod(td.seconds, 3600)
-    minutes, seconds_part = divmod(remainder, 60)
-    return f"{sign}{hours:02d}:{minutes:02d}:{seconds_part:02d}"
+    total_seconds = int(abs(seconds))
+    
+    # Calculate days, hours, minutes, seconds
+    days = total_seconds // 86400
+    remaining = total_seconds % 86400
+    hours = remaining // 3600
+    remaining = remaining % 3600
+    minutes = remaining // 60
+    secs = remaining % 60
+    
+    if days > 0:
+        return f"{sign}{days}d {hours:02d}:{minutes:02d}:{secs:02d}"
+    else:
+        return f"{sign}{hours:02d}:{minutes:02d}:{secs:02d}"
+
+def analyze_tags(df_markets, title):
+    """Analyzes and prints top tags from markets."""
+    if df_markets.empty or 'tags' not in df_markets.columns:
+        logger.info(f"{title}: No data or tags column")
+        return
+    
+    all_tags = []
+    for tags_list in df_markets['tags']:
+        if isinstance(tags_list, list):
+            all_tags.extend(tags_list)
+    
+    if all_tags:
+        from collections import Counter
+        tag_counts = Counter(all_tags)
+        top_tags = tag_counts.most_common(TOP_TAGS_COUNT)
+        
+        logger.info(f"\n{title} (n={len(df_markets):,} markets, {len(all_tags):,} total tags)")
+        for tag, count in top_tags:
+            percentage = (count / len(all_tags)) * 100
+            logger.info(f"  {tag}: {count:,} ({percentage:.1f}%)")
+    else:
+        logger.info(f"{title}: No tags found")
 
 def prepare_cdf_data(df, time_column, label):
     """Prepares data for CDF plotting."""
@@ -457,6 +509,17 @@ def analyze_and_print_stats(df_matched_all, total_prepared_events, oracle_totals
     logger.info(f"  Total Matched Events (all oracles): {total_matched_events:,}")
     logger.info("-----------------------------\n")
     
+    # Tag Analysis for matched markets
+    if 'tags' in df_matched_all.columns:
+        analyze_tags(df_matched_all, "--- Top Tags in All Matched Markets ---")
+        
+        # Per-oracle tag analysis
+        for oracle in sorted(event_counts.index):
+            alias = ORACLE_ALIASES.get(oracle, oracle)
+            oracle_matched = df_matched_all[df_matched_all['oracle'] == oracle]
+            if not oracle_matched.empty:
+                analyze_tags(oracle_matched, f"--- Top Tags in Markets Matched to {alias} ---")
+    
     return event_counts.index.tolist()
 
 # ----------------------------------------------------------------
@@ -763,9 +826,6 @@ async def main():
         avg_time_diffs = np.array(avg_time_diffs)
         
         logger.info(f"Total non-overlapping windows: {len(avg_time_diffs)}")
-        logger.info("Window average time differences (seconds):")
-        for idx, (ts, diff) in enumerate(zip(window_starts, avg_time_diffs)):
-            logger.info(f"  Window {idx} (start: {ts.strftime('%Y-%m-%d %H:%M:%S')}): {diff:.4f} sec avg")
         
         # Find first significant drop in avg time difference
         spike_idx = -1
