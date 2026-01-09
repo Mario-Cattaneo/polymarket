@@ -65,7 +65,6 @@ async def create_settlements_table(conn):
         CREATE TABLE IF NOT EXISTS settlements (
             id BIGSERIAL,
             timestamp_ms BIGINT NOT NULL,
-            block_number BIGINT NOT NULL,
             transaction_hash TEXT NOT NULL,
             trade JSONB NOT NULL,
             type VARCHAR(20) NOT NULL,
@@ -73,7 +72,6 @@ async def create_settlements_table(conn):
         );
         
         CREATE INDEX IF NOT EXISTS idx_settlements_timestamp ON settlements(timestamp_ms);
-        CREATE INDEX IF NOT EXISTS idx_settlements_block ON settlements(block_number);
         CREATE INDEX IF NOT EXISTS idx_settlements_type ON settlements(type);
         CREATE INDEX IF NOT EXISTS idx_settlements_exchange ON settlements(exchange);
         CREATE INDEX IF NOT EXISTS idx_settlements_tx_hash ON settlements(transaction_hash);
@@ -133,7 +131,6 @@ async def fetch_events_in_time_range(conn, min_ts_ms, max_ts_ms):
             topics,
             data,
             timestamp_ms,
-            block_number,
             LOWER(contract_address) as contract
         FROM events_ctf_exchange
         WHERE timestamp_ms BETWEEN $1 AND $2
@@ -148,7 +145,6 @@ async def fetch_events_in_time_range(conn, min_ts_ms, max_ts_ms):
             topics,
             data,
             timestamp_ms,
-            block_number,
             LOWER(contract_address) as contract
         FROM events_neg_risk_exchange
         WHERE timestamp_ms BETWEEN $1 AND $2
@@ -162,8 +158,7 @@ async def fetch_events_in_time_range(conn, min_ts_ms, max_ts_ms):
             event_name,
             topics,
             data,
-            timestamp_ms,
-            block_number
+            timestamp_ms
         FROM events_conditional_tokens
         WHERE timestamp_ms BETWEEN $1 AND $2
         ORDER BY timestamp_ms ASC, transaction_hash ASC
@@ -272,9 +267,6 @@ async def process_and_insert_settlements(conn, timestamp_map):
                 # Collect all position events
                 all_pos_events = split_events + merge_events
                 
-                # Get block_number from first event
-                block_number = om_events[0]['block_number']
-                
                 # Create settlement record with only data and topics
                 trade_jsonb = json.dumps({
                     'transaction_hash': tx_hash,
@@ -289,10 +281,10 @@ async def process_and_insert_settlements(conn, timestamp_map):
                 # Insert into settlements table
                 await conn.execute(
                     """
-                    INSERT INTO settlements (timestamp_ms, block_number, transaction_hash, trade, type, exchange)
-                    VALUES ($1, $2, $3, $4, $5, $6)
+                    INSERT INTO settlements (timestamp_ms, transaction_hash, trade, type, exchange)
+                    VALUES ($1, $2, $3, $4, $5)
                     """,
-                    timestamp_ms, block_number, tx_hash, trade_jsonb, settlement_type, exchange
+                    timestamp_ms, tx_hash, trade_jsonb, settlement_type, exchange
                 )
                 
                 insert_count += 1
