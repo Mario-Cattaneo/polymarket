@@ -16,7 +16,7 @@ from http_cli import HttpManager, HttpTaskConfig, HttpTaskCallbacks, Method
 INFURA_MAX_LOGS = 10_000
 ALPHA = 0.2  # Exponential Moving Average smoothing factor
 TOLERANCE = 0.1  # Safety margin (10%)
-CONFIG_FILE = "collect_events_config.json"
+CONFIG_FILE = "reg.json"
 BLOCK_TIME_MS = 2000  # 2 seconds per block
 
 # --- Logging Setup ---

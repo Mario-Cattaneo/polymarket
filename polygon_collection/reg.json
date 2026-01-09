@@ -1,0 +1,58 @@
+{
+  "general": {
+    "rpc_env_var": "INFURA_KEY_2",
+    "rpc_base_url": "https://polygon-mainnet.infura.io/v3/",
+    "max_concurrent": 30,
+    "global_rate_limit": 1,
+    "save_interval_seconds": 15,
+    "batch_size": {
+      "min": 5,
+      "max": 1000000
+    },
+    "db": {
+      "socket_env": "PG_SOCKET",
+      "port_env": "POLY_PG_PORT",
+      "name_env": "POLY_DB",
+      "user_env": "POLY_DB_CLI",
+      "pass_env": "POLY_DB_CLI_PASS"
+    }
+  },
+  "collection_range": {
+    "start_block": 79172085,
+    "end_block": null
+  },
+  "contracts": [
+    {
+      "id": "ctf_exchange",
+      "address": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+      "table_name": "token_reg",
+      "drop_on_start": false,
+      "events": [
+        {
+          "signature": "TokenRegistered(uint256,uint256,bytes32)",
+          "init_batch_size": 180000,
+          "collected_range": [
+            79172085,
+            81374604
+          ]
+        }
+      ]
+    },
+    {
+      "id": "neg_risk_exchange",
+      "address": "0xC5d563A36AE78145C45a50134d48A1215220f80a",
+      "table_name": "token_reg",
+      "drop_on_start": false,
+      "events": [
+        {
+          "signature": "TokenRegistered(uint256,uint256,bytes32)",
+          "init_batch_size": 180000,
+          "collected_range": [
+            79172085,
+            81374604
+          ]
+        }
+      ]
+    }
+  ]
+}
