@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 """
-Oracle Analysis Script (Condition ID Version):
-Simplified approach using condition_id matching instead of token_id matching.
-
+Oracle Analysis Script:
 1. Fetch ALL ConditionPreparation events and deduplicate by condition_id
 2. For each of 3 oracles: count their prepared conditions
-3. Match prepared conditions to CSV rows by condition_id
-4. Fetch TokenRegistered events and deduplicate by condition_id (one per exchange)
-5. Match deduplicated TokenRegistered condition_ids to prepared conditions
-6. Report breakdown: CTFE vs NegRisk per oracle
+3. Match prepared conditions to CSV rows by condition_id (tracks token_id1, token_id2)
+4. Match token_ids to TokenRegistered events and count per oracle
+5. Report breakdown: CTFE vs NegRisk per oracle
 """
 
 import os
@@ -17,6 +14,7 @@ import asyncpg
 import pandas as pd
 import logging
 from datetime import datetime, timezone
+from collections import defaultdict
 
 # ----------------------------------------------------------------
 # SETUP & CONFIGURATION
@@ -93,17 +91,16 @@ async def fetch_all_prepared_conditions(pool):
 async def fetch_all_token_registered_events(pool):
     """Fetch ALL TokenRegistered events from token_reg table.
     
-    TokenRegistered structure:
-    - topics[0]: event signature hash
-    - topics[1]: token0
-    - topics[2]: token1
-    - topics[3]: conditionId (the condition_id we need)
+    Uses the pre-built token_reg table which consolidates both exchanges.
+    Differentiates by contract_address.
     
-    Returns: DataFrame with condition_id, contract, and exchange categorization
+    Token IDs in topics are stored as hex strings (32 bytes).
     """
     query = """
         SELECT 
-            LOWER(topics[3]) as condition_id,
+            LOWER(topics[1]) as token0,
+            LOWER(topics[2]) as token1,
+            topics[3] as condition_id,
             LOWER(contract_address) as contract,
             transaction_hash,
             timestamp_ms
@@ -118,16 +115,53 @@ async def fetch_all_token_registered_events(pool):
     logger.info(f"Fetched {len(rows):,} total TokenRegistered events")
     return pd.DataFrame([dict(row) for row in rows])
 
+def match_token_ids_sorted_merge(df_all_token_events, oracle_token_ids_decimal):
+    """
+    Efficiently match token_ids using set lookup O(1).
+    
+    CSV token_ids are decimal integers.
+    Topics store them as 0x-prefixed hex strings (256-bit).
+    
+    Convert each decimal token_id to 0x hex format for matching.
+    """
+    if df_all_token_events.empty or len(oracle_token_ids_decimal) == 0:
+        return pd.DataFrame()
+    
+    # Convert decimal token_ids to hex (0x-prefixed, lowercase)
+    token_id_set = set()
+    for token_id_decimal in oracle_token_ids_decimal:
+        try:
+            # Convert to hex string without 0x prefix, pad to 64 chars (256 bits)
+            hex_str = hex(int(token_id_decimal))[2:].lower().zfill(64)
+            token_id_set.add('0x' + hex_str)
+        except (ValueError, TypeError):
+            logger.warning(f"Failed to convert token_id {token_id_decimal} to hex")
+    
+    logger.info(f"  Converted {len(token_id_set):,} token_ids to hex format")
+    
+    # Find rows where token0 OR token1 is in token_id_set
+    mask = (df_all_token_events['token0'].isin(token_id_set)) | \
+           (df_all_token_events['token1'].isin(token_id_set))
+    
+    return df_all_token_events[mask].copy()
+
 # ----------------------------------------------------------------
 # CSV LOADING
 # ----------------------------------------------------------------
 
 def load_market_data(csv_path):
-    """Load market data from CSV with conditionId."""
+    """Load market data from CSV with conditionId and token_ids."""
     logger.info(f"Loading market data from {csv_path}...")
     try:
-        df = pd.read_csv(csv_path, usecols=['conditionId'])
+        df = pd.read_csv(csv_path, usecols=['conditionId', 'token_id1', 'token_id2'])
         df['conditionId'] = df['conditionId'].str.lower()
+        
+        # Debug: Show data types and samples
+        logger.info(f"  token_id1 dtype: {df['token_id1'].dtype}")
+        logger.info(f"  token_id2 dtype: {df['token_id2'].dtype}")
+        sample_tokens = sorted(df['token_id1'].dropna().unique().tolist())[:3]
+        logger.info(f"  token_id1 samples: {sample_tokens}")
+        
         logger.info(f"Loaded {len(df):,} markets from CSV.")
         return df
     except Exception as e:
@@ -148,13 +182,23 @@ async def main():
             logger.error("Failed to load CSV data")
             return
         
-        csv_cond_ids = set(csv_data['conditionId'].unique())
-        logger.info(f"CSV contains {len(csv_cond_ids):,} unique condition_ids\n")
+        # Create condition_id to token_ids mapping from CSV
+        csv_condition_map = {}
+        for _, row in csv_data.iterrows():
+            cond_id = str(row['conditionId']).lower()
+            token1 = str(row['token_id1'])
+            token2 = str(row['token_id2'])
+            csv_condition_map[cond_id] = {
+                'token_id1': token1,
+                'token_id2': token2,
+            }
+        
+        logger.info(f"CSV contains {len(csv_condition_map):,} unique condition_ids")
         
         # ====================================================================
         # STEP 1: Fetch ALL ConditionPreparation events and deduplicate
         # ====================================================================
-        logger.info("=" * 80)
+        logger.info("\n" + "=" * 80)
         logger.info("STEP 1: Fetch ALL ConditionPreparation Events (Deduplicated)")
         logger.info("=" * 80)
         
@@ -184,7 +228,9 @@ async def main():
         logger.info("STEP 2: Match Prepared Conditions to CSV Rows")
         logger.info("=" * 80)
         
+        # Find which prepared conditions match the CSV
         prepared_cond_ids = set(df_prepared_dedup['condition_id'].unique())
+        csv_cond_ids = set(csv_condition_map.keys())
         matching_cond_ids = prepared_cond_ids & csv_cond_ids
         
         logger.info(f"\nPrepared conditions in DB: {len(prepared_cond_ids):,}")
@@ -202,12 +248,13 @@ async def main():
             logger.info(f"  {alias}: {count:,}")
         
         # ====================================================================
-        # STEP 3: Fetch ALL TokenRegistered events and deduplicate by condition_id
+        # STEP 3: Fetch ALL TokenRegistered events (once, then match locally)
         # ====================================================================
         logger.info("\n" + "=" * 80)
-        logger.info("STEP 3: Fetch ALL TokenRegistered Events (Deduplicate by Condition_ID)")
+        logger.info("STEP 3: Fetch ALL TokenRegistered Events (fetch once, match locally)")
         logger.info("=" * 80)
         
+        # Fetch all TokenRegistered events once (no filtering yet)
         df_all_token_events = await fetch_all_token_registered_events(pool)
         
         # Categorize by exchange using contract address
@@ -218,60 +265,72 @@ async def main():
             lambda x: 'CTFE' if x.lower() == CTFE_ADDR.lower() else 'NegRisk'
         )
         
-        if df_all_token_events.empty:
-            logger.warning("No TokenRegistered events found!")
-        else:
-            logger.info(f"\nTokenRegistered Events (all exchanges):")
-            logger.info(f"  Total events: {len(df_all_token_events):,}")
-            logger.info(f"  CTFE: {(df_all_token_events['exchange'] == 'CTFE').sum():,}")
-            logger.info(f"  NegRisk: {(df_all_token_events['exchange'] == 'NegRisk').sum():,}")
-            
-            # Deduplicate by condition_id (one per exchange type)
-            # Note: "exactly one duplicate for every condition id" means one TokenRegistered
-            # event per exchange (CTFE and NegRisk may both have same condition_id)
-            df_token_dedup = df_all_token_events.drop_duplicates(subset='condition_id', keep='first')
-            logger.info(f"  Unique condition_ids (deduplicated): {len(df_token_dedup):,}")
+        logger.info(f"\nTokenRegistered Events (all oracles) by Exchange:")
+        logger.info(f"  CTFE: {(df_all_token_events['exchange'] == 'CTFE').sum():,}")
+        logger.info(f"  NegRisk: {(df_all_token_events['exchange'] == 'NegRisk').sum():,}")
+        
+        # Debug: Show data types and samples from token_reg table
+        logger.info(f"\nDebug - Token_reg table samples:")
+        logger.info(f"  token0 dtype: {df_all_token_events['token0'].dtype}")
+        logger.info(f"  token1 dtype: {df_all_token_events['token1'].dtype}")
+        sample_token0 = sorted(df_all_token_events['token0'].dropna().unique().tolist())[:3]
+        sample_token1 = sorted(df_all_token_events['token1'].dropna().unique().tolist())[:3]
+        logger.info(f"  token0 samples: {sample_token0}")
+        logger.info(f"  token1 samples: {sample_token1}")
         
         # ====================================================================
-        # STEP 4: Match TokenRegistered condition_ids to prepared conditions per oracle
+        # STEP 4: Build comprehensive summary per oracle
         # ====================================================================
         logger.info("\n" + "=" * 80)
-        logger.info("STEP 4: Match TokenRegistered Condition_IDs to Prepared Conditions")
+        logger.info("STEP 4: Comprehensive Summary by Oracle (Using Sorted Merge Matching)")
         logger.info("=" * 80)
         
         results = []
         
         for oracle_addr, oracle_name in sorted(ORACLE_ADDRESSES.items()):
-            # Prepared conditions for this oracle
-            oracle_prepared = df_prepared_dedup[df_prepared_dedup['oracle'] == oracle_addr]
-            prepared_count = len(oracle_prepared)
-            oracle_prepared_conds = set(oracle_prepared['condition_id'])
+            # Prepared conditions
+            prepared_count = len(df_prepared_dedup[df_prepared_dedup['oracle'] == oracle_addr])
             
-            # Matched conditions (to CSV) for this oracle
-            oracle_matched = df_matched_prepared[df_matched_prepared['oracle'] == oracle_addr]
-            matched_count = len(oracle_matched)
-            oracle_matched_conds = set(oracle_matched['condition_id'])
+            # Matched conditions (to CSV)
+            matched_count = len(df_matched_prepared[df_matched_prepared['oracle'] == oracle_addr])
+            
+            # Get token_ids for this oracle's matched conditions
+            oracle_matched_conds = set(df_matched_prepared[df_matched_prepared['oracle'] == oracle_addr]['condition_id'])
+            oracle_token_ids = set()
+            for cond_id in oracle_matched_conds:
+                if cond_id in csv_condition_map:
+                    oracle_token_ids.add(csv_condition_map[cond_id]['token_id1'])
+                    oracle_token_ids.add(csv_condition_map[cond_id]['token_id2'])
             
             logger.info(f"\n{oracle_name}:")
             logger.info(f"  Prepared Conditions: {prepared_count:,}")
             logger.info(f"  Matched to CSV: {matched_count:,}")
+            logger.info(f"  Unique Token IDs: {len(oracle_token_ids):,}")
             
-            if df_all_token_events.empty:
-                token_count = 0
+            # Debug: Show samples of token IDs from CSV
+            if oracle_token_ids:
+                csv_token_samples = sorted(list(oracle_token_ids))[:5]
+                logger.info(f"  CSV Token ID Samples (first 5): {csv_token_samples}")
+            
+            # Debug: Show samples of token IDs from token_reg table
+            if not df_all_token_events.empty:
+                token_reg_samples = sorted(df_all_token_events['token0'].unique().tolist())[:5]
+                logger.info(f"  Token_reg table token0 samples (first 5): {token_reg_samples}")
+            
+            # Find TokenRegistered events for this oracle's token_ids (using sorted merge)
+            if len(oracle_token_ids) == 0:
                 ctfe_count = 0
                 negrisk_count = 0
+                total_token_count = 0
             else:
-                # Find TokenRegistered events whose condition_id matches this oracle's prepared conditions
-                df_oracle_tokens = df_all_token_events[
-                    df_all_token_events['condition_id'].isin(oracle_prepared_conds)
-                ].copy()
+                # Use sorted merge matching - much faster than database query
+                df_oracle_tokens = match_token_ids_sorted_merge(df_all_token_events, oracle_token_ids)
                 
-                # Count by exchange
                 ctfe_count = (df_oracle_tokens['exchange'] == 'CTFE').sum()
                 negrisk_count = (df_oracle_tokens['exchange'] == 'NegRisk').sum()
-                token_count = len(df_oracle_tokens)
+                total_token_count = len(df_oracle_tokens)
             
-            logger.info(f"  TokenRegistered Events (all exchanges): {token_count:,}")
+            logger.info(f"  TokenRegistered Events: {total_token_count:,}")
             logger.info(f"    ├─ CTFE: {ctfe_count:,}")
             logger.info(f"    └─ NegRisk: {negrisk_count:,}")
             
@@ -279,7 +338,8 @@ async def main():
                 'Oracle': oracle_name,
                 'Prepared': f"{prepared_count:,}",
                 'CSV Matches': f"{matched_count:,}",
-                'Token Events': f"{token_count:,}",
+                'Unique Tokens': f"{len(oracle_token_ids):,}",
+                'Token Events': f"{total_token_count:,}",
                 'CTFE': f"{ctfe_count:,}",
                 'NegRisk': f"{negrisk_count:,}",
             })
