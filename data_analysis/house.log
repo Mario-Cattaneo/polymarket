@@ -1,0 +1,97 @@
+nohup: ignoring input
+2026-01-09 20:52:25 - INFO - house_settlements table created/verified
+2026-01-09 20:52:25 - INFO - 
+================================================================================
+2026-01-09 20:52:25 - INFO - INITIALIZING TWO EVENT LINES
+2026-01-09 20:52:25 - INFO - ================================================================================
+2026-01-09 20:52:25 - INFO - Exchange line: No existing data, fetching TokenRegistered min timestamp...
+2026-01-09 20:52:25 - INFO - CFT line: No existing data, fetching ConditionPreparation min timestamp...
+2026-01-09 20:52:25 - INFO - CTF line starts from: 1763449217000
+2026-01-09 20:52:25 - INFO - Exchange line starts from: 1763449271000
+2026-01-09 20:52:25 - INFO - Overall processing until: 1767842385000
+2026-01-09 20:52:25 - INFO - Configuration: 4 assets, 2 conditions
+2026-01-09 20:52:25 - INFO - 
+================================================================================
+2026-01-09 20:52:25 - INFO - Batch 1
+2026-01-09 20:52:25 - INFO - ================================================================================
+2026-01-09 20:52:25 - INFO -   CFT line: Inserted 1,341 ConditionPreparation events
+2026-01-09 20:52:26 - INFO -   Exchange line: Inserted 2,766 TokenRegistered events
+2026-01-09 20:52:26 - INFO -   Fetched 393 settlements, 46 CFT_no_exchange events
+2026-01-09 20:52:26 - INFO -   Matched 0 settlements, 0 CFT_no_exchange events
+2026-01-09 20:52:26 - INFO - 
+================================================================================
+2026-01-09 20:52:26 - INFO - Batch 2
+2026-01-09 20:52:26 - INFO - ================================================================================
+2026-01-09 20:52:26 - INFO -   CFT line: Inserted 834 ConditionPreparation events
+2026-01-09 20:52:27 - INFO -   Exchange line: Inserted 1,636 TokenRegistered events
+2026-01-09 20:52:27 - INFO -   Fetched 388 settlements, 50 CFT_no_exchange events
+2026-01-09 20:52:27 - INFO -   Matched 0 settlements, 0 CFT_no_exchange events
+2026-01-09 20:52:27 - INFO - 
+================================================================================
+2026-01-09 20:52:27 - INFO - Batch 3
+2026-01-09 20:52:27 - INFO - ================================================================================
+2026-01-09 20:52:27 - INFO -   CFT line: Inserted 876 ConditionPreparation events
+2026-01-09 20:52:27 - INFO -   Exchange line: Inserted 1,774 TokenRegistered events
+2026-01-09 20:52:27 - INFO -   Fetched 423 settlements, 116 CFT_no_exchange events
+2026-01-09 20:52:27 - INFO -   Matched 0 settlements, 0 CFT_no_exchange events
+2026-01-09 20:52:27 - INFO - 
+================================================================================
+2026-01-09 20:52:27 - INFO - Batch 4
+2026-01-09 20:52:27 - INFO - ================================================================================
+2026-01-09 20:52:28 - INFO -   CFT line: Inserted 895 ConditionPreparation events
+2026-01-09 20:52:28 - INFO -   Exchange line: Inserted 1,764 TokenRegistered events
+2026-01-09 20:52:28 - INFO -   Fetched 315 settlements, 138 CFT_no_exchange events
+2026-01-09 20:52:28 - INFO -   Matched 0 settlements, 0 CFT_no_exchange events
+2026-01-09 20:52:28 - INFO - 
+================================================================================
+2026-01-09 20:52:28 - INFO - Batch 5
+2026-01-09 20:52:28 - INFO - ================================================================================
+2026-01-09 20:52:28 - INFO -   CFT line: Inserted 747 ConditionPreparation events
+2026-01-09 20:52:29 - INFO -   Exchange line: Inserted 1,502 TokenRegistered events
+2026-01-09 20:52:29 - INFO -   Fetched 447 settlements, 33 CFT_no_exchange events
+2026-01-09 20:52:29 - INFO -   Matched 0 settlements, 0 CFT_no_exchange events
+2026-01-09 20:52:29 - INFO - 
+================================================================================
+2026-01-09 20:52:29 - INFO - Batch 6
+2026-01-09 20:52:29 - INFO - ================================================================================
+2026-01-09 20:52:29 - INFO -   CFT line: Inserted 755 ConditionPreparation events
+2026-01-09 20:52:30 - INFO -   Exchange line: Inserted 1,490 TokenRegistered events
+2026-01-09 20:52:30 - INFO -   Fetched 421 settlements, 28 CFT_no_exchange events
+2026-01-09 20:52:30 - INFO -   Matched 0 settlements, 0 CFT_no_exchange events
+2026-01-09 20:52:30 - INFO - 
+================================================================================
+2026-01-09 20:52:30 - INFO - Batch 7
+2026-01-09 20:52:30 - INFO - ================================================================================
+2026-01-09 20:52:30 - INFO -   CFT line: Inserted 875 ConditionPreparation events
+2026-01-09 20:52:35 - INFO -   Exchange line: Inserted 1,766 TokenRegistered events
+2026-01-09 20:52:35 - INFO -   Fetched 374 settlements, 73 CFT_no_exchange events
+2026-01-09 20:52:35 - INFO -   Matched 0 settlements, 0 CFT_no_exchange events
+2026-01-09 20:52:35 - INFO - 
+================================================================================
+2026-01-09 20:52:35 - INFO - Batch 8
+2026-01-09 20:52:35 - INFO - ================================================================================
+2026-01-09 20:52:35 - INFO -   CFT line: Inserted 890 ConditionPreparation events
+2026-01-09 20:53:14 - INFO -   Exchange line: Inserted 1,764 TokenRegistered events
+2026-01-09 20:53:14 - INFO -   Fetched 626 settlements, 81 CFT_no_exchange events
+2026-01-09 20:53:14 - INFO -   Matched 0 settlements, 0 CFT_no_exchange events
+2026-01-09 20:53:14 - INFO - 
+================================================================================
+2026-01-09 20:53:14 - INFO - Batch 9
+2026-01-09 20:53:14 - INFO - ================================================================================
+2026-01-09 20:53:14 - INFO -   CFT line: Inserted 820 ConditionPreparation events
+2026-01-09 20:54:03 - INFO -   Exchange line: Inserted 1,644 TokenRegistered events
+2026-01-09 20:54:03 - INFO -   Fetched 652 settlements, 98 CFT_no_exchange events
+2026-01-09 20:54:03 - INFO -   Matched 0 settlements, 0 CFT_no_exchange events
+2026-01-09 20:54:03 - INFO - 
+================================================================================
+2026-01-09 20:54:03 - INFO - Batch 10
+2026-01-09 20:54:03 - INFO - ================================================================================
+2026-01-09 20:54:03 - INFO -   CFT line: Inserted 641 ConditionPreparation events
+2026-01-09 20:54:52 - INFO -   Exchange line: Inserted 1,278 TokenRegistered events
+2026-01-09 20:54:52 - INFO -   Fetched 370 settlements, 12 CFT_no_exchange events
+2026-01-09 20:54:52 - INFO -   Matched 0 settlements, 0 CFT_no_exchange events
+2026-01-09 20:54:52 - INFO - 
+================================================================================
+2026-01-09 20:54:52 - INFO - Batch 11
+2026-01-09 20:54:52 - INFO - ================================================================================
+2026-01-09 20:54:52 - INFO -   CFT line: Inserted 1,031 ConditionPreparation events

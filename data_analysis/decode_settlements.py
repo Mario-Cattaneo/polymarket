@@ -80,34 +80,44 @@ def decode_orders_matched(data: str, topics: List[str]) -> Dict[str, Any]:
 
 def decode_position_split(data: str, topics: List[str]) -> Dict[str, Any]:
     """Decode PositionSplit event."""
-    # topics: [signature, stakeholder, conditionId]
-    # data: [amount]
+    # ABI: event PositionSplit(address indexed stakeholder, address collateralToken, bytes32 indexed parentCollectionId, bytes32 indexed conditionId, uint256[] partition, uint256 amount)
+    # topics: [signature, stakeholder, parentCollectionId, conditionId]
+    # data: [collateralToken, partition_offset, amount, partition_length, partition_items...]
     try:
         data_hex = bytes.fromhex(data[2:] if data.startswith('0x') else data)
-        decoded = decode(['uint256'], data_hex)
+        # We decode: address (collateral), uint256[] (partition), uint256 (amount)
+        decoded = decode(['address', 'uint256[]', 'uint256'], data_hex)
         
         return {
             'event': 'PositionSplit',
             'stakeholder': '0x' + topics[1][-40:] if len(topics) > 1 else None,
-            'conditionId': topics[2] if len(topics) > 2 else None,
-            'amount': str(decoded[0])
+            'parentCollectionId': topics[2] if len(topics) > 2 else None,
+            'conditionId': topics[3] if len(topics) > 3 else None,
+            'collateralToken': decoded[0],
+            'partition': [str(x) for x in decoded[1]],
+            'amount': str(decoded[2]) # This is the correct amount now
         }
     except Exception as e:
         return {'event': 'PositionSplit', 'error': str(e)}
 
 def decode_position_merge(data: str, topics: List[str]) -> Dict[str, Any]:
     """Decode PositionsMerge event."""
-    # topics: [signature, stakeholder, conditionId]
-    # data: [amount]
+    # ABI: event PositionsMerge(address indexed stakeholder, address collateralToken, bytes32 indexed parentCollectionId, bytes32 indexed conditionId, uint256[] partition, uint256 amount)
+    # topics: [signature, stakeholder, parentCollectionId, conditionId]
+    # data: [collateralToken, partition_offset, amount, partition_length, partition_items...]
     try:
         data_hex = bytes.fromhex(data[2:] if data.startswith('0x') else data)
-        decoded = decode(['uint256'], data_hex)
+        # We decode: address (collateral), uint256[] (partition), uint256 (amount)
+        decoded = decode(['address', 'uint256[]', 'uint256'], data_hex)
         
         return {
             'event': 'PositionsMerge',
             'stakeholder': '0x' + topics[1][-40:] if len(topics) > 1 else None,
-            'conditionId': topics[2] if len(topics) > 2 else None,
-            'amount': str(decoded[0])
+            'parentCollectionId': topics[2] if len(topics) > 2 else None,
+            'conditionId': topics[3] if len(topics) > 3 else None,
+            'collateralToken': decoded[0],
+            'partition': [str(x) for x in decoded[1]],
+            'amount': str(decoded[2]) # This is the correct amount now
         }
     except Exception as e:
         return {'event': 'PositionsMerge', 'error': str(e)}
@@ -144,15 +154,24 @@ def decode_settlement(settlement: Dict[str, Any]) -> Dict[str, Any]:
     
     # Decode OrdersMatched events
     for om in trade.get('orders_matched', []):
-        decoded_trade['orders_matched'].append(decode_event(om['data'], om['topics']))
+        if isinstance(om, str):
+            om = json.loads(om)
+        topics = om['topics'] if isinstance(om['topics'], list) else json.loads(om['topics'])
+        decoded_trade['orders_matched'].append(decode_event(om['data'], topics))
     
     # Decode OrderFilled events
     for of in trade.get('orders_filled', []):
-        decoded_trade['orders_filled'].append(decode_event(of['data'], of['topics']))
+        if isinstance(of, str):
+            of = json.loads(of)
+        topics = of['topics'] if isinstance(of['topics'], list) else json.loads(of['topics'])
+        decoded_trade['orders_filled'].append(decode_event(of['data'], topics))
     
     # Decode position events
     for pe in trade.get('position_events', []):
-        decoded_trade['position_events'].append(decode_event(pe['data'], pe['topics']))
+        if isinstance(pe, str):
+            pe = json.loads(pe)
+        topics = pe['topics'] if isinstance(pe['topics'], list) else json.loads(pe['topics'])
+        decoded_trade['position_events'].append(decode_event(pe['data'], topics))
     
     return {
         'id': settlement['id'],
@@ -220,34 +239,6 @@ async def test_decoder():
                 print("✅ TEST 3 PASSED")
             else:
                 print("❌ No merge settlement found")
-            
-            # Test 4: Check statistics
-            print("\n[TEST 4] Settlement statistics...")
-            stats = await conn.fetchrow("""
-                SELECT 
-                    COUNT(*) as total,
-                    SUM(CASE WHEN type = 'complementary' THEN 1 ELSE 0 END) as complementary,
-                    SUM(CASE WHEN type = 'split' THEN 1 ELSE 0 END) as split,
-                    SUM(CASE WHEN type = 'merge' THEN 1 ELSE 0 END) as merge,
-                    SUM(CASE WHEN exchange = 'base' THEN 1 ELSE 0 END) as base_count,
-                    SUM(CASE WHEN exchange = 'negrisk' THEN 1 ELSE 0 END) as negrisk_count
-                FROM settlements
-            """)
-            print(json.dumps(dict(stats), indent=2))
-            print("✅ TEST 4 PASSED")
-            
-            # Test 5: Verify OrderFilled/OrdersMatched counts
-            print("\n[TEST 5] Verifying event counts...")
-            sample = await conn.fetchrow("""
-                SELECT 
-                    jsonb_array_length(trade->'orders_matched') as om_count,
-                    jsonb_array_length(trade->'orders_filled') as of_count,
-                    jsonb_array_length(trade->'position_events') as pe_count
-                FROM settlements
-                LIMIT 1
-            """)
-            print(f"Sample settlement: {dict(sample)}")
-            print("✅ TEST 5 PASSED")
             
             print("\n" + "=" * 80)
             print("ALL TESTS COMPLETED")
