@@ -4,6 +4,7 @@ import os
 import logging
 import asyncpg
 import heapq
+import time
 from typing import Optional, Tuple, List, Dict, Any
 from collections import deque
 from Crypto.Hash import keccak
@@ -16,7 +17,7 @@ from http_cli import HttpManager, HttpTaskConfig, HttpTaskCallbacks, Method
 INFURA_MAX_LOGS = 10_000
 ALPHA = 0.2  # Exponential Moving Average smoothing factor
 TOLERANCE = 0.1  # Safety margin (10%)
-CONFIG_FILE = "reg.json"
+CONFIG_FILE = "collect_events_config.json"
 BLOCK_TIME_MS = 2000  # 2 seconds per block
 
 # --- Logging Setup ---
@@ -108,6 +109,11 @@ class EventCollector:
         self.estimation_in_flight = False
         self.active_requests: int = 0
         self.processing_complete = False
+        
+        # Watchdog for hang detection
+        self.last_progress_time: float = 0.0
+        self.last_progress_block: int = 0
+        self.watchdog_timeout_s: float = 300  # 5 minutes of no progress = force completion
 
         # Contiguous Progress Tracking
         self.last_contiguous_block: int = 0
@@ -263,6 +269,10 @@ class EventCollector:
                 self.last_contiguous_block = start_block - 1
                 self.completed_ranges_heap = []
                 
+                # Initialize progress tracking
+                self.last_progress_time = time.time()
+                self.last_progress_block = start_block - 1
+                
                 callbacks = HttpTaskCallbacks(
                     next_request=self.next_request,
                     on_response=self.on_response,
@@ -279,11 +289,26 @@ class EventCollector:
                 
                 while not self.processing_complete:
                     await asyncio.sleep(1)
+                    
+                    # Standard completion check
                     if (self.next_start_block > self.global_end_block and 
                         len(self.retry_queue) == 0 and 
                         self.active_requests == 0 and
                         self.initial_estimation_done):
                         self.processing_complete = True
+                        continue
+                    
+                    # Watchdog safety valve: force completion if no progress for 5 mins
+                    # but we've exhausted the block range
+                    if (self.next_start_block > self.global_end_block and 
+                        self.initial_estimation_done):
+                        time_since_progress = time.time() - self.last_progress_time
+                        if time_since_progress > self.watchdog_timeout_s:
+                            logger.warning(f"WATCHDOG: No progress for {time_since_progress:.0f}s. "
+                                         f"Active requests: {self.active_requests}, "
+                                         f"Retry queue: {len(self.retry_queue)}. "
+                                         f"Force completing.")
+                            self.processing_complete = True
                 
                 producer.stop()
                 self.save_config()
@@ -400,6 +425,11 @@ class EventCollector:
             self._update_metrics(start, end, len(logs), req_type)
             self._mark_range_complete(start, end)
             
+            # Update progress tracking for watchdog
+            if self.last_contiguous_block > self.last_progress_block:
+                self.last_progress_block = self.last_contiguous_block
+                self.last_progress_time = time.time()
+            
             total_blocks = self.global_end_block - self.current_run_start_block
             progress = 0.0
             if total_blocks > 0:
@@ -413,6 +443,8 @@ class EventCollector:
                 self.initial_estimation_done = True
                 self.estimation_in_flight = False
                 self.next_start_block = end + 1
+                # Update progress time after probe
+                self.last_progress_time = time.time()
 
         self.active_requests -= 1
         return True

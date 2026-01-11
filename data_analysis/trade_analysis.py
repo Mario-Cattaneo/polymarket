@@ -5,9 +5,10 @@ import asyncpg
 import json
 import pandas as pd
 import matplotlib.pyplot as plt
+import numpy as np
 from eth_abi import decode
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 
 # ==============================================================================
 # CONFIGURATION
@@ -19,278 +20,276 @@ DB_NAME = os.getenv("POLY_DB")
 DB_USER = os.getenv("POLY_DB_CLI")
 DB_PASS = os.getenv("POLY_DB_CLI_PASS")
 
-# Batch size: 12 hours in milliseconds
-T_BATCH_RANGE = 12 * 60 * 60 * 1000 
+# Batch size for fetching from DB
+DB_BATCH_SIZE = 50_000
+
 USDC_DECIMALS = 6
 
+# Time Mapping Constants
+REF_BLOCK = 79172085
+REF_TS_MS = int(datetime(2025, 11, 18, 7, 0, 1, tzinfo=timezone.utc).timestamp() * 1000)
+MS_PER_BLOCK = 2000
+
 # ==============================================================================
-# DECODING LOGIC
+# DECODING & EXTRACTION HELPERS
 # ==============================================================================
+
+def block_to_time(block_num: int) -> datetime:
+    ts_ms = REF_TS_MS + (block_num - REF_BLOCK) * MS_PER_BLOCK
+    return datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc)
 
 def decode_cft_amount(data_hex: str) -> int:
-    """
-    Decodes the 'amount' from PositionSplit/PositionsMerge.
-    Correct ABI: (address collateralToken, uint256[] partition, uint256 amount)
-    We want the 3rd element.
-    """
     try:
         if data_hex.startswith('0x'): data_hex = data_hex[2:]
-        data_bytes = bytes.fromhex(data_hex)
-        decoded = decode(['address', 'uint256[]', 'uint256'], data_bytes)
+        decoded = decode(['address', 'uint256[]', 'uint256'], bytes.fromhex(data_hex))
         return decoded[2]
-    except Exception:
-        return 0
+    except: return 0
+
+def decode_adapter_amount(event_name: str, data_hex: str) -> int:
+    try:
+        if data_hex.startswith('0x'): data_hex = data_hex[2:]
+        if event_name in ['PositionSplit', 'PositionsMerge']:
+            decoded = decode(['address', 'bytes32', 'uint256'], bytes.fromhex(data_hex))
+            return decoded[2]
+        elif event_name == 'PositionsConverted':
+            decoded = decode(['address', 'bytes32', 'uint256', 'uint256'], bytes.fromhex(data_hex))
+            return decoded[3]
+    except: return 0
+    return 0
 
 def get_settlement_volume(trade_data: dict) -> int:
-    """
-    Calculates USDC volume from orders_matched.
-    Checks for Asset ID 0 (USDC) in either maker or taker side.
-    """
     volume = 0
-    oms = trade_data.get('orders_matched', [])
-    for om in oms:
+    for om in trade_data.get('orders_matched', []):
         if isinstance(om, str): om = json.loads(om)
-        data = om.get('data', '')
-        if not data: continue
         try:
+            data = om.get('data', '')
             if data.startswith('0x'): data = data[2:]
-            # ABI: makerAssetId, takerAssetId, making, taking
             decoded = decode(['uint256', 'uint256', 'uint256', 'uint256'], bytes.fromhex(data))
-            makerAssetId, takerAssetId, making, taking = decoded
-            
-            if makerAssetId == 0: volume += making
-            elif takerAssetId == 0: volume += taking
+            if decoded[0] == 0: volume += decoded[2]
+            elif decoded[1] == 0: volume += decoded[3]
         except: continue
     return volume
 
-def get_actors_from_settlement(trade_data: dict):
-    """Extracts makers and takers from orders_filled."""
-    actors = []
-    ofs = trade_data.get('orders_filled', [])
-    for of in ofs:
+def get_cft_tx_volume(cft_events: list, adapter_events: list) -> int:
+    volume = 0
+    if cft_events:
+        for event in cft_events:
+            volume += decode_cft_amount(event.get('data', ''))
+    if adapter_events:
+        for event in adapter_events:
+            volume += decode_adapter_amount(event.get('event'), event.get('data', ''))
+    return volume
+
+def get_unique_makers_takers(trade_data: dict):
+    takers = set()
+    makers = set()
+    for om in trade_data.get('orders_matched', []):
+        if isinstance(om, str): om = json.loads(om)
+        topics = om.get('topics', [])
+        if len(topics) >= 3: takers.add('0x' + topics[2][-40:])
+            
+    for of in trade_data.get('orders_filled', []):
         if isinstance(of, str): of = json.loads(of)
         topics = of.get('topics', [])
-        if len(topics) >= 4:
-            # topics[2] = maker, topics[3] = taker
-            actors.append('0x' + topics[2][-40:])
-            actors.append('0x' + topics[3][-40:])
-    return actors
+        if len(topics) >= 3:
+            maker_addr = '0x' + topics[2][-40:]
+            if maker_addr not in takers: makers.add(maker_addr)
+            
+    return list(makers), list(takers)
 
-def get_stakeholder_from_cft(event_data: dict):
-    """Extracts stakeholder from PositionSplit/Merge topics."""
-    topics = event_data.get('topics', [])
-    if len(topics) > 1:
-        return ['0x' + topics[1][-40:]]
-    return []
+def get_cft_tx_stakeholders(cft_events: list, adapter_events: list) -> list:
+    """
+    Extracts stakeholders with a hierarchy: Adapter events are the source of truth.
+    """
+    stakeholders = set()
+    
+    # HIERARCHY: If adapter events exist, they are the source of truth for the stakeholder.
+    if adapter_events:
+        for event in adapter_events:
+            topics = event.get('topics', [])
+            # Stakeholder is always topic 1 for these events
+            if len(topics) > 1:
+                stakeholders.add('0x' + topics[1][-40:])
+    
+    # Fallback: If no adapter events, use the stakeholder from the CFT events.
+    elif cft_events:
+        for event in cft_events:
+            topics = event.get('topics', [])
+            if len(topics) > 1:
+                stakeholders.add('0x' + topics[1][-40:])
+                
+    return list(stakeholders)
 
 # ==============================================================================
-# MAIN ANALYSIS
+# MAIN
 # ==============================================================================
 
 async def main():
     print(f"Connecting to {DB_NAME}...")
-    pool = await asyncpg.create_pool(
-        host=PG_HOST, port=PG_PORT, database=DB_NAME, user=DB_USER, password=DB_PASS
-    )
+    pool = await asyncpg.create_pool(host=PG_HOST, port=PG_PORT, database=DB_NAME, user=DB_USER, password=DB_PASS)
 
-    # 1. Get Global Time Bounds
-    print("Determining time range...")
-    async with pool.acquire() as conn:
-        # We query min/max from both tables to find the absolute start and end
-        row_s = await conn.fetchrow("SELECT MIN(timestamp_ms), MAX(timestamp_ms) FROM settlements")
-        row_c = await conn.fetchrow("SELECT MIN(timestamp_ms), MAX(timestamp_ms) FROM CFT_no_exchange")
-        
-        mins = [x for x in [row_s[0], row_c[0]] if x]
-        maxs = [x for x in [row_s[1], row_c[1]] if x]
-        
-        if not mins:
-            print("No data found.")
-            return
-
-        start_ms = min(mins)
-        end_ms = max(maxs)
-        print(f"Range: {datetime.fromtimestamp(start_ms/1000)} to {datetime.fromtimestamp(end_ms/1000)}")
-
-    # 2. Initialize Data Structures
-    # We will store time/vol pairs for plotting
-    plot_data = {
-        'Complementary Trade': [],
-        'Split Trade': [],
-        'Merge Trade': [],
-        'Split (Standalone)': [],
-        'Merge (Standalone)': []
-    }
-    
-    # We will store aggregate stats
-    stats = {k: {'vol': 0.0, 'tx_count': 0, 'fill_count': 0, 'actors': Counter()} for k in plot_data.keys()}
-
-    # 3. Batch Processing
-    current_ms = start_ms
-    total_batches = ((end_ms - start_ms) // T_BATCH_RANGE) + 1
-    batch_idx = 0
+    ts_data = defaultdict(list)
+    stats = defaultdict(lambda: {
+        'vol': 0.0, 'tx': 0, 'fills': 0,
+        'makers': Counter(), 'takers': Counter(), 'stakeholders': Counter()
+    })
 
     async with pool.acquire() as conn:
-        while current_ms <= end_ms:
-            next_ms = current_ms + T_BATCH_RANGE
-            batch_idx += 1
-            print(f"Processing Batch {batch_idx}/{total_batches}...", end='\r')
-
-            # --- CASE 1: Complementary Trades ---
+        # 1. Process Settlements
+        print("Processing Settlements...")
+        cursor_id = 0
+        while True:
             rows = await conn.fetch("""
-                SELECT timestamp_ms, trade FROM settlements 
-                WHERE type = 'complementary' AND timestamp_ms >= $1 AND timestamp_ms < $2
-                ORDER BY timestamp_ms ASC
-            """, current_ms, next_ms)
+                SELECT id, block_number, type, exchange, trade FROM settlements 
+                WHERE id > $1 ORDER BY id ASC LIMIT $2
+            """, cursor_id, DB_BATCH_SIZE)
+            
+            if not rows: break
             
             for r in rows:
-                trade = json.loads(r['trade']) if isinstance(r['trade'], str) else r['trade']
-                vol = get_settlement_volume(trade) / 10**USDC_DECIMALS
-                fills = len(trade.get('orders_filled', []))
-                actors = get_actors_from_settlement(trade)
+                cursor_id = r['id']
+                exch_label = "Base" if r['exchange'] == 'base' else "NegRisk"
+                cat = f"{r['type'].capitalize()} ({exch_label})"
+                trade = json.loads(r['trade'])
                 
-                stats['Complementary Trade']['vol'] += vol
-                stats['Complementary Trade']['tx_count'] += 1
-                stats['Complementary Trade']['fill_count'] += fills
-                stats['Complementary Trade']['actors'].update(actors)
-                plot_data['Complementary Trade'].append({'time': r['timestamp_ms'], 'vol': vol})
-
-            # --- CASE 2: Split Trades ---
-            rows = await conn.fetch("""
-                SELECT timestamp_ms, trade FROM settlements 
-                WHERE type = 'split' AND timestamp_ms >= $1 AND timestamp_ms < $2
-                ORDER BY timestamp_ms ASC
-            """, current_ms, next_ms)
-
-            for r in rows:
-                trade = json.loads(r['trade']) if isinstance(r['trade'], str) else r['trade']
                 vol = get_settlement_volume(trade) / 10**USDC_DECIMALS
                 fills = len(trade.get('orders_filled', []))
-                actors = get_actors_from_settlement(trade)
+                makers, takers = get_unique_makers_takers(trade)
+                time = block_to_time(r['block_number'])
+                
+                stats[cat]['vol'] += vol
+                stats[cat]['tx'] += 1
+                stats[cat]['fills'] += fills
+                stats[cat]['makers'].update(makers)
+                stats[cat]['takers'].update(takers)
+                ts_data[cat].append({'time': time, 'vol': vol})
+            
+            print(f"  Processed up to ID {cursor_id}...", end='\r')
 
-                stats['Split Trade']['vol'] += vol
-                stats['Split Trade']['tx_count'] += 1
-                stats['Split Trade']['fill_count'] += fills
-                stats['Split Trade']['actors'].update(actors)
-                plot_data['Split Trade'].append({'time': r['timestamp_ms'], 'vol': vol})
-
-            # --- CASE 3: Merge Trades ---
+        # 2. Process Standalone CFT
+        print("\nProcessing Standalone CFT Events...")
+        cursor_id = 0
+        while True:
             rows = await conn.fetch("""
-                SELECT timestamp_ms, trade FROM settlements 
-                WHERE type = 'merge' AND timestamp_ms >= $1 AND timestamp_ms < $2
-                ORDER BY timestamp_ms ASC
-            """, current_ms, next_ms)
-
+                SELECT id, block_number, type, cft_events, negrisk_adapter_events 
+                FROM CFT_no_exchange WHERE id > $1 ORDER BY id ASC LIMIT $2
+            """, cursor_id, DB_BATCH_SIZE)
+            
+            if not rows: break
+            
             for r in rows:
-                trade = json.loads(r['trade']) if isinstance(r['trade'], str) else r['trade']
-                vol = get_settlement_volume(trade) / 10**USDC_DECIMALS
-                fills = len(trade.get('orders_filled', []))
-                actors = get_actors_from_settlement(trade)
+                cursor_id = r['id']
+                cat = r['type'].replace('_', ' ').capitalize()
+                
+                cft_events = json.loads(r['cft_events']) if r['cft_events'] else []
+                adapter_events = json.loads(r['negrisk_adapter_events']) if r['negrisk_adapter_events'] else []
+                
+                vol = get_cft_tx_volume(cft_events, adapter_events) / 10**USDC_DECIMALS
+                
+                # UPDATED LOGIC HERE
+                stakeholders = get_cft_tx_stakeholders(cft_events, adapter_events)
+                
+                time = block_to_time(r['block_number'])
+                
+                stats[cat]['vol'] += vol
+                stats[cat]['tx'] += 1
+                stats[cat]['stakeholders'].update(stakeholders)
+                ts_data[cat].append({'time': time, 'vol': vol})
+            
+            print(f"  Processed up to ID {cursor_id}...", end='\r')
 
-                stats['Merge Trade']['vol'] += vol
-                stats['Merge Trade']['tx_count'] += 1
-                stats['Merge Trade']['fill_count'] += fills
-                stats['Merge Trade']['actors'].update(actors)
-                plot_data['Merge Trade'].append({'time': r['timestamp_ms'], 'vol': vol})
-
-            # --- CASE 4: Split (Standalone) ---
-            rows = await conn.fetch("""
-                SELECT timestamp_ms, event_data FROM CFT_no_exchange 
-                WHERE event_name = 'PositionSplit' AND timestamp_ms >= $1 AND timestamp_ms < $2
-                ORDER BY timestamp_ms ASC
-            """, current_ms, next_ms)
-
-            for r in rows:
-                data = json.loads(r['event_data']) if isinstance(r['event_data'], str) else r['event_data']
-                vol = decode_cft_amount(data.get('data', '')) / 10**USDC_DECIMALS
-                actors = get_stakeholder_from_cft(data)
-
-                stats['Split (Standalone)']['vol'] += vol
-                stats['Split (Standalone)']['tx_count'] += 1
-                stats['Split (Standalone)']['actors'].update(actors)
-                plot_data['Split (Standalone)'].append({'time': r['timestamp_ms'], 'vol': vol})
-
-            # --- CASE 5: Merge (Standalone) ---
-            rows = await conn.fetch("""
-                SELECT timestamp_ms, event_data FROM CFT_no_exchange 
-                WHERE event_name = 'PositionsMerge' AND timestamp_ms >= $1 AND timestamp_ms < $2
-                ORDER BY timestamp_ms ASC
-            """, current_ms, next_ms)
-
-            for r in rows:
-                data = json.loads(r['event_data']) if isinstance(r['event_data'], str) else r['event_data']
-                vol = decode_cft_amount(data.get('data', '')) / 10**USDC_DECIMALS
-                actors = get_stakeholder_from_cft(data)
-
-                stats['Merge (Standalone)']['vol'] += vol
-                stats['Merge (Standalone)']['tx_count'] += 1
-                stats['Merge (Standalone)']['actors'].update(actors)
-                plot_data['Merge (Standalone)'].append({'time': r['timestamp_ms'], 'vol': vol})
-
-            current_ms = next_ms
-
-    print(f"\nProcessing complete.")
     await pool.close()
 
     # ==============================================================================
-    # OUTPUT: STATISTICS
+    # OUTPUT 1: STATISTICS TABLE
     # ==============================================================================
+    print("\n" + "="*145)
+    print(f"{'CATEGORY':<30} | {'VOL (USDC)':<16} | {'TXs':<8} | {'FILLS':<8} | {'UNIQ MAKERS':<12} | {'UNIQ TAKERS':<12} | {'TOTAL UNIQ':<12}")
+    print("="*145)
     
-    print("\n" + "="*110)
-    print(f"{'CATEGORY':<22} | {'TOTAL VOL (USDC)':<18} | {'TX COUNT':<10} | {'FILLS':<10} | {'(FILLS-TX)/TX':<15}")
-    print("="*110)
-    
-    for cat, s in stats.items():
-        # Metric: (Total Orders Filled - Total Transactions) / Total Transactions
-        # This shows the "extra" liquidity fragmentation per trade.
-        # For standalone events, fills is 0, so this will be -1.0 (which makes sense, no orders filled).
-        metric = 0.0
-        if s['tx_count'] > 0:
-            metric = (s['fill_count'] - s['tx_count']) / s['tx_count']
-            
-        print(f"{cat:<22} | {s['vol']:,.2f}".ljust(43) + 
-              f" | {s['tx_count']:<10} | {s['fill_count']:<10} | {metric:.4f}")
-
-    print("\n" + "="*110)
-    print("TOP 10 ACTORS (Makers/Takers for Trades, Stakeholders for Standalone)")
-    print("="*110)
-    
-    for cat, s in stats.items():
-        print(f"\n--- {cat} ---")
-        top = s['actors'].most_common(10)
-        if not top: print("  (None)")
-        for actor, count in top:
-            print(f"  {actor}: {count}")
+    for cat, s in sorted(stats.items()):
+        n_makers = len(s['makers'])
+        n_takers = len(s['takers'])
+        all_actors = set(s['makers'].keys()) | set(s['takers'].keys()) | set(s['stakeholders'].keys())
+        n_total = len(all_actors)
+        
+        is_trade = n_makers > 0 or n_takers > 0
+        
+        if not is_trade:
+            print(f"{cat:<30} | {s['vol']:>16,.0f} | {s['tx']:<8} | {'-':<8} | {'-':<12} | {'-':<12} | {n_total:<12}")
+        else:
+            print(f"{cat:<30} | {s['vol']:>16,.0f} | {s['tx']:<8} | {s['fills']:<8} | {n_makers:<12} | {n_takers:<12} | {n_total:<12}")
 
     # ==============================================================================
-    # OUTPUT: PLOTTING
+    # OUTPUT 2: TOP 10 LISTS
     # ==============================================================================
-    print("\nGenerating Plot...")
-    plt.figure(figsize=(12, 8))
+    print("\n" + "="*100)
+    print("TOP 10 ACTORS (Separated by Role)")
+    print("="*100)
     
-    for cat, records in plot_data.items():
+    for cat, s in sorted(stats.items()):
+        print(f"\n>>> {cat} <<<")
+        
+        is_trade = len(s['makers']) > 0 or len(s['takers']) > 0
+        
+        if not is_trade:
+            print("  [Top Stakeholders]")
+            for actor, count in s['stakeholders'].most_common(10):
+                print(f"    {actor}: {count}")
+        else:
+            print("  [Top Makers]")
+            for actor, count in s['makers'].most_common(10):
+                print(f"    {actor}: {count}")
+            print("\n  [Top Takers]")
+            for actor, count in s['takers'].most_common(10):
+                print(f"    {actor}: {count}")
+
+    # ==============================================================================
+    # OUTPUT 3: PLOT CUMULATIVE VOLUME
+    # ==============================================================================
+    print("\nGenerating Volume Plot...")
+    plt.figure(figsize=(14, 8))
+    for cat, records in sorted(ts_data.items()):
         if not records: continue
-        
-        # Convert to DataFrame
-        df = pd.DataFrame(records)
-        # Convert timestamp_ms to datetime objects for plotting
-        df['datetime'] = pd.to_datetime(df['time'], unit='ms')
-        df = df.sort_values('datetime')
-        
-        # Cumulative Sum
+        df = pd.DataFrame(records).sort_values('time')
         df['cum_vol'] = df['vol'].cumsum()
-        
-        plt.plot(df['datetime'], df['cum_vol'], label=cat, linewidth=1.5)
-
-    plt.title('Cumulative USDC Volume by Type')
-    plt.xlabel('Date')
-    plt.ylabel('Cumulative Volume (USDC)')
-    plt.legend()
-    plt.grid(True, which='both', linestyle='--', alpha=0.5)
-    plt.tight_layout()
+        plt.plot(df['time'], df['cum_vol'], label=cat)
     
-    filename = 'cumulative_volume_5_cases.png'
-    plt.savefig(filename)
-    print(f"Plot saved to {filename}")
+    plt.title('Cumulative USDC Volume by Category & Exchange')
+    plt.xlabel('Date')
+    plt.ylabel('Volume (USDC)')
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.tight_layout()
+    plt.savefig('analysis_volume_detailed.png')
+    print("Saved analysis_volume_detailed.png")
+
+    # ==============================================================================
+    # OUTPUT 4: PLOT CDF (Lorenz Curve)
+    # ==============================================================================
+    print("Generating Actor CDF Plot...")
+    plt.figure(figsize=(14, 8))
+    
+    for cat, s in sorted(stats.items()):
+        combined_counts = s['makers'] + s['takers'] + s['stakeholders']
+        if not combined_counts: continue
+        
+        frequencies = sorted(combined_counts.values())
+        y_values = np.cumsum(frequencies)
+        y_values = y_values / y_values[-1] 
+        x_values = np.linspace(0, 1, len(y_values))
+        
+        plt.plot(x_values, y_values, label=f"{cat} (n={len(frequencies)})", linewidth=2)
+
+    plt.title('Activity Concentration (Lorenz Curve)')
+    plt.xlabel('Percentile of Actors (Sorted by Activity)')
+    plt.ylabel('Cumulative Share of Total Activity')
+    plt.plot([0, 1], [0, 1], 'k--', alpha=0.3, label='Perfect Equality')
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.tight_layout()
+    plt.savefig('analysis_actor_cdf_detailed.png')
+    print("Saved analysis_actor_cdf_detailed.png")
 
 if __name__ == "__main__":
     asyncio.run(main())
