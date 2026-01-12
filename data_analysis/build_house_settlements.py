@@ -1,320 +1,307 @@
 #!/usr/bin/env python3
 """
-Build house_settlements table by filtering settlements and CFT_no_exchange events.
-Matches settlements with specific asset IDs and condition IDs.
+Builds derivative 'settlements_house' and 'CFT_no_exchange_house' tables
+by filtering for specific market condition and asset IDs.
+
+This script processes the main 'settlements' and 'CFT_no_exchange' tables,
+decodes the event data within them to find matches, and stores the relevant
+rows in the new tables. It is designed to be resumable and processes data
+in batches based on block numbers.
 """
 
 import os
 import asyncio
 import asyncpg
-import json
 import logging
-from datetime import datetime, timezone
-from typing import Dict, List, Set, Any
+import json
+from collections import defaultdict
 from eth_abi import decode
+from typing import Dict, Any, List, Set
 
-# ================================================================
+# ----------------------------------------------------------------
 # CONFIGURATION
-# ================================================================
+# ----------------------------------------------------------------
 
-# Asset IDs to filter for (Exchange/Settlements)
-ASSET_IDS = [
-    "65139230827417363158752884968303867495725894165574887635816574090175320800482", 
-    "17371217118862125782438074585166210555214661810823929795910191856905580975576",
-    "83247781037352156539108067944461291821683755894607244160607042790356561625563", 
-    "33156410999665902694791064431724433042010245771106314074312009703157423879038"
-]
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+logger = logging.getLogger()
 
-# Condition IDs to filter for (CFT Events)
-CONDITION_IDS = [
-    "0xd5d9fc47718bd553592d126b1fa5e87183d27f3936975b0c04cc0f2dec1f1bb4", 
-    "0x4e4f77e7dbf4cab666e9a1943674d7ae66348e862df03ea6f44b11eb95731928"
-]
-
-# Default Start Date: January 8th, 2026 00:00 UTC
-DEFAULT_START_DT = datetime(2026, 1, 8, 0, 0, 0, tzinfo=timezone.utc)
-DEFAULT_START_MS = int(DEFAULT_START_DT.timestamp() * 1000)
-
-T_BATCH = 6 * 60 * 60 * 1000  # 6 hours in milliseconds
-
-# Database Credentials
+# --- Database Credentials ---
 PG_HOST = os.getenv("PG_SOCKET")
 PG_PORT = os.getenv("POLY_PG_PORT")
 DB_NAME = os.getenv("POLY_DB")
 DB_USER = os.getenv("POLY_DB_CLI")
 DB_PASS = os.getenv("POLY_DB_CLI_PASS")
 
-# Logging Setup
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-logger = logging.getLogger(__name__)
+# --- Processing Configuration ---
+# Batch size in BLOCKS for processing and rewind overlap
+BLOCK_BATCH_SIZE = 10_000
 
-# ================================================================
-# DECODING LOGIC
-# ================================================================
+# Hardcoded start block number if the target tables are empty
+HARDCODED_START_BLOCK = 81372608
 
-EVENT_SIGS = {
-    'OrderFilled': '0xd0a08e8c493f9c94f29311604c9de1b4e8c8d4c06bd0c789af57f2d65bfec0f6',
-    'OrdersMatched': '0x63bf4d16b7fa898ef4c4b2b6d90fd201e9c56313b65638af6088d149d2ce956c',
-    'PositionSplit': '0x2e6bb91f8cbcda0c93623c54d0403a43514fabc40084ec96b6d5379a74786298',
-    'PositionsMerge': '0x6f13ca62553fcc2bcd2372180a43949c1e4cebba603901ede2f4e14f36b282ca',
+# Buffer start number as requested
+BUFFER_START_NR = 7
+
+# --- Target Market Data ---
+# Condition IDs for Democratic and Republican 2026 House control markets
+TARGET_CONDITION_IDS: Set[str] = {
+    "0xd5d9fc47718bd553592d126b1fa5e87183d27f3936975b0c04cc0f2dec1f1bb4",
+    "0x4e4f77e7dbf4cab666e9a1943674d7ae66348e862df03ea6f44b11eb95731928",
 }
 
-def get_asset_ids_from_data(event_name: str, data_hex: str) -> Set[str]:
-    """Decodes binary data to extract asset IDs."""
-    found_assets = set()
+# Asset IDs for the outcomes of the target markets
+TARGET_ASSET_IDS: Set[str] = {
+    # Democratic Party Market
+    "83247781037352156539108067944461291821683755894607244160607042790356561625563",
+    "33156410999665902694791064431724433042010245771106314074312009703157423879038",
+    # Republican Party Market
+    "65139230827417363158752884968303867495725894165574887635816574090175320800482",
+    "17371217118862125782438074585166210555214661810823929795910191856905580975576",
+}
+
+# ----------------------------------------------------------------
+# EVENT DECODING LOGIC
+# ----------------------------------------------------------------
+
+def decode_orders_matched(data: str, topics: List[str]) -> Dict[str, Any]:
+    """Decodes data for an OrdersMatched event."""
     try:
-        data_bytes = bytes.fromhex(data_hex[2:] if data_hex.startswith('0x') else data_hex)
-        
-        if event_name == 'OrderFilled':
-            # [makerAssetId, takerAssetId, making, taking, fee]
-            decoded = decode(['uint256', 'uint256', 'uint256', 'uint256', 'uint256'], data_bytes)
-            found_assets.add(str(decoded[0])) # makerAssetId
-            found_assets.add(str(decoded[1])) # takerAssetId
-            
-        elif event_name == 'OrdersMatched':
-            # [makerAssetId, takerAssetId, making, taking]
-            decoded = decode(['uint256', 'uint256', 'uint256', 'uint256'], data_bytes)
-            found_assets.add(str(decoded[0])) # makerAssetId
-            found_assets.add(str(decoded[1])) # takerAssetId
-            
-    except Exception as e:
-        # logger.debug(f"Failed to decode {event_name}: {e}")
-        pass
-        
-    return found_assets
+        data_hex = bytes.fromhex(data[2:])
+        decoded = decode(['uint256', 'uint256', 'uint256', 'uint256'], data_hex)
+        return {
+            'makerAssetId': str(decoded[0]),
+            'takerAssetId': str(decoded[1]),
+        }
+    except Exception:
+        return {}
 
-def extract_assets_from_settlement(trade_data: Dict) -> Set[str]:
-    """Parses a settlement trade object to find all involved Asset IDs."""
-    assets = set()
-    
-    # Helper to process list of events
-    def process_events(event_list, event_type_override=None):
-        if not event_list: return
-        for item in event_list:
-            if isinstance(item, str):
-                try:
-                    item = json.loads(item)
-                except: continue
-            
-            topics = item.get('topics', [])
-            if isinstance(topics, str): topics = json.loads(topics)
-            
-            data = item.get('data', '0x')
-            
-            # Identify event
-            sig = topics[0] if topics else None
-            event_name = event_type_override
-            
-            if not event_name and sig:
-                for name, known_sig in EVENT_SIGS.items():
-                    if sig.lower() == known_sig.lower():
-                        event_name = name
-                        break
-            
-            if event_name in ['OrderFilled', 'OrdersMatched']:
-                assets.update(get_asset_ids_from_data(event_name, data))
+def decode_order_filled(data: str, topics: List[str]) -> Dict[str, Any]:
+    """Decodes data for an OrderFilled event."""
+    try:
+        data_hex = bytes.fromhex(data[2:])
+        decoded = decode(['uint256', 'uint256', 'uint256', 'uint256', 'uint256'], data_hex)
+        return {
+            'makerAssetId': str(decoded[0]),
+            'takerAssetId': str(decoded[1]),
+        }
+    except Exception:
+        return {}
 
-    # Check standard fields in the trade JSON
-    process_events(trade_data.get('orders_matched', []), 'OrdersMatched')
-    process_events(trade_data.get('orders_filled', []), 'OrderFilled')
-    
-    return assets
+def decode_position_event(data: str, topics: List[str]) -> Dict[str, Any]:
+    """Decodes data for PositionSplit or PositionsMerge events."""
+    try:
+        # The conditionId is the 4th topic (index 3)
+        if len(topics) > 3:
+            return {'conditionId': topics[3]}
+        return {}
+    except Exception:
+        return {}
 
-def extract_condition_from_cft(event_data: Dict) -> Set[str]:
-    """Extracts condition IDs from CFT event topics."""
-    conditions = set()
-    
-    topics = event_data.get('topics', [])
-    if isinstance(topics, str):
-        try:
-            topics = json.loads(topics)
-        except: return conditions
+# ----------------------------------------------------------------
+# DATABASE FUNCTIONS
+# ----------------------------------------------------------------
 
-    # PositionSplit and PositionsMerge: Condition ID is usually indexed at topic 2
-    # Event Sig: topic[0], Stakeholder: topic[1], ConditionId: topic[2]
-    if len(topics) > 2:
-        conditions.add(topics[2].lower())
-        
-    return conditions
-
-# ================================================================
-# DATABASE LOGIC
-# ================================================================
-
-async def create_tables(conn):
-    """Create the house_settlements table."""
-    await conn.execute("""
-        CREATE TABLE IF NOT EXISTS house_settlements (
-            id BIGSERIAL PRIMARY KEY,
-            source_table VARCHAR(50) NOT NULL, -- 'settlements' or 'CFT_no_exchange'
-            source_id BIGINT NOT NULL,         -- ID from the source table
-            asset_id TEXT NOT NULL,            -- The ID that triggered the match (Asset ID or Condition ID)
-            timestamp_ms BIGINT NOT NULL,
-            transaction_hash TEXT NOT NULL,
-            payload JSONB NOT NULL,            -- The full data
-            created_at TIMESTAMP DEFAULT NOW()
-        );
-    """)
-    
-    # Index for fast resuming and querying
-    await conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_house_settlements_source_ts 
-        ON house_settlements (source_table, timestamp_ms);
-    """)
-    await conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_house_settlements_asset 
-        ON house_settlements (asset_id);
-    """)
-    logger.info("Table `house_settlements` verified.")
-
-async def get_resume_timestamp(conn, source_table: str) -> int:
-    """Get the last timestamp processed for a specific source table."""
-    val = await conn.fetchval("""
-        SELECT MAX(timestamp_ms) 
-        FROM house_settlements 
-        WHERE source_table = $1
-    """, source_table)
-    
-    if val:
-        return val + 1 # Start from next ms
-    return DEFAULT_START_MS
-
-async def process_settlements(conn, start_ts: int, end_ts: int):
-    """Fetch, filter, and insert settlements."""
-    rows = await conn.fetch("""
-        SELECT id, timestamp_ms, transaction_hash, type, exchange, trade
-        FROM settlements
-        WHERE timestamp_ms >= $1 AND timestamp_ms < $2
-        ORDER BY timestamp_ms ASC
-    """, start_ts, end_ts)
-    
-    count = 0
-    for row in rows:
-        try:
-            trade_json = row['trade']
-            if isinstance(trade_json, str):
-                trade_json = json.loads(trade_json)
-            
-            # Extract assets involved in this settlement
-            involved_assets = extract_assets_from_settlement(trade_json)
-            
-            # Check intersection with our target list
-            matches = [aid for aid in involved_assets if aid in ASSET_IDS]
-            
-            for match_id in matches:
-                await conn.execute("""
-                    INSERT INTO house_settlements 
-                    (source_table, source_id, asset_id, timestamp_ms, transaction_hash, payload)
-                    VALUES ($1, $2, $3, $4, $5, $6)
-                """, 'settlements', row['id'], match_id, row['timestamp_ms'], row['transaction_hash'], json.dumps(dict(row)))
-                count += 1
-                
-        except Exception as e:
-            logger.error(f"Error processing settlement {row['id']}: {e}")
-            continue
-            
-    return count
-
-async def process_cft(conn, start_ts: int, end_ts: int):
-    """Fetch, filter, and insert CFT events."""
-    rows = await conn.fetch("""
-        SELECT id, timestamp_ms, transaction_hash, event_name, event_data
-        FROM CFT_no_exchange
-        WHERE timestamp_ms >= $1 AND timestamp_ms < $2
-        ORDER BY timestamp_ms ASC
-    """, start_ts, end_ts)
-    
-    count = 0
-    for row in rows:
-        try:
-            event_data = row['event_data']
-            if isinstance(event_data, str):
-                event_data = json.loads(event_data)
-            
-            # Extract conditions involved
-            involved_conditions = extract_condition_from_cft(event_data)
-            
-            # Check intersection (normalize to lower case for comparison)
-            matches = [cid for cid in involved_conditions if cid.lower() in [x.lower() for x in CONDITION_IDS]]
-            
-            for match_id in matches:
-                await conn.execute("""
-                    INSERT INTO house_settlements 
-                    (source_table, source_id, asset_id, timestamp_ms, transaction_hash, payload)
-                    VALUES ($1, $2, $3, $4, $5, $6)
-                """, 'CFT_no_exchange', row['id'], match_id, row['timestamp_ms'], row['transaction_hash'], json.dumps(dict(row)))
-                count += 1
-                
-        except Exception as e:
-            logger.error(f"Error processing CFT event {row['id']}: {e}")
-            continue
-            
-    return count
-
-async def main():
-    if not PG_HOST:
-        logger.error("Database credentials not set in environment variables.")
-        return
-
-    pool = await asyncpg.create_pool(
-        host=PG_HOST,
-        port=PG_PORT,
-        database=DB_NAME,
-        user=DB_USER,
-        password=DB_PASS
+async def connect_db():
+    """Creates and returns a database connection pool."""
+    return await asyncpg.create_pool(
+        host=PG_HOST, port=int(PG_PORT), database=DB_NAME, user=DB_USER, password=DB_PASS, min_size=1, max_size=10
     )
 
+async def create_tables(conn):
+    """Creates the target tables if they do not exist, ensuring unique constraints."""
+    # --- SETTLEMENTS_HOUSE TABLE ---
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS settlements_house (
+            id BIGINT,
+            block_number BIGINT NOT NULL,
+            transaction_hash TEXT NOT NULL,
+            trade JSONB NOT NULL,
+            negrisk_adapter_events JSONB,
+            type VARCHAR(50) NOT NULL,
+            exchange VARCHAR(20) NOT NULL,
+            PRIMARY KEY (id),
+            CONSTRAINT uk_settlements_house_tx_hash UNIQUE (transaction_hash)
+        );
+        CREATE INDEX IF NOT EXISTS idx_settlements_house_block ON settlements_house(block_number);
+    """)
+
+    # --- CFT_NO_EXCHANGE_HOUSE TABLE ---
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS CFT_no_exchange_house (
+            id BIGINT,
+            block_number BIGINT NOT NULL,
+            transaction_hash TEXT NOT NULL,
+            cft_events JSONB,
+            negrisk_adapter_events JSONB,
+            type VARCHAR(50) NOT NULL,
+            PRIMARY KEY (id),
+            CONSTRAINT uk_cft_house_tx_hash UNIQUE (transaction_hash)
+        );
+        CREATE INDEX IF NOT EXISTS idx_cft_house_block ON CFT_no_exchange_house(block_number);
+    """)
+    logger.info("✅ 'house' tables ready with unique constraints")
+
+async def get_global_bounds(conn):
+    """Gets the min and max block number from the source tables."""
+    query = """
+        SELECT MIN(min_b), MAX(max_b) FROM (
+            SELECT MIN(block_number) as min_b, MAX(block_number) as max_b FROM settlements
+            UNION ALL
+            SELECT MIN(block_number) as min_b, MAX(block_number) as max_b FROM CFT_no_exchange
+        ) t
+    """
+    row = await conn.fetchrow(query)
+    return row[0], row[1]
+
+async def get_safe_start_block(conn, global_min):
+    """
+    Determines the safe starting block for processing.
+    If target tables are empty, uses the hardcoded start block.
+    Otherwise, resumes from the last processed block with a safety overlap.
+    """
+    row_s = await conn.fetchrow("SELECT MAX(block_number) FROM settlements_house")
+    max_s = row_s[0] if row_s[0] is not None else 0
+    
+    row_c = await conn.fetchrow("SELECT MAX(block_number) FROM CFT_no_exchange_house")
+    max_c = row_c[0] if row_c[0] is not None else 0
+    
+    current_max = max(max_s, max_c)
+    
+    # If no data has been collected yet, start from the hardcoded block number.
+    if current_max == 0:
+        logger.info(f"🌱 No data in target tables. Starting from hardcoded block: {HARDCODED_START_BLOCK}")
+        return HARDCODED_START_BLOCK
+
+    # If resuming, rewind by one batch size to handle potential partial writes from a crash.
+    safe_start = max(global_min, current_max - BLOCK_BATCH_SIZE)
+    logger.info(f"🔎 Found Max Block: {current_max}. Resuming from safe block {safe_start}.")
+    return safe_start
+
+async def clean_overlap(conn, start_block):
+    """Deletes overlapping data from target tables to prevent duplicates on resume."""
+    logger.info(f"🧹 Cleaning overlap from block {start_block} in 'house' tables...")
+    await conn.execute("DELETE FROM settlements_house WHERE block_number >= $1", start_block)
+    await conn.execute("DELETE FROM CFT_no_exchange_house WHERE block_number >= $1", start_block)
+
+async def fetch_source_data_in_range(conn, start_block, end_block):
+    """Fetches records from the source tables within a given block range."""
+    q_s = "SELECT * FROM settlements WHERE block_number >= $1 AND block_number < $2"
+    q_c = "SELECT * FROM CFT_no_exchange WHERE block_number >= $1 AND block_number < $2"
+    
+    settlements = await conn.fetch(q_s, start_block, end_block)
+    cfts = await conn.fetch(q_c, start_block, end_block)
+    
+    return settlements, cfts
+
+async def process_batch(conn, settlement_rows, cft_rows):
+    """
+    Processes a batch of rows, decodes events to find matches,
+    and prepares them for insertion into the 'house' tables.
+    """
+    insert_settlements = []
+    insert_cft = []
+
+    # --- Process Settlements ---
+    for row in settlement_rows:
+        is_match = False
+        try:
+            trade = json.loads(row['trade'])
+            
+            # Check OrdersMatched and OrderFilled events for target asset IDs
+            trade_events = trade.get('orders_matched', []) + trade.get('orders_filled', [])
+            for event in trade_events:
+                if 'OrdersMatched' in event.get('topics', [''])[0]:
+                    decoded = decode_orders_matched(event['data'], event['topics'])
+                else:
+                    decoded = decode_order_filled(event['data'], event['topics'])
+                
+                if decoded.get('makerAssetId') in TARGET_ASSET_IDS or decoded.get('takerAssetId') in TARGET_ASSET_IDS:
+                    is_match = True
+                    break
+            
+            if is_match:
+                insert_settlements.append(tuple(row.values()))
+
+        except (json.JSONDecodeError, KeyError, IndexError) as e:
+            logger.warning(f"Skipping settlement row due to parsing error (tx: {row['transaction_hash']}): {e}")
+
+    # --- Process CFTs ---
+    for row in cft_rows:
+        is_match = False
+        try:
+            # Check position events for target condition IDs
+            cft_events = json.loads(row['cft_events'] or '[]')
+            adapter_events = json.loads(row['negrisk_adapter_events'] or '[]')
+            
+            for event in cft_events + adapter_events:
+                # Position events have 4 topics
+                if len(event.get('topics', [])) == 4:
+                    decoded = decode_position_event(event['data'], event['topics'])
+                    if decoded.get('conditionId') in TARGET_CONDITION_IDS:
+                        is_match = True
+                        break
+            
+            if is_match:
+                insert_cft.append(tuple(row.values()))
+
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.warning(f"Skipping CFT row due to parsing error (tx: {row['transaction_hash']}): {e}")
+
+    # --- Batch Insert with ON CONFLICT clause for robustness ---
+    async with conn.transaction():
+        if insert_settlements:
+            await conn.executemany("""
+                INSERT INTO settlements_house (id, block_number, transaction_hash, trade, negrisk_adapter_events, type, exchange)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ON CONFLICT (transaction_hash) DO NOTHING
+            """, insert_settlements)
+            
+        if insert_cft:
+            await conn.executemany("""
+                INSERT INTO CFT_no_exchange_house (id, block_number, transaction_hash, cft_events, negrisk_adapter_events, type)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (transaction_hash) DO NOTHING
+            """, insert_cft)
+        
+    return len(insert_settlements), len(insert_cft)
+
+async def main():
+    """Main execution function."""
+    pool = await connect_db()
     try:
         async with pool.acquire() as conn:
             await create_tables(conn)
             
-            # Get resume points
-            next_settlement_ts = await get_resume_timestamp(conn, 'settlements')
-            next_cft_ts = await get_resume_timestamp(conn, 'CFT_no_exchange')
-            
-            logger.info(f"Resuming Settlements from: {datetime.fromtimestamp(next_settlement_ts/1000, tz=timezone.utc)}")
-            logger.info(f"Resuming CFT Events from:  {datetime.fromtimestamp(next_cft_ts/1000, tz=timezone.utc)}")
-            
-            # Get global max to know when to stop (optional, or just run until now)
-            max_ts_row = await conn.fetchrow("""
-                SELECT GREATEST(
-                    (SELECT MAX(timestamp_ms) FROM settlements),
-                    (SELECT MAX(timestamp_ms) FROM CFT_no_exchange)
-                ) as max_ts
-            """)
-            global_max = max_ts_row['max_ts'] or DEFAULT_START_MS
-            
-            # Loop until caught up
-            while next_settlement_ts < global_max or next_cft_ts < global_max:
+            min_blk, max_blk = await get_global_bounds(conn)
+            if not min_blk: 
+                logger.error("No source data found in 'settlements' or 'CFT_no_exchange' tables.")
+                return
+
+            start_blk = await get_safe_start_block(conn, min_blk)
+            await clean_overlap(conn, start_blk)
+
+            if start_blk >= max_blk:
+                logger.info("✅ All blocks already processed.")
+                return
+
+            logger.info(f"🚀 Starting processing from Block {start_blk} to {max_blk}")
+
+            curr = start_blk
+            while curr < max_blk:
+                next_blk = min(curr + BLOCK_BATCH_SIZE, max_blk + 1)
+                logger.info(f"Batch: Block {curr} -> {next_blk-1}")
                 
-                # 1. Process Settlements Batch
-                if next_settlement_ts < global_max:
-                    end_batch = next_settlement_ts + T_BATCH
-                    logger.info(f"Processing Settlements: {datetime.fromtimestamp(next_settlement_ts/1000, tz=timezone.utc)} -> {datetime.fromtimestamp(end_batch/1000, tz=timezone.utc)}")
-                    
-                    inserted = await process_settlements(conn, next_settlement_ts, end_batch)
-                    if inserted > 0:
-                        logger.info(f"  -> Found {inserted} matching settlements")
-                    
-                    next_settlement_ts = end_batch
-
-                # 2. Process CFT Batch
-                if next_cft_ts < global_max:
-                    end_batch = next_cft_ts + T_BATCH
-                    logger.info(f"Processing CFT Events:  {datetime.fromtimestamp(next_cft_ts/1000, tz=timezone.utc)} -> {datetime.fromtimestamp(end_batch/1000, tz=timezone.utc)}")
-                    
-                    inserted = await process_cft(conn, next_cft_ts, end_batch)
-                    if inserted > 0:
-                        logger.info(f"  -> Found {inserted} matching CFT events")
-                    
-                    next_cft_ts = end_batch
-
-            logger.info("Sync complete.")
-
+                settlements, cfts = await fetch_source_data_in_range(conn, curr, next_blk)
+                if settlements or cfts:
+                    s_count, c_count = await process_batch(conn, settlements, cfts)
+                    logger.info(f"  -> Found Matches: {s_count} Settlements, {c_count} CFTs")
+                else:
+                    logger.info("  -> No source events in range")
+                
+                curr = next_blk
+            
+            logger.info("✅ Processing complete.")
+                
     finally:
         await pool.close()
 

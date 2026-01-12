@@ -1,10 +1,7 @@
 nohup: ignoring input
-2026-01-10 21:37:53 | ✅ Tables ready
-2026-01-10 21:37:53 | 🔎 Found Max Block: 79342084. Rewinding to 79332084.
-2026-01-10 21:37:53 | 🧹 Cleaning overlap from block 79332084...
-2026-01-10 21:37:54 | 🚀 Starting processing from Block 79332084
-2026-01-10 21:37:54 | Batch: Block 79332084 -> 79342084
-2026-01-10 21:38:07 |   -> Settlements: 136215, CFT: 2907
-2026-01-10 21:38:07 | Batch: Block 79342084 -> 79352084
-2026-01-10 21:38:19 |   -> Settlements: 133516, CFT: 3275
-2026-01-10 21:38:19 | Batch: Block 79352084 -> 79362084
+2026-01-11 22:21:05 | ✅ Tables ready
+2026-01-11 22:21:05 | 🔎 Found Max Block: 81480981. Rewinding to 81470981.
+2026-01-11 22:21:05 | 🧹 Cleaning overlap from block 81470981...
+2026-01-11 22:21:07 | 🚀 Starting processing from Block 81470981
+2026-01-11 22:21:07 | Batch: Block 81470981 -> 81480981
+2026-01-11 22:22:31 |   -> Settlements: 382341, CFT: 66248
