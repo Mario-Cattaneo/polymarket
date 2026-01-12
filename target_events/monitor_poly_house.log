@@ -1,26 +1,26 @@
-=== House Elections Market Statistics Report - 2026-01-12 15:07:50 ===
+=== House Elections Market Statistics Report - 2026-01-12 15:27:20 ===
 
 Market 562802: Will the Democratic Party control the House after the 2026 Midterm elections?
   [Yes]:
-    Websocket Events Total: 67191
-    best_bid_ask: 624, book: 605, last_trade_price: 163, price_change: 65799
-    Orderbook Responses: 644384
+    Websocket Events Total: 67436
+    best_bid_ask: 625, book: 606, last_trade_price: 164, price_change: 66041
+    Orderbook Responses: 646483
 
   [No]:
-    Websocket Events Total: 67469
-    best_bid_ask: 624, book: 605, last_trade_price: 441, price_change: 65799
-    Orderbook Responses: 644384
+    Websocket Events Total: 67713
+    best_bid_ask: 625, book: 606, last_trade_price: 441, price_change: 66041
+    Orderbook Responses: 646483
 
 
 Market 562803: Will the Republican Party control the House after the 2026 Midterm elections?
   [Yes]:
-    Websocket Events Total: 70275
-    best_bid_ask: 714, book: 502, last_trade_price: 73, price_change: 68986
-    Orderbook Responses: 644384
+    Websocket Events Total: 70509
+    best_bid_ask: 714, book: 502, last_trade_price: 73, price_change: 69220
+    Orderbook Responses: 646483
 
   [No]:
-    Websocket Events Total: 70631
-    best_bid_ask: 714, book: 502, last_trade_price: 429, price_change: 68986
-    Orderbook Responses: 644384
+    Websocket Events Total: 70865
+    best_bid_ask: 714, book: 502, last_trade_price: 429, price_change: 69220
+    Orderbook Responses: 646483
 
 
