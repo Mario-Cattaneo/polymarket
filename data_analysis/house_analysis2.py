@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Analytics script to plot the cumulative volume of bought and sold shares for specific market outcomes.
-This version corrects the unit handling for off-chain trades and adds total counts to the legend.
+This version uses a robust method to calculate cumulative volumes, ensuring logical consistency.
 
 For each of the four target asset IDs, this script generates a plot with six lines:
 - On-Chain Settlements: Cumulative Buys, Sells, and Combined Volume.
@@ -40,7 +40,6 @@ REF_UNIX_TIMESTAMP = 1767864474
 SECONDS_PER_BLOCK = 2
 
 # --- Target Market & Asset Configuration ---
-# The amounts from ON-CHAIN settlements are divided by this scalar.
 SHARE_SCALAR = Decimal("1_000_000")
 
 TARGET_ASSETS = {
@@ -73,108 +72,82 @@ async def fetch_data(query: str) -> list:
             await conn.close()
 
 def process_settlements_data(records: list) -> pd.DataFrame:
-    """
-    Processes raw settlement records to extract trade volumes for target assets.
-    The logic centers on the OrdersMatched event, which summarizes the taker's action.
-    """
     processed_trades = []
     for row in records:
         try:
             trade_data = json.loads(row['trade'])
             timestamp = pd.to_datetime(block_to_timestamp(row['block_number']), unit='s')
-            
             for matched_order in trade_data.get('orders_matched', []):
                 data_hex = bytes.fromhex(matched_order['data'][2:])
                 decoded_data = decode(['uint256', 'uint256', 'uint256', 'uint256'], data_hex)
-                maker_asset_id = str(decoded_data[0])
-                taker_asset_id = str(decoded_data[1])
-                maker_amount_filled = Decimal(decoded_data[2])
-                taker_amount_filled = Decimal(decoded_data[3])
-
+                maker_asset_id, taker_asset_id = str(decoded_data[0]), str(decoded_data[1])
+                maker_amount, taker_amount = Decimal(decoded_data[2]), Decimal(decoded_data[3])
                 if taker_asset_id in TARGET_ASSETS:
-                    processed_trades.append({
-                        'timestamp': timestamp, 'asset_id': taker_asset_id, 'side': 'sell',
-                        'amount': taker_amount_filled / SHARE_SCALAR
-                    })
-                
+                    processed_trades.append({'timestamp': timestamp, 'asset_id': taker_asset_id, 'side': 'sell', 'amount': taker_amount / SHARE_SCALAR})
                 if maker_asset_id in TARGET_ASSETS:
-                    processed_trades.append({
-                        'timestamp': timestamp, 'asset_id': maker_asset_id, 'side': 'buy',
-                        'amount': maker_amount_filled / SHARE_SCALAR
-                    })
-        except (json.JSONDecodeError, KeyError, IndexError, Exception) as e:
+                    processed_trades.append({'timestamp': timestamp, 'asset_id': maker_asset_id, 'side': 'buy', 'amount': maker_amount / SHARE_SCALAR})
+        except Exception as e:
             logger.warning(f"Skipping settlement row due to parsing error: {e}")
-            continue
-            
     return pd.DataFrame(processed_trades)
 
 def process_last_trades_data(records: list) -> pd.DataFrame:
-    """Processes raw last_trade records to extract trade volumes."""
     processed_trades = []
     for row in records:
         try:
             msg = json.loads(row['message'])
             side = msg.get('side', '').lower()
             if side in ['buy', 'sell']:
-                # CORRECTED: The 'size' from last_trade is already in the correct unit.
-                # Do NOT divide by SHARE_SCALAR.
-                amount = Decimal(msg.get('size', 0))
-                processed_trades.append({
-                    'timestamp': pd.to_datetime(row['server_time_us'], unit='us'),
-                    'asset_id': row['asset_id'],
-                    'side': side,
-                    'amount': amount
-                })
-        except (json.JSONDecodeError, KeyError) as e:
+                processed_trades.append({'timestamp': pd.to_datetime(row['server_time_us'], unit='us'), 'asset_id': row['asset_id'], 'side': side, 'amount': Decimal(msg.get('size', 0))})
+        except Exception as e:
             logger.warning(f"Skipping last_trade row due to parsing error: {e}")
-            continue
-            
     return pd.DataFrame(processed_trades)
 
 def prepare_plot_data(df: pd.DataFrame, asset_id: str) -> dict:
-    """Filters data for an asset and calculates cumulative buys, sells, and combined volume."""
+    """
+    CORRECTED: Calculates cumulative volumes on a unified timeline to prevent logical errors.
+    """
     if df.empty:
-        return {'buy': pd.DataFrame(), 'sell': pd.DataFrame(), 'combined': pd.DataFrame()}
-
-    asset_df = df[df['asset_id'] == asset_id].copy()
+        return {}
+    asset_df = df[df['asset_id'] == asset_id].sort_values('timestamp').copy()
     if asset_df.empty:
-        return {'buy': pd.DataFrame(), 'sell': pd.DataFrame(), 'combined': pd.DataFrame()}
-        
-    buys = asset_df[asset_df['side'] == 'buy'].sort_values('timestamp')
-    buys['cumulative'] = buys['amount'].cumsum()
+        return {}
+
+    # Create separate columns for buy and sell amounts
+    asset_df['buy_amount'] = asset_df.apply(lambda row: row['amount'] if row['side'] == 'buy' else 0, axis=1)
+    asset_df['sell_amount'] = asset_df.apply(lambda row: row['amount'] if row['side'] == 'sell' else 0, axis=1)
+
+    # Calculate cumulative sums on the unified dataframe
+    asset_df['cumulative_buys'] = asset_df['buy_amount'].cumsum()
+    asset_df['cumulative_sells'] = asset_df['sell_amount'].cumsum()
+    asset_df['cumulative_combined'] = asset_df['amount'].cumsum()
     
-    sells = asset_df[asset_df['side'] == 'sell'].sort_values('timestamp')
-    sells['cumulative'] = sells['amount'].cumsum()
-    
-    combined = asset_df.sort_values('timestamp')
-    combined['cumulative'] = combined['amount'].cumsum()
-    
-    return {'buy': buys, 'sell': sells, 'combined': combined}
+    return asset_df
 
 # ----------------------------------------------------------------
 # PLOTTING FUNCTION
 # ----------------------------------------------------------------
 
-def plot_volume_graphs(asset_id: str, asset_name: str, settlements_data: dict, trades_data: dict):
-    """Generates and saves a plot for a single asset ID with totals in the legend."""
+def plot_volume_graphs(asset_id: str, asset_name: str, settlements_df: pd.DataFrame, trades_df: pd.DataFrame):
     plt.style.use('seaborn-v0_8-whitegrid')
     fig, ax = plt.subplots(figsize=(16, 9))
 
-    def get_legend_label(base_label: str, data: pd.DataFrame) -> str:
-        if data.empty:
+    def get_legend_label(base_label: str, series: pd.Series) -> str:
+        if series.empty:
             return f"{base_label} (Total: 0.00)"
-        total = data['cumulative'].iloc[-1]
+        total = series.iloc[-1]
         return f"{base_label} (Total: {total:,.2f})"
 
     # --- Plotting Settlements Data (Solid Lines) ---
-    ax.plot(settlements_data['buy']['timestamp'], settlements_data['buy']['cumulative'], color='green', linestyle='-', linewidth=1.5, zorder=5, label=get_legend_label('Settlements - Buys', settlements_data['buy']))
-    ax.plot(settlements_data['sell']['timestamp'], settlements_data['sell']['cumulative'], color='red', linestyle='-', linewidth=1.5, zorder=5, label=get_legend_label('Settlements - Sells', settlements_data['sell']))
-    ax.plot(settlements_data['combined']['timestamp'], settlements_data['combined']['cumulative'], color='black', linestyle='-', linewidth=2.0, zorder=4, label=get_legend_label('Settlements - Combined', settlements_data['combined']))
+    if not settlements_df.empty:
+        ax.plot(settlements_df['timestamp'], settlements_df['cumulative_buys'], color='green', linestyle='-', linewidth=1.5, zorder=5, label=get_legend_label('Settlements - Buys', settlements_df['cumulative_buys']))
+        ax.plot(settlements_df['timestamp'], settlements_df['cumulative_sells'], color='red', linestyle='-', linewidth=1.5, zorder=5, label=get_legend_label('Settlements - Sells', settlements_df['cumulative_sells']))
+        ax.plot(settlements_df['timestamp'], settlements_df['cumulative_combined'], color='black', linestyle='-', linewidth=2.0, zorder=4, label=get_legend_label('Settlements - Combined', settlements_df['cumulative_combined']))
 
     # --- Plotting Last Trades Data (Dashed Lines) ---
-    ax.plot(trades_data['buy']['timestamp'], trades_data['buy']['cumulative'], color='cyan', linestyle='--', linewidth=2.0, zorder=10, label=get_legend_label('Last Trades - Buys', trades_data['buy']))
-    ax.plot(trades_data['sell']['timestamp'], trades_data['sell']['cumulative'], color='magenta', linestyle='--', linewidth=2.0, zorder=10, label=get_legend_label('Last Trades - Sells', trades_data['sell']))
-    ax.plot(trades_data['combined']['timestamp'], trades_data['combined']['cumulative'], color='orange', linestyle='--', linewidth=2.5, zorder=9, label=get_legend_label('Last Trades - Combined', trades_data['combined']))
+    if not trades_df.empty:
+        ax.plot(trades_df['timestamp'], trades_df['cumulative_buys'], color='cyan', linestyle='--', linewidth=2.0, zorder=10, label=get_legend_label('Last Trades - Buys', trades_df['cumulative_buys']))
+        ax.plot(trades_df['timestamp'], trades_df['cumulative_sells'], color='magenta', linestyle='--', linewidth=2.0, zorder=10, label=get_legend_label('Last Trades - Sells', trades_df['cumulative_sells']))
+        ax.plot(trades_df['timestamp'], trades_df['cumulative_combined'], color='orange', linestyle='--', linewidth=2.5, zorder=9, label=get_legend_label('Last Trades - Combined', trades_df['cumulative_combined']))
 
     # --- Formatting ---
     ax.set_title(f'Cumulative Share Volume: {asset_name}', fontsize=18, pad=20)
@@ -202,7 +175,17 @@ async def main():
     last_trade_records = await fetch_data("SELECT asset_id, server_time_us, message FROM poly_last_trade_price_house")
 
     df_settlements = process_settlements_data(settlement_records)
+    
+    max_settlement_timestamp = pd.Timestamp.min
+    if not df_settlements.empty:
+        max_settlement_timestamp = df_settlements['timestamp'].max()
+        logger.info(f"Time range will be synchronized to the last settlement event: {max_settlement_timestamp}")
+    else:
+        logger.warning("No settlement data found. The time range for last trades will not be truncated.")
+
     df_last_trades = process_last_trades_data(last_trade_records)
+    if not df_last_trades.empty and max_settlement_timestamp > pd.Timestamp.min:
+        df_last_trades = df_last_trades[df_last_trades['timestamp'] <= max_settlement_timestamp].copy()
 
     for asset_id, asset_name in TARGET_ASSETS.items():
         logger.info(f"\n--- Generating plot for: {asset_name} ---")
