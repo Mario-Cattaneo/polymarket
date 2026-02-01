@@ -1,0 +1,38 @@
+DB Connected.
+
+--- Sample Data: poly_dem ---
+                         poly_dem_bid  poly_dem_ask
+timestamp                                          
+2026-01-08 09:24:46.920          0.21          0.22
+2026-01-08 09:25:11.229          0.78          0.79
+2026-01-08 09:25:31.396          0.21          0.22
+2026-01-08 09:25:32.648          0.78          0.79
+2026-01-08 09:25:36.001          0.21          0.22
+
+--- Sample Data: poly_rep ---
+                         poly_rep_bid  poly_rep_ask
+timestamp                                          
+2026-01-08 09:24:46.920          0.78          0.79
+2026-01-08 09:25:31.396          0.21          0.22
+2026-01-08 09:25:32.648          0.78          0.79
+2026-01-08 09:25:34.875          0.21          0.22
+2026-01-08 09:26:16.220          0.78          0.79
+Saved: price_plots/1_market_poly_dem.png
+Saved: price_plots/2_market_poly_rep.png
+Aligning timelines...
+
+--- Stats: Polymarket Dem Spread (Ask - Bid) ---
+Mean: 0.011129, Var: 0.000010
+Percentiles: [0.01 0.01 0.01 0.01 0.02 0.02]
+
+--- Stats: Polymarket Rep Spread (Ask - Bid) ---
+Mean: 0.011257, Var: 0.000011
+Percentiles: [0.01 0.01 0.01 0.01 0.02 0.02]
+
+--- Stats: Arb: Poly Dem Bid - Kalshi Dem Yes ---
+Mean: -0.302603, Var: 0.079797
+Percentiles: [-0.59 -0.56 -0.56  0.    0.01  0.03]
+
+--- Stats: Sum: Poly Dem Bid + Poly Rep Bid (Target 1.0) ---
+Mean: 0.990549, Var: 0.152850
+Percentiles: [0.38 0.42 0.99 0.99 1.56 1.6 ]
