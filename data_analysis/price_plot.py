@@ -37,9 +37,9 @@ os.makedirs(PLOT_DIR, exist_ok=True)
 
 def parse_polymarket_book(message):
     """
-    Parses the JSON orderbook EXACTLY as requested (No 1-P inversion).
+    Parses the JSON orderbook.
     Yes Price = Best Bid (Max Bid)
-    No Price  = Best Ask (Min Ask)
+    No Price  = 1 - Best Ask (inverted ask price)
     """
     try:
         bids = message.get('bids', [])
@@ -50,53 +50,82 @@ def parse_polymarket_book(message):
         
         # The price to BUY the asset (Yes Price) is the Best Bid
         yes_price = best_bid
-        # The price to SELL the asset (No Price / Price to Buy 'No') is the Best Ask
-        no_price = best_ask
+        # The No Price is 1 - Best Ask (inverted ask price)
+        no_price = 1.0 - best_ask if not np.isnan(best_ask) else np.nan
         
         return yes_price, no_price
     except:
         return np.nan, np.nan
 
-async def get_polymarket_data(pool, asset_id, prefix):
+async def get_polymarket_data(pool, asset_id, prefix, time_range=None, time_batch_hours=24):
+    """
+    Fetch polymarket data in time-based batches.
+    
+    Args:
+        time_range: tuple of (start, end) timestamps to fetch. If None or (None, None), fetches all data.
+        time_batch_hours: hours per batch (default 24 = 1 day)
+    """
     logger.info(f"Starting fetch for {prefix} (asset_id: {asset_id})")
-    logger.info(f"Asset ID type: {type(asset_id)}, value length: {len(str(asset_id))}")
+    logger.info(f"Time batch size: {time_batch_hours} hours")
+    
+    # Handle None or (None, None) for time_range - query all data
+    if time_range is None or time_range == (None, None):
+        fetch_all = True
+        time_range = (pd.Timestamp('1970-01-01'), pd.Timestamp('2099-12-31'))  # Dummy range for logging
+    else:
+        fetch_all = False
+        if time_range[0] is None or time_range[1] is None:
+            # If only one is None, use extreme dates for full range
+            start = time_range[0] if time_range[0] is not None else pd.Timestamp('1970-01-01')
+            end = time_range[1] if time_range[1] is not None else pd.Timestamp('2099-12-31')
+            time_range = (start, end)
+    
+    logger.info(f"Fetching {'ALL data' if fetch_all else 'data in range'} for {prefix}")
     
     timestamps, yes_p, no_p = [], [], []
-    batch_size = 100000
     batch_num = 0
     total_rows = 0
     matching_rows = 0
     asset_filtered = 0
     last_y, last_n = None, None
-    last_time_us = 0
     samples_logged = 0
     first_batch_asset_ids = set()
     
     start_time = time.time()
     
+    # Convert to microseconds for database queries
+    batch_start_us = int(time_range[0].timestamp() * 1_000_000)
+    batch_end_us = int(time_range[1].timestamp() * 1_000_000)
+    time_batch_us = time_batch_hours * 3600 * 1_000_000
+    
+    current_batch_start_us = batch_start_us
+    
     async with pool.acquire() as conn:
-        while True:
-            batch_start = time.time()
-            # Use keyset pagination (WHERE server_time_us > last_time_us) instead of OFFSET
+        while current_batch_start_us < batch_end_us:
+            batch_fetch_start = time.time()
+            current_batch_end_us = min(current_batch_start_us + time_batch_us, batch_end_us)
+            
+            # Fetch all records in this time window
             records = await conn.fetch("""
                 SELECT asset_id, outcome, server_time_us, message
                 FROM poly_book_state_house
-                WHERE server_time_us > $1
+                WHERE server_time_us >= $1 AND server_time_us < $2
                 ORDER BY server_time_us ASC
-                LIMIT $2;
-            """, last_time_us, batch_size)
+            """, current_batch_start_us, current_batch_end_us)
             
-            batch_fetch_time = time.time() - batch_start
+            batch_fetch_time = time.time() - batch_fetch_start
             
             if not records:
-                logger.info(f"{prefix}: Batch {batch_num} returned 0 rows. Fetch complete.")
-                break
+                logger.info(f"{prefix}: Batch {batch_num} (time window {current_batch_start_us}-{current_batch_end_us}) returned 0 rows.")
+                current_batch_start_us = current_batch_end_us
+                batch_num += 1
+                continue
             
             batch_num += 1
             total_rows += len(records)
             batch_matches = 0
             
-            # Collect unique asset_ids from this batch for inspection
+            # Collect unique asset_ids from first batch for inspection
             if batch_num == 1:
                 for r in records[:20]:
                     first_batch_asset_ids.add(str(r['asset_id']))
@@ -105,7 +134,7 @@ async def get_polymarket_data(pool, asset_id, prefix):
                 try:
                     msg = json.loads(row['message'])
                     
-                    # Filter by asset_id INSIDE the message, not the database column
+                    # Filter by asset_id INSIDE the message
                     msg_asset_id = msg.get('asset_id')
                     if msg_asset_id is None or str(msg_asset_id) != str(asset_id):
                         asset_filtered += 1
@@ -118,21 +147,15 @@ async def get_polymarket_data(pool, asset_id, prefix):
                     if not bids or not asks:
                         continue
                     
-                    # Yes price = max bid price (highest price someone will pay to buy)
+                    # Yes price = max bid price, No price = 1 - min ask price
                     bid_prices = [float(b['price']) for b in bids]
                     ask_prices = [float(a['price']) for a in asks]
                     
                     y = max(bid_prices)
-                    n = min(ask_prices)
+                    n = 1.0 - min(ask_prices)
                     
-                    # Log first 5 samples with FULL message structure
-                    if samples_logged < 5:
-                        msg_asset_id = msg.get('asset_id', 'N/A')
-                        logger.info(f"{prefix} SAMPLE {samples_logged + 1}: DB asset_id={row['asset_id']} | JSON asset_id={msg_asset_id} | outcome={row['outcome']}")
-                        logger.info(f"{prefix} SAMPLE {samples_logged + 1} Prices: yes={y:.4f}, no={n:.4f}")
-                        samples_logged += 1
-                    
-                    # Only store if prices changed from last recorded value
+
+                    # Only store if prices changed
                     if last_y is None or y != last_y or n != last_n:
                         timestamps.append(pd.to_datetime(row['server_time_us'], unit='us'))
                         yes_p.append(y)
@@ -140,15 +163,18 @@ async def get_polymarket_data(pool, asset_id, prefix):
                         last_y, last_n = y, n
                         matching_rows += 1
                         batch_matches += 1
-                    last_time_us = row['server_time_us']
                 except Exception as e:
                     logger.debug(f"Error parsing orderbook for {asset_id}: {e}")
                     continue
             
-            logger.info(f"{prefix}: Batch {batch_num} | Fetched: {len(records)} rows | Asset matched: {len(records) - asset_filtered} | Price changes: {batch_matches} | Time: {batch_fetch_time:.2f}s")
+            batch_start_ts = pd.to_datetime(current_batch_start_us, unit='us')
+            batch_end_ts = pd.to_datetime(current_batch_end_us, unit='us')
+            logger.info(f"{prefix}: Batch {batch_num} | Time: {batch_start_ts} to {batch_end_ts} | Fetched: {len(records)} rows | Asset matched: {len(records) - asset_filtered} | Price changes: {batch_matches} | Fetch time: {batch_fetch_time:.2f}s")
+            
+            current_batch_start_us = current_batch_end_us
     
     total_time = time.time() - start_time
-    logger.info(f"{prefix}: Total rows scanned: {total_rows} | Asset filtered: {asset_filtered} | Effective data points: {matching_rows} | Total time: {total_time:.2f}s")
+    logger.info(f"{prefix}: Total batches: {batch_num} | Total rows scanned: {total_rows} | Asset filtered: {asset_filtered} | Effective data points: {matching_rows} | Total time: {total_time:.2f}s")
     
     if batch_num > 0:
         logger.info(f"{prefix}: First batch unique asset_ids found: {first_batch_asset_ids}")
@@ -162,40 +188,69 @@ async def get_polymarket_data(pool, asset_id, prefix):
         logger.info(f"{prefix}: Yes price range: [{min(yes_p):.4f}, {max(yes_p):.4f}] | No price range: [{min(no_p):.4f}, {max(no_p):.4f}]")
     return df
 
-async def get_kalshi_data(pool, ticker, prefix):
+async def get_kalshi_data(pool, ticker, prefix, time_range=None, time_batch_hours=24):
+    """
+    Fetch Kalshi data in time-based batches.
+    
+    Args:
+        time_range: tuple of (start, end) timestamps to fetch. If None or (None, None), fetches all data.
+        time_batch_hours: hours per batch (default 24 = 1 day)
+    """
     logger.info(f"Starting fetch for {prefix} (ticker: {ticker})")
+    logger.info(f"Time batch size: {time_batch_hours} hours")
+    
+    # Handle None or (None, None) for time_range - query all data
+    if time_range is None or time_range == (None, None):
+        fetch_all = True
+        time_range = (pd.Timestamp('1970-01-01'), pd.Timestamp('2099-12-31'))  # Dummy range for logging
+    else:
+        fetch_all = False
+        if time_range[0] is None or time_range[1] is None:
+            # If only one is None, use extreme dates for full range
+            start = time_range[0] if time_range[0] is not None else pd.Timestamp('1970-01-01')
+            end = time_range[1] if time_range[1] is not None else pd.Timestamp('2099-12-31')
+            time_range = (start, end)
+    
+    logger.info(f"Fetching {'ALL data' if fetch_all else 'data in range'} for {prefix}")
     
     timestamps, yes_p, no_p = [], [], []
-    yes_book, no_book = {}, {}
-    batch_size = 100000
     batch_num = 0
     total_rows = 0
     matching_rows = 0
     ticker_filtered = 0
     type_filtered = 0
     last_y, last_n = None, None
-    last_time_us = 0
     samples_logged = 0
     
     start_time = time.time()
     
+    # Convert to microseconds for database queries
+    batch_start_us = int(time_range[0].timestamp() * 1_000_000)
+    batch_end_us = int(time_range[1].timestamp() * 1_000_000)
+    time_batch_us = time_batch_hours * 3600 * 1_000_000
+    
+    current_batch_start_us = batch_start_us
+    
     async with pool.acquire() as conn:
-        while True:
-            batch_start = time.time()
-            # Use keyset pagination (WHERE server_time_us > last_time_us) instead of OFFSET
+        while current_batch_start_us < batch_end_us:
+            batch_fetch_start = time.time()
+            current_batch_end_us = min(current_batch_start_us + time_batch_us, batch_end_us)
+            
+            # Fetch all records in this time window
             records = await conn.fetch("""
                 SELECT market_ticker, server_time_us, message
                 FROM kalshi_orderbook_updates_house
-                WHERE server_time_us > $1
+                WHERE server_time_us >= $1 AND server_time_us < $2
                 ORDER BY server_time_us ASC
-                LIMIT $2;
-            """, last_time_us, batch_size)
+            """, current_batch_start_us, current_batch_end_us)
             
-            batch_fetch_time = time.time() - batch_start
+            batch_fetch_time = time.time() - batch_fetch_start
             
             if not records:
-                logger.info(f"{prefix}: Batch {batch_num} returned 0 rows. Fetch complete.")
-                break
+                logger.info(f"{prefix}: Batch {batch_num} (time window {current_batch_start_us}-{current_batch_end_us}) returned 0 rows.")
+                current_batch_start_us = current_batch_end_us
+                batch_num += 1
+                continue
 
             batch_num += 1
             total_rows += len(records)
@@ -236,11 +291,6 @@ async def get_kalshi_data(pool, ticker, prefix):
                     best_yes = (max(yes_book.keys()) / 100.0) if yes_book else np.nan
                     best_no = (max(no_book.keys()) / 100.0) if no_book else np.nan
 
-                    # Log first 10 samples for verification
-                    if samples_logged < 10:
-                        logger.info(f"{prefix} SAMPLE {samples_logged + 1}: msg_type={msg_type}, yes_book_keys={len(yes_book)}, no_book_keys={len(no_book)}, y={best_yes}, n={best_no}")
-                        samples_logged += 1
-
                     # Only store if prices changed from last recorded value
                     if last_y is None or best_yes != last_y or best_no != last_n:
                         timestamps.append(ts)
@@ -249,15 +299,18 @@ async def get_kalshi_data(pool, ticker, prefix):
                         last_y, last_n = best_yes, best_no
                         matching_rows += 1
                         batch_matches += 1
-                    last_time_us = row['server_time_us']
                 except Exception as e:
                     logger.debug(f"Error parsing orderbook for {ticker}: {e}")
                     continue
             
-            logger.info(f"{prefix}: Batch {batch_num} | Fetched: {len(records)} rows | Ticker matched: {len(records) - ticker_filtered} | Type matched: {len(records) - ticker_filtered - type_filtered} | Price changes: {batch_matches} | Time: {batch_fetch_time:.2f}s")
+            batch_start_ts = pd.to_datetime(current_batch_start_us, unit='us')
+            batch_end_ts = pd.to_datetime(current_batch_end_us, unit='us')
+            logger.info(f"{prefix}: Batch {batch_num} | Time: {batch_start_ts} to {batch_end_ts} | Fetched: {len(records)} rows | Ticker matched: {len(records) - ticker_filtered} | Type matched: {len(records) - ticker_filtered - type_filtered} | Price changes: {batch_matches} | Fetch time: {batch_fetch_time:.2f}s")
+            
+            current_batch_start_us = current_batch_end_us
     
     total_time = time.time() - start_time
-    logger.info(f"{prefix}: Total rows scanned: {total_rows} | Ticker filtered: {ticker_filtered} | Type filtered: {type_filtered} | Effective data points: {matching_rows} | Total time: {total_time:.2f}s")
+    logger.info(f"{prefix}: Total batches: {batch_num} | Total rows scanned: {total_rows} | Ticker filtered: {ticker_filtered} | Type filtered: {type_filtered} | Effective data points: {matching_rows} | Total time: {total_time:.2f}s")
     
     df = pd.DataFrame({'timestamp': timestamps, f'{prefix}_yes': yes_p, f'{prefix}_no': no_p})
     df.set_index('timestamp', inplace=True)
@@ -299,15 +352,27 @@ def calculate_stats(series, name):
     print(f"Percentiles [0.1, 10, 33, 66, 90, 99.9]:")
     print(f"  {pcts}")
 
-def plot_market_raw(df, yes_col, no_col, title, filename):
-    """Plots Yes (Bid) and No (Ask) for a single market (No Fill)."""
+def plot_market_raw(df, yes_col, no_col, title, filename, time_range=None):
+    """Plots Yes and No prices for a single market, extended to full time range if provided."""
+    # If time_range provided and not full range, ensure data covers full range by forward-filling
+    if time_range is not None and time_range != (None, None) and len(df) > 0:
+        start_time, end_time = time_range
+        last_idx = df.index[-1]
+        
+        # Only extend if last data point is before end of range
+        if last_idx < end_time:
+            # Add final point at end_time with same values as last point
+            final_row = df.iloc[-1:].copy()
+            final_row.index = [end_time]
+            df = pd.concat([df, final_row])
+    
     # Downsample for plotting to avoid rendering issues
     df_plot = downsample_for_plotting(df, max_points=50000)
     logger.info(f"Plotting {title}: {len(df_plot)} points (downsampled from {len(df)})")
     
     plt.figure(figsize=(12, 6))
-    plt.plot(df_plot.index, df_plot[yes_col], drawstyle='steps-post', color='green', label='Yes (Bid)', linewidth=1.5)
-    plt.plot(df_plot.index, df_plot[no_col], drawstyle='steps-post', color='red', label='No (Ask)', linewidth=1.5, linestyle='--')
+    plt.plot(df_plot.index, df_plot[yes_col], drawstyle='steps-post', color='green', label='Yes', linewidth=1.5)
+    plt.plot(df_plot.index, df_plot[no_col], drawstyle='steps-post', color='red', label='No', linewidth=1.5, linestyle='--')
     
     # We add a subtle fill to clearly show the spread for debugging, 
     # but the primary plot lines are the steps
@@ -347,27 +412,64 @@ def plot_difference(df, col_name, title, filename):
     plt.close()
     print(f"Saved plot: {path}")
 
-async def main():
+async def main(time_range=None, debug=False):
+    """
+    Main function to fetch and plot market data.
+    
+    Args:
+        time_range: tuple of (start_datetime, end_datetime) for filtering data.
+                   If None or (None, None), fetches all available data.
+        debug: if True, sample asset IDs in database before fetching
+    """
+    # Default: Jan 21 to Jan 22, 2026 (1 day)
+    if time_range is None:
+        time_range = (
+            pd.Timestamp('2026-01-21 00:00:00'),
+            pd.Timestamp('2026-01-22 00:00:00')
+        )
+    
+    # Log time range
+    if time_range == (None, None):
+        logger.info("Using time range: ALL DATA")
+    else:
+        logger.info(f"Using time range: {time_range[0]} to {time_range[1]}")
+    
     if not all([DB_USER, DB_PASS, DB_NAME, PG_HOST]):
         print("Error: DB credentials missing.")
         return
 
     pool = await asyncpg.create_pool(user=DB_USER, password=DB_PASS, database=DB_NAME, host=PG_HOST, port=PG_PORT)
     print("DB Connected.")
+    
+    # Debug: check what asset IDs exist in the time range
+    if debug:
+        async with pool.acquire() as conn:
+            batch_start_us = int(time_range[0].timestamp() * 1_000_000)
+            batch_end_us = int(time_range[1].timestamp() * 1_000_000)
+            sample_records = await conn.fetch("""
+                SELECT DISTINCT asset_id FROM poly_book_state_house
+                WHERE server_time_us >= $1 AND server_time_us < $2
+                LIMIT 20
+            """, batch_start_us, batch_end_us)
+            logger.info(f"DEBUG: Sample asset_ids in database for time range:")
+            for r in sample_records:
+                logger.info(f"  - {r['asset_id']}")
+            logger.info(f"Expected DEM asset_id: {POLY_DEM_ASSET_ID}")
+            logger.info(f"Expected REP asset_id: {POLY_REP_ASSET_ID}")
 
     # 1. Fetch Data
     print("Fetching data...")
-    t1 = get_polymarket_data(pool, POLY_DEM_ASSET_ID, 'poly_dem')
-    t2 = get_polymarket_data(pool, POLY_REP_ASSET_ID, 'poly_rep')
-    t3 = get_kalshi_data(pool, KALSHI_DEM_TICKER, 'kalshi_dem')
+    t1 = get_polymarket_data(pool, POLY_DEM_ASSET_ID, 'poly_dem', time_range=time_range)
+    t2 = get_polymarket_data(pool, POLY_REP_ASSET_ID, 'poly_rep', time_range=time_range)
+    t3 = get_kalshi_data(pool, KALSHI_DEM_TICKER, 'kalshi_dem', time_range=time_range)
     
     df_pd, df_pr, df_kd = await asyncio.gather(t1, t2, t3)
     await pool.close()
 
     # 2. Plot Raw Markets (3 Plots)
-    plot_market_raw(df_pd, 'poly_dem_yes', 'poly_dem_no', 'Polymarket Democrats (Raw)', '1_market_poly_dem.png')
-    plot_market_raw(df_pr, 'poly_rep_yes', 'poly_rep_no', 'Polymarket Republicans (Raw)', '2_market_poly_rep.png')
-    plot_market_raw(df_kd, 'kalshi_dem_yes', 'kalshi_dem_no', 'Kalshi Democrats (Raw)', '3_market_kalshi_dem.png')
+    plot_market_raw(df_pd, 'poly_dem_yes', 'poly_dem_no', 'Polymarket Democrats (Raw)', '1_market_poly_dem.png', time_range=time_range)
+    plot_market_raw(df_pr, 'poly_rep_yes', 'poly_rep_no', 'Polymarket Republicans (Raw)', '2_market_poly_rep.png', time_range=time_range)
+    plot_market_raw(df_kd, 'kalshi_dem_yes', 'kalshi_dem_no', 'Kalshi Democrats (Raw)', '3_market_kalshi_dem.png', time_range=time_range)
 
     # 3. Align Data (State of the World)
     print("Aligning timelines...")
@@ -375,27 +477,32 @@ async def main():
     df_all.sort_index(inplace=True)
     df_all.ffill(inplace=True)
     df_all.dropna(inplace=True)
+    logger.info(f"After alignment: {len(df_all)} rows")
 
-    # 4. Calculate Differences (5 Plots)
+    # 4. Calculate Price Differences (7 Plots)
     
-    # Internal Differences (Spread: Yes - No)
-    df_all['diff_internal_poly_dem'] = df_all['poly_dem_yes'] - df_all['poly_dem_no']
-    df_all['diff_internal_poly_rep'] = df_all['poly_rep_yes'] - df_all['poly_rep_no']
-    df_all['diff_internal_kalshi_dem'] = df_all['kalshi_dem_yes'] - df_all['kalshi_dem_no']
+    # A) Internal Arbitrage: 1 - (yes + no) for each market
+    df_all['diff_internal_poly_dem'] = 1.0 - (df_all['poly_dem_yes'] + df_all['poly_dem_no'])
+    df_all['diff_internal_poly_rep'] = 1.0 - (df_all['poly_rep_yes'] + df_all['poly_rep_no'])
+    df_all['diff_internal_kalshi_dem'] = 1.0 - (df_all['kalshi_dem_yes'] + df_all['kalshi_dem_no'])
     
-    # Mirror Difference (Arbitrage: Poly Dem Yes - Kalshi Dem Yes)
-    df_all['diff_mirror_dem'] = df_all['poly_dem_yes'] - df_all['kalshi_dem_yes']
+    # B) Poly Complementary Arbitrage
+    df_all['diff_complementary_no'] = 1.0 - (df_all['poly_dem_no'] + df_all['poly_rep_no'])
+    df_all['diff_complementary_yes'] = 1.0 - (df_all['poly_dem_yes'] + df_all['poly_rep_yes'])
     
-    # Complementary Difference (Poly Dem Yes - Poly Rep No)
-    df_all['diff_complementary'] = df_all['poly_dem_yes'] - df_all['poly_rep_no']
+    # C) Mirror Arbitrage (Poly vs Kalshi) - absolute difference
+    df_all['diff_mirror_yes'] = abs(df_all['poly_dem_yes'] - df_all['kalshi_dem_yes'])
+    df_all['diff_mirror_no'] = abs(df_all['poly_dem_no'] - df_all['kalshi_dem_no'])
 
     # 5. Stats & Plots for Differences
     diffs = [
-        ('diff_internal_poly_dem', 'Internal Spread: Poly Dem (Yes - No)', '4_diff_internal_poly_dem.png'),
-        ('diff_internal_poly_rep', 'Internal Spread: Poly Rep (Yes - No)', '5_diff_internal_poly_rep.png'),
-        ('diff_internal_kalshi_dem', 'Internal Spread: Kalshi Dem (Yes - No)', '6_diff_internal_kalshi_dem.png'),
-        ('diff_mirror_dem', 'Mirror Arb: Poly Dem Yes - Kalshi Dem Yes', '7_diff_mirror_dem.png'),
-        ('diff_complementary', 'Complementary: Poly Dem Yes - Poly Rep No', '8_diff_complementary.png')
+        ('diff_internal_poly_dem', 'Internal Arb: Poly Dem (1 - Yes - No)', '4_diff_internal_poly_dem.png'),
+        ('diff_internal_poly_rep', 'Internal Arb: Poly Rep (1 - Yes - No)', '5_diff_internal_poly_rep.png'),
+        ('diff_internal_kalshi_dem', 'Internal Arb: Kalshi Dem (1 - Yes - No)', '6_diff_internal_kalshi_dem.png'),
+        ('diff_complementary_no', 'Poly Complementary Arb: |No Dem + No Rep - 1|', '7_diff_complementary_no.png'),
+        ('diff_complementary_yes', 'Poly Complementary Arb: |Yes Dem + Yes Rep - 1|', '8_diff_complementary_yes.png'),
+        ('diff_mirror_yes', 'Mirror Arb: |Yes Poly Dem - Yes Kalshi|', '9_diff_mirror_yes.png'),
+        ('diff_mirror_no', 'Mirror Arb: |No Poly Dem - No Kalshi|', '10_diff_mirror_no.png')
     ]
 
     for col, title, fname in diffs:
@@ -403,4 +510,8 @@ async def main():
         plot_difference(df_all, col, title, fname)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # To use full range, pass: time_range=(None, None) or modify the condition
+    # To use custom range, pass: time_range=(start_datetime, end_datetime)
+    # Default is Jan 21-22, 2026
+    # Set debug=True to see what asset_ids are actually in the database
+    asyncio.run(main(time_range=(None, None), debug=False))
