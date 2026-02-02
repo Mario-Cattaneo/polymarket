@@ -10,6 +10,12 @@ import json
 import logging
 import random
 from datetime import datetime, timedelta
+from heatmap_15min_cycles import (
+    fetch_polymarket_orderbook_updates,
+    get_polymarket_yes_asset_id,
+    fetch_kalshi_orderbook_updates,
+    get_kalshi_ticker
+)
 
 # Logging
 logging.basicConfig(
@@ -35,100 +41,7 @@ def setup_plot_dir():
     os.makedirs(PLOT_DIR, exist_ok=True)
     logger.info(f"Created {PLOT_DIR}\n")
 
-async def get_polymarket_yes_asset_id(pool):
-    """Get Polymarket YES asset_id for Bitcoin."""
-    logger.info("[POLY] Fetching Bitcoin market asset_id...")
-    async with pool.acquire() as conn:
-        result = await conn.fetchrow(
-            """SELECT m.yes_asset_id FROM poly_markets m
-               WHERE lower(m.title) LIKE '%bitcoin%'
-               AND lower(m.title) LIKE '%up or down%'
-               LIMIT 1""",
-            timeout=10
-        )
-    
-    if result and result['yes_asset_id']:
-        asset_id = str(result['yes_asset_id'])
-        logger.info(f"[POLY] Found asset_id: {asset_id[:40]}...\n")
-        return asset_id
-    
-    logger.warning("[POLY] No Bitcoin market found\n")
-    return None
-    
-    logger.warning("[POLY] No Bitcoin market found\n")
-    return None
 
-async def get_polymarket_market_info(pool, asset_id):
-    """Get market title for an asset_id."""
-    logger.info(f"[POLY] Fetching market info for {asset_id[:40]}...")
-    async with pool.acquire() as conn:
-        result = await conn.fetchrow(
-            "SELECT title, market_ticker FROM poly_markets WHERE yes_asset_id = $1 LIMIT 1",
-            asset_id
-        )
-    if result:
-        logger.info(f"[POLY] Market: {result['market_ticker']} - {result['title'][:60]}\n")
-        return result['title'], result['market_ticker']
-    logger.warning("[POLY] Market info not found\n")
-    return None, None
-
-async def get_kalshi_ticker(pool):
-    """Get a Bitcoin Kalshi ticker."""
-    logger.info("[KALSHI] Fetching Bitcoin market ticker...")
-    async with pool.acquire() as conn:
-        result = await conn.fetchval(
-            """SELECT DISTINCT market_ticker FROM kalshi_orderbook_updates
-               WHERE market_ticker LIKE 'KXBTC%'
-               LIMIT 1""",
-            timeout=10
-        )
-    if result:
-        logger.info(f"[KALSHI] Found ticker: {result}\n")
-        return result
-    logger.warning("[KALSHI] No Bitcoin market found\n")
-    return None
-
-async def fetch_polymarket_orderbook(pool, utc_time, asset_id):
-    """Fetch Polymarket orderbook for 15-min window."""
-    cycle_start_us = int(utc_time.timestamp() * 1_000_000)
-    cycle_end_us = cycle_start_us + (15 * 60 * 1_000_000)
-    
-    logger.info(f"[POLY] Fetching orderbook {utc_time.isoformat()} to +15min...")
-    async with pool.acquire() as conn:
-        records = await conn.fetch(
-            """SELECT server_time_us, message FROM poly_book_state 
-               WHERE message->>'asset_id' = $1 
-               AND server_time_us >= $2
-               AND server_time_us < $3
-               ORDER BY server_time_us ASC""",
-            asset_id,
-            cycle_start_us,
-            cycle_end_us,
-            timeout=30
-        )
-    logger.info(f"[POLY] Got {len(records)} records\n")
-    return records
-
-async def fetch_kalshi_orderbook(pool, utc_time, ticker):
-    """Fetch Kalshi orderbook for 15-min window."""
-    cycle_start_us = int(utc_time.timestamp() * 1_000_000)
-    cycle_end_us = cycle_start_us + (15 * 60 * 1_000_000)
-    
-    logger.info(f"[KALSHI] Fetching orderbook {utc_time.isoformat()} to +15min...")
-    async with pool.acquire() as conn:
-        records = await conn.fetch(
-            """SELECT server_time_us, message FROM kalshi_orderbook_updates 
-               WHERE market_ticker = $1 
-               AND server_time_us >= $2
-               AND server_time_us < $3
-               ORDER BY server_time_us ASC""",
-            ticker,
-            cycle_start_us,
-            cycle_end_us,
-            timeout=30
-        )
-    logger.info(f"[KALSHI] Got {len(records)} records\n")
-    return records
 
 def extract_prices(records):
     """Extract YES/NO prices from Polymarket records."""
@@ -282,47 +195,53 @@ async def main():
             logger.info(f"{'='*80}\n")
             
             # Get Polymarket asset
-            asset_id = await get_polymarket_yes_asset_id(pool)
+            logger.info("[POLY] Fetching Bitcoin market...")
+            asset_id = await get_polymarket_yes_asset_id(pool, interval)
             if asset_id is None:
-                logger.warning("Skipping - no Polymarket market found\n")
+                logger.warning("[POLY] No market found - Skipping\n")
                 continue
-            
-            # Get Polymarket market info
-            poly_title, poly_ticker = await get_polymarket_market_info(pool, asset_id)
-            if poly_title is None:
-                logger.warning("Skipping - market info not found\n")
-                continue
+            logger.info(f"[POLY] Asset ID: {asset_id[:40]}...\n")
             
             # Fetch Polymarket orderbook
-            poly_records = await fetch_polymarket_orderbook(pool, interval, asset_id)
+            logger.info(f"[POLY] Fetching orderbook {interval.isoformat()} to +15min...")
+            poly_records = await fetch_polymarket_orderbook_updates(pool, interval, asset_id)
+            logger.info(f"[POLY] Got {len(poly_records)} records\n")
             if not poly_records:
-                logger.warning("Skipping - no Polymarket orderbook data\n")
+                logger.warning("[POLY] No orderbook data - Skipping\n")
                 continue
             
             poly_ts, poly_yes, poly_no = extract_prices(poly_records)
             logger.info(f"[POLY] Extracted {len(poly_ts)} price points\n")
             
             if not poly_ts:
-                logger.warning("Skipping - no Polymarket prices extracted\n")
+                logger.warning("[POLY] No prices extracted - Skipping\n")
                 continue
+            
+            # Use generic labels
+            poly_title = "Bitcoin"
+            poly_ticker = "POLY"
             
             # Get Kalshi ticker
-            kalshi_ticker = await get_kalshi_ticker(pool)
+            logger.info("[KALSHI] Fetching Bitcoin market...")
+            kalshi_ticker = await get_kalshi_ticker(pool, interval)
             if not kalshi_ticker:
-                logger.warning("Skipping - no Kalshi market found\n")
+                logger.warning("[KALSHI] No market found - Skipping\n")
                 continue
+            logger.info(f"[KALSHI] Ticker: {kalshi_ticker}\n")
             
             # Fetch Kalshi orderbook
-            kalshi_records = await fetch_kalshi_orderbook(pool, interval, kalshi_ticker)
+            logger.info(f"[KALSHI] Fetching orderbook {interval.isoformat()} to +15min...")
+            kalshi_records = await fetch_kalshi_orderbook_updates(pool, interval, kalshi_ticker)
+            logger.info(f"[KALSHI] Got {len(kalshi_records)} records\n")
             if not kalshi_records:
-                logger.warning("Skipping - no Kalshi orderbook data\n")
+                logger.warning("[KALSHI] No orderbook data - Skipping\n")
                 continue
             
             kalshi_ts, kalshi_yes, kalshi_no = extract_kalshi_prices(kalshi_records)
             logger.info(f"[KALSHI] Extracted {len(kalshi_ts)} price points\n")
             
             if not kalshi_ts:
-                logger.warning("Skipping - no Kalshi prices extracted\n")
+                logger.warning("[KALSHI] No prices extracted - Skipping\n")
                 continue
             
             # Plot
