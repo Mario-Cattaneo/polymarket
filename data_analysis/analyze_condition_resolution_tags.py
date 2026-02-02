@@ -32,6 +32,13 @@ ADDR = {
     'conditional_tokens': "0x4d97dcd97ec945f40cf65f87097ace5ea0476045".lower(),
 }
 
+# --- Oracle Address Aliases ---
+ORACLE_ALIASES = {
+    "0x65070be91477460d8a7aeeb94ef92fe056c2f2a7".lower(): "MOOV2 Adapter",
+    "0x58e1745bedda7312c4cddb72618923da1b90efde".lower(): "Centralized Adapter",
+    "0xd91e80cf2e7be2e162c6513ced06f1dd0da35296".lower(): "Negrisk Adapter",
+}
+
 # --- ConditionResolution Event Definition ---
 CONDITION_RESOLUTION_EVENT = {
     "indexed_types": ["bytes32", "address", "bytes32"],  # conditionId, oracle, questionId (indexed)
@@ -230,6 +237,10 @@ async def main():
 
         # --- Categorize by Payout Pattern ---
         df_merged['payout_category'] = df_merged['payout_numerators'].apply(categorize_payout)
+        
+        # --- Normalize Oracle Addresses and Map to Aliases ---
+        df_merged['oracle_normalized'] = df_merged['oracle'].apply(lambda x: x.lower() if isinstance(x, str) else x)
+        df_merged['oracle_name'] = df_merged['oracle_normalized'].map(ORACLE_ALIASES).fillna('Unknown')
 
         # --- Print Statistics ---
         print("\n" + "="*80)
@@ -241,11 +252,18 @@ async def main():
         total_events = len(df_merged)
         
         print(f"\nTotal Matched Events: {total_events:,}\n")
-        print("--- Count Distribution ---")
+        print("--- Count Distribution by Payout Pattern ---")
         for category in ["(1,1)", "(1,0)", "(0,1)", "Other"]:
             count = category_counts.get(category, 0)
             percentage = (count / total_events * 100) if total_events > 0 else 0
             print(f"{category}: {count:,} ({percentage:.2f}%)")
+            
+            # Show oracle breakdown for this category
+            df_category = df_merged[df_merged['payout_category'] == category]
+            oracle_breakdown = df_category['oracle_name'].value_counts().sort_values(ascending=False)
+            for oracle_name, oracle_count in oracle_breakdown.items():
+                oracle_percentage = (oracle_count / count * 100) if count > 0 else 0
+                print(f"  ├─ {oracle_name}: {oracle_count:,} ({oracle_percentage:.2f}%)")
         
         print("\n" + "="*80)
         print("Top Tags Analysis by Payout Pattern")

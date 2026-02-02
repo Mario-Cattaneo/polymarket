@@ -504,6 +504,53 @@ async def fetch_kalshi_orderbook_updates(pool, utc_cycle_start, ticker=None):
     logger.info(f"Fetched {len(records)} Kalshi orderbook updates for {ticker} [{utc_cycle_start} to {utc_cycle_start + timedelta(minutes=15)})")
     return records
 
+async def fetch_polymarket_orderbook_updates(pool, utc_cycle_start, asset_id=None):
+    """Fetch and filter Polymarket orderbook updates for a 15-minute cycle.
+    
+    Given a UTC timestamp for a 15-minute cycle start, this:
+    1. Gets the asset ID for the YES outcome using get_polymarket_yes_asset_id() (or uses provided asset_id)
+    2. Queries poly_book_state for all updates in that 15-minute interval
+    3. Filters to only updates matching that specific asset_id INSIDE the message JSON
+    4. Returns the filtered updates as raw records with server_time_us and message
+    
+    Args:
+        pool: Database connection pool
+        utc_cycle_start: UTC datetime for 15-minute cycle start
+        asset_id: Optional asset ID to use directly (if None, will be retrieved)
+        
+    Returns:
+        List of dicts with keys: server_time_us, message (JSON string)
+    """
+    # Get the asset_id if not provided
+    if asset_id is None:
+        asset_id = await get_polymarket_yes_asset_id(pool, utc_cycle_start)
+        if asset_id is None:
+            logger.warning(f"No Polymarket market found for {utc_cycle_start}")
+            return []
+    
+    # Calculate cycle boundaries in microseconds
+    cycle_start_us = int(utc_cycle_start.timestamp() * 1_000_000)
+    cycle_end_us = cycle_start_us + (15 * 60 * 1_000_000)  # 15 minutes in microseconds
+    
+    async with pool.acquire() as conn:
+        # Use time range to enable partition pruning + composite index usage
+        records = await conn.fetch(
+            """SELECT server_time_us, message FROM poly_book_state 
+               WHERE message->>'asset_id' = $1 
+               AND server_time_us >= $2
+               AND server_time_us < $3
+               ORDER BY server_time_us ASC""",
+            asset_id,
+            cycle_start_us,
+            cycle_end_us,
+            timeout=30
+        )
+    
+    return records
+    
+    logger.info(f"Fetched {len(filtered)} Polymarket orderbook updates for asset_id {asset_id[:40]}... [{utc_cycle_start} to {utc_cycle_start + timedelta(minutes=15)})")
+    return filtered
+
 async def fetch_polymarket_cycle_data(pool, asset_id, cycle_start_us, cycle_end_us):
     """Fetch poly_book_state data for a 15-minute cycle."""
     async with pool.acquire() as conn:

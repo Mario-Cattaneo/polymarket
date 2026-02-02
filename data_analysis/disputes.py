@@ -142,34 +142,53 @@ async def main():
 
         # --- 3. Fetch Event Counts and Data ---
         async with pool.acquire() as conn:
-            # Get total ProposePrice events
-            logger.info("Fetching ProposePrice event count...")
-            propose_price_count = await conn.fetchval("SELECT COUNT(*) FROM oov2 WHERE event_name = 'ProposePrice'")
+            # Get total ProposePrice events from both tables
+            logger.info("Fetching ProposePrice event counts...")
+            propose_price_count_oov2 = await conn.fetchval("SELECT COUNT(*) FROM oov2 WHERE event_name = 'ProposePrice'")
+            propose_price_count_moov2 = await conn.fetchval("SELECT COUNT(*) FROM events_managed_oracle WHERE event_name = 'ProposePrice'")
 
             # Get all DisputePrice events to decode them (need both topics and data for indexed + non-indexed args)
-            logger.info("Fetching all DisputePrice events for analysis...")
+            logger.info("Fetching all DisputePrice events from oov2 for analysis...")
             dispute_price_records = await conn.fetch("SELECT data, topics FROM oov2 WHERE event_name = 'DisputePrice'")
             dispute_price_count = len(dispute_price_records)
+            
+            # Get DisputePrice events from events_managed_oracle (moov2)
+            logger.info("Fetching all DisputePrice events from events_managed_oracle for analysis...")
+            dispute_price_records_moov2 = await conn.fetch("SELECT data, topics FROM events_managed_oracle WHERE event_name = 'DisputePrice'")
+            dispute_price_count_moov2 = len(dispute_price_records_moov2)
+            
+            # Get ProposePrice events records from both tables for matching analysis
+            logger.info("Fetching ProposePrice event records from oov2 and events_managed_oracle for analysis...")
+            propose_price_records = await conn.fetch("SELECT data, topics FROM oov2 WHERE event_name = 'ProposePrice'")
+            propose_price_records_moov2 = await conn.fetch("SELECT data, topics FROM events_managed_oracle WHERE event_name = 'ProposePrice'")
 
-        if dispute_price_count == 0:
+        if dispute_price_count == 0 and dispute_price_count_moov2 == 0:
             logger.warning("No DisputePrice events found. Exiting.")
             return
 
         # --- 4. Decode Events and Match Tags ---
-        logger.info(f"Decoding {dispute_price_count:,} DisputePrice events and matching with market tags...")
+        logger.info(f"Processing events and matching with market tags...")
+        
+        # Collections for each event type
         all_disputed_tags = []
-        matched_disputes = 0
+        # matched disputes per source
+        matched_disputes_oov2 = 0
+        matched_disputes_moov2 = 0
+        
+        # Counters for matched ProposePrice events
+        matched_proposes_oov2 = 0
+        matched_proposes_moov2 = 0
+        
         dispute_definition = OOV2_EVENT_DEFINITIONS['DisputePrice']
+        propose_definition = OOV2_EVENT_DEFINITIONS['ProposePrice']
         
         # DEBUG: Show sample market IDs from CSV
         sample_market_ids = list(market_tags_map.keys())[:5]
         logger.info(f"DEBUG: Sample market IDs from CSV: {sample_market_ids}")
         logger.info(f"DEBUG: Total unique market IDs in CSV: {len(market_tags_map):,}")
         
-        # DEBUG: Track extraction stats
-        extracted_market_ids = []
-        failed_extractions = []
-        
+        # --- Process OOV2 DisputePrice events ---
+        logger.info(f"Processing {dispute_price_count:,} DisputePrice events from oov2...")
         for idx, record in enumerate(dispute_price_records):
             try:
                 data_bytes = HexBytes(record['data'])
@@ -186,25 +205,11 @@ async def main():
                                 abi_decode([dispute_definition['indexed_types'][i]], HexBytes(topics[i + 1]))[0]
                             )
                 
-                # DEBUG: Print first 5 events
-                if idx < 5:
-                    logger.info(f"DEBUG: Event {idx} - Decoded indexed args: {len(decoded_indexed_args)}, data args: {len(decoded_data_args)}")
-                    logger.info(f"DEBUG: Event {idx} - Topics count: {len(topics)}")
-                
                 # Reconstruct full argument list: indexed first, then data
                 all_args = decoded_indexed_args + list(decoded_data_args)
                 
                 # Create a dictionary of decoded arguments by name
                 args = dict(zip(dispute_definition['arg_names'], all_args))
-                
-                # DEBUG: Print first 5 args
-                if idx < 5:
-                    logger.info(f"DEBUG: Event {idx} - Arg names: {list(args.keys())}")
-                    for arg_name, arg_value in args.items():
-                        if arg_name == 'ancillaryData':
-                            logger.info(f"DEBUG: Event {idx} - {arg_name}: {type(arg_value)} len={len(arg_value) if isinstance(arg_value, bytes) else 'N/A'}")
-                        else:
-                            logger.info(f"DEBUG: Event {idx} - {arg_name}: {type(arg_value)}")
                 
                 # The ancillaryData should now be properly decoded
                 ancillary_bytes = args.get('ancillaryData')
@@ -213,47 +218,141 @@ async def main():
                     ancillary_str = decode_ancillary_data(ancillary_bytes)
                     market_id = extract_market_id(ancillary_str)
                     
-                    # DEBUG: Print first 5 extractions
-                    if idx < 5:
-                        logger.info(f"DEBUG: Event {idx} - Ancillary (first 200 chars): {ancillary_str[:200]}")
-                        logger.info(f"DEBUG: Event {idx} - Extracted market_id: {market_id}")
-                    
                     if market_id:
-                        extracted_market_ids.append(market_id)
-                        # Look up the market_id in our map and get the tags
                         tags = market_tags_map.get(market_id)
                         if tags:
                             all_disputed_tags.extend(tags)
-                            matched_disputes += 1
-                    else:
-                        failed_extractions.append((idx, ancillary_str[:200]))
-                else:
-                    if idx < 5:
-                        logger.info(f"DEBUG: Event {idx} - Skipped: ancillary_bytes is None or empty")
+                            matched_disputes_oov2 += 1
 
             except Exception as e:
-                logger.warning(f"Could not decode a DisputePrice event {idx}: {e}")
+                logger.debug(f"Could not decode a DisputePrice event {idx}: {e}")
+        
+        # --- Process events_managed_oracle DisputePrice events ---
+        logger.info(f"Processing {dispute_price_count_moov2:,} DisputePrice events from events_managed_oracle...")
+        for idx, record in enumerate(dispute_price_records_moov2):
+            try:
+                data_bytes = HexBytes(record['data'])
+                topics = record.get('topics', [])
+                
+                decoded_data_args = abi_decode(dispute_definition['data_types'], data_bytes)
+                
+                # Decode indexed arguments from topics
+                decoded_indexed_args = []
+                if len(topics) > 1:
+                    for i in range(len(dispute_definition['indexed_types'])):
+                        if i + 1 < len(topics):
+                            decoded_indexed_args.append(
+                                abi_decode([dispute_definition['indexed_types'][i]], HexBytes(topics[i + 1]))[0]
+                            )
+                
+                # Reconstruct full argument list
+                all_args = decoded_indexed_args + list(decoded_data_args)
+                args = dict(zip(dispute_definition['arg_names'], all_args))
+                
+                ancillary_bytes = args.get('ancillaryData')
+                
+                if ancillary_bytes is not None and len(ancillary_bytes) > 0:
+                    ancillary_str = decode_ancillary_data(ancillary_bytes)
+                    market_id = extract_market_id(ancillary_str)
+                    
+                    if market_id:
+                        tags = market_tags_map.get(market_id)
+                        if tags:
+                            all_disputed_tags.extend(tags)
+                            matched_disputes_moov2 += 1
+
+            except Exception as e:
+                logger.debug(f"Could not decode a DisputePrice event from events_managed_oracle {idx}: {e}")
+
+        # --- Process ProposePrice events from oov2 ---
+        logger.info(f"Processing {len(propose_price_records):,} ProposePrice events from oov2...")
+        for idx, record in enumerate(propose_price_records):
+            try:
+                data_bytes = HexBytes(record['data'])
+                topics = record.get('topics', [])
+
+                decoded_data_args = abi_decode(propose_definition['data_types'], data_bytes)
+
+                # Decode indexed arguments from topics
+                decoded_indexed_args = []
+                if len(topics) > 1:
+                    for i in range(len(propose_definition['indexed_types'])):
+                        if i + 1 < len(topics):
+                            decoded_indexed_args.append(
+                                abi_decode([propose_definition['indexed_types'][i]], HexBytes(topics[i + 1]))[0]
+                            )
+
+                all_args = decoded_indexed_args + list(decoded_data_args)
+                args = dict(zip(propose_definition['arg_names'], all_args))
+
+                ancillary_bytes = args.get('ancillaryData')
+                if ancillary_bytes is not None and len(ancillary_bytes) > 0:
+                    ancillary_str = decode_ancillary_data(ancillary_bytes)
+                    market_id = extract_market_id(ancillary_str)
+                    if market_id:
+                        tags = market_tags_map.get(market_id)
+                        if tags:
+                            matched_proposes_oov2 += 1
+
+            except Exception as e:
+                logger.debug(f"Could not decode a ProposePrice event from oov2 {idx}: {e}")
+
+        # --- Process ProposePrice events from events_managed_oracle (moov2) ---
+        logger.info(f"Processing {len(propose_price_records_moov2):,} ProposePrice events from events_managed_oracle...")
+        for idx, record in enumerate(propose_price_records_moov2):
+            try:
+                data_bytes = HexBytes(record['data'])
+                topics = record.get('topics', [])
+
+                decoded_data_args = abi_decode(propose_definition['data_types'], data_bytes)
+
+                # Decode indexed arguments from topics
+                decoded_indexed_args = []
+                if len(topics) > 1:
+                    for i in range(len(propose_definition['indexed_types'])):
+                        if i + 1 < len(topics):
+                            decoded_indexed_args.append(
+                                abi_decode([propose_definition['indexed_types'][i]], HexBytes(topics[i + 1]))[0]
+                            )
+
+                all_args = decoded_indexed_args + list(decoded_data_args)
+                args = dict(zip(propose_definition['arg_names'], all_args))
+
+                ancillary_bytes = args.get('ancillaryData')
+                if ancillary_bytes is not None and len(ancillary_bytes) > 0:
+                    ancillary_str = decode_ancillary_data(ancillary_bytes)
+                    market_id = extract_market_id(ancillary_str)
+                    if market_id:
+                        tags = market_tags_map.get(market_id)
+                        if tags:
+                            matched_proposes_moov2 += 1
+
+            except Exception as e:
+                logger.debug(f"Could not decode a ProposePrice event from events_managed_oracle {idx}: {e}")
 
         # --- 5. Analyze and Print Results ---
         logger.info("Analysis complete. Compiling results...")
         
-        # DEBUG: Print extraction stats
-        logger.info(f"DEBUG: Successfully extracted market_ids: {len(extracted_market_ids):,}")
-        if extracted_market_ids:
-            logger.info(f"DEBUG: Sample extracted market_ids: {extracted_market_ids[:5]}")
-        logger.info(f"DEBUG: Failed extractions: {len(failed_extractions):,}")
-        if failed_extractions:
-            logger.info(f"DEBUG: First failed ancillary (event 0): {failed_extractions[0][1] if failed_extractions else 'N/A'}")
-        
         print("\n" + "="*70)
-        print("                 UMA Dispute Event Analysis")
+        print("                 UMA Event Analysis (OOV2 + MOOV2)")
         print("="*70 + "\n")
 
         # Event counts with percentages
         print("--- Event Counts ---")
-        print(f"Total ProposePrice Events: {propose_price_count:,}")
-        print(f"Total DisputePrice Events: {dispute_price_count:,}")
-        print(f"DisputePrice Events Matched to Markets: {matched_disputes:,} ({(matched_disputes/dispute_price_count*100):.2f}%)")
+        print(f"OOV2 ProposePrice Events: {propose_price_count_oov2:,}")
+        print(f"MOOV2 ProposePrice Events: {propose_price_count_moov2:,}")
+        print(f"Total ProposePrice Events: {propose_price_count_oov2 + propose_price_count_moov2:,}")
+        print(f"OOV2 ProposePrice Events Matched to Markets: {matched_proposes_oov2:,} ({(matched_proposes_oov2/propose_price_count_oov2*100 if propose_price_count_oov2>0 else 0):.2f}%)")
+        print(f"MOOV2 ProposePrice Events Matched to Markets: {matched_proposes_moov2:,} ({(matched_proposes_moov2/propose_price_count_moov2*100 if propose_price_count_moov2>0 else 0):.2f}%)")
+        print(f"Total ProposePrice Events Matched to Markets: {matched_proposes_oov2 + matched_proposes_moov2:,} ({((matched_proposes_oov2 + matched_proposes_moov2)/(propose_price_count_oov2 + propose_price_count_moov2)*100 if (propose_price_count_oov2 + propose_price_count_moov2)>0 else 0):.2f}%)")
+        print()
+        print(f"OOV2 DisputePrice Events: {dispute_price_count:,}")
+        print(f"MOOV2 DisputePrice Events: {dispute_price_count_moov2:,}")
+        total_matched_disputes = matched_disputes_oov2 + matched_disputes_moov2
+        print(f"Total DisputePrice Events: {dispute_price_count + dispute_price_count_moov2:,}")
+        print(f"OOV2 DisputePrice Events Matched to Markets: {matched_disputes_oov2:,} ({(matched_disputes_oov2/dispute_price_count*100 if dispute_price_count>0 else 0):.2f}%)")
+        print(f"MOOV2 DisputePrice Events Matched to Markets: {matched_disputes_moov2:,} ({(matched_disputes_moov2/dispute_price_count_moov2*100 if dispute_price_count_moov2>0 else 0):.2f}%)")
+        print(f"Total DisputePrice Events Matched to Markets: {total_matched_disputes:,} ({(total_matched_disputes/(dispute_price_count + dispute_price_count_moov2)*100 if (dispute_price_count + dispute_price_count_moov2)>0 else 0):.2f}%)")
         print()
         
         if not all_disputed_tags:
@@ -261,8 +360,8 @@ async def main():
             print("="*70)
             return
 
-        # Analyze and print top 10 tags in matched disputes
-        analyze_tags(all_disputed_tags, "--- Top 10 Tags in Matched Disputed Markets ---", total_count=dispute_price_count)
+        # Analyze and print top 10 tags
+        analyze_tags(all_disputed_tags, "--- Top 10 Tags in Matched Disputed Markets ---", total_count=total_matched_disputes)
         
         print("\n" + "="*70)
 
