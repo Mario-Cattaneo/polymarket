@@ -34,8 +34,8 @@ ADDR = {
 
 # --- ConditionResolution Event Definition ---
 CONDITION_RESOLUTION_EVENT = {
-    "indexed_types": ["bytes32", "address", "bytes32", "uint256"],
-    "data_types": ["uint256[]"],
+    "indexed_types": ["bytes32", "address", "bytes32"],  # conditionId, oracle, questionId (indexed)
+    "data_types": ["uint256", "uint256[]"],  # outcomeSlotCount, payoutNumerators (non-indexed)
     "arg_names": ["conditionId", "oracle", "questionId", "outcomeSlotCount", "payoutNumerators"]
 }
 
@@ -88,11 +88,11 @@ def analyze_tags_for_group(df_group, title):
         tag_counts = Counter(all_tags)
         top_tags = tag_counts.most_common(TOP_TAGS_COUNT)
         
-        total_tags = len(all_tags)
+        num_markets = len(df_group)
         logger.info(f"\n{title}")
-        logger.info(f"Markets: {len(df_group):,} | Total Tags: {total_tags:,}")
+        logger.info(f"Markets: {num_markets:,}")
         for rank, (tag, count) in enumerate(top_tags, 1):
-            percentage = (count / total_tags) * 100
+            percentage = (count / num_markets) * 100
             logger.info(f"  {rank:2d}. {tag}: {count:,} ({percentage:.2f}%)")
     else:
         logger.info(f"{title}: No tags found")
@@ -150,6 +150,11 @@ async def main():
                 topics = record.get('topics', [])
                 data_hex = record.get('data', '0x')
                 
+                # DEBUG: First event
+                if idx == 0:
+                    logger.info(f"DEBUG: Event 0 - Topics count: {len(topics)}")
+                    logger.info(f"DEBUG: Event 0 - Data hex length: {len(data_hex)}")
+                
                 # Decode indexed arguments
                 decoded_indexed_args = []
                 if len(topics) > 1:
@@ -165,6 +170,12 @@ async def main():
                 
                 # Reconstruct full argument list
                 all_args = decoded_indexed_args + list(decoded_data_args)
+                
+                # DEBUG: First event
+                if idx == 0:
+                    logger.info(f"DEBUG: Event 0 - Indexed args count: {len(decoded_indexed_args)}, Data args count: {len(list(decoded_data_args))}")
+                    logger.info(f"DEBUG: Event 0 - Total args: {len(all_args)}")
+                    logger.info(f"DEBUG: Event 0 - Arg names: {CONDITION_RESOLUTION_EVENT['arg_names']}")
                 
                 # Create a dictionary of decoded arguments
                 args = dict(zip(CONDITION_RESOLUTION_EVENT['arg_names'], all_args))
@@ -187,8 +198,12 @@ async def main():
                     'question_id': args.get('questionId', 'N/A')
                 })
                 
+                if idx == 0:
+                    logger.info(f"DEBUG: Event 0 successfully decoded!")
+                
             except Exception as e:
-                logger.debug(f"Failed to decode event {idx}: {e}")
+                if idx < 5:
+                    logger.warning(f"Failed to decode event {idx}: {e}")
                 continue
 
         logger.info(f"Successfully decoded {len(decoded_events):,} events.")
