@@ -32,7 +32,7 @@ DB_USER = os.getenv("POLY_DB_CLI")
 DB_PASS = os.getenv("POLY_DB_CLI_PASS")
 
 # Configuration
-K_CYCLES = 15  # Number of 15-min intervals to analyze (None = all)
+K_CYCLES = 1000  # Number of 15-min intervals to analyze (None = all)
 RANGE_DEN = 100  # Price range buckets (0.01 each)
 DOMAIN_DEN = 15 * 60  # Time buckets (1 second each)
 
@@ -345,7 +345,7 @@ async def main():
             cycle_data_list.append(df)
             
             # Plot individual interval (only first 5 with data)
-            if cycle_count <= 5:
+            if cycle_count <= 10:
                 plot_interval_comparison(df, cycle_count, current_dt)
             
             current_us += 15 * 60 * 1_000_000
