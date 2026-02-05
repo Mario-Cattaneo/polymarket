@@ -543,7 +543,7 @@ async def fetch_polymarket_orderbook_updates(pool, utc_cycle_start, asset_id=Non
             asset_id,
             cycle_start_us,
             cycle_end_us,
-            timeout=30
+            timeout=120
         )
     
     return records

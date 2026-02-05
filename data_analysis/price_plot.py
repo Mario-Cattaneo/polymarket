@@ -323,6 +323,59 @@ async def get_kalshi_data(pool, ticker, prefix, time_range=None, time_batch_hour
 
 # --- Analysis & Plotting ---
 
+# Legend label mapping
+LABEL_NAMES = {
+    'poly_dem_yes': 'Poly Dem Yes',
+    'poly_dem_no': 'Poly Dem No',
+    'poly_rep_yes': 'Poly Rep Yes',
+    'poly_rep_no': 'Poly Rep No',
+    'kalshi_dem_yes': 'Kalshi Dem Yes',
+    'kalshi_dem_no': 'Kalshi Dem No',
+}
+
+def analyze_time_intervals(series, series_name, df_full):
+    """
+    Analyze time intervals spent at each price level (rounded to cents).
+    Logs the duration and proportion of total time at each level.
+    
+    Args:
+        series: Price series (Yes or No)
+        series_name: Name for logging
+        df_full: Full dataframe to get time range
+    """
+    clean = series.dropna()
+    if clean.empty:
+        logger.info(f"Time Interval Analysis for {series_name}: No Data")
+        return
+    
+    # Round to cents (0.01)
+    rounded = (clean * 100).round() / 100
+    
+    # Get time intervals
+    time_diffs = rounded.index.to_series().diff()
+    
+    # Group by price level and sum time intervals
+    price_levels = {}
+    for i, (idx, price) in enumerate(rounded.items()):
+        if i == 0:
+            continue  # Skip first point
+        time_interval = time_diffs.iloc[i].total_seconds()
+        price = round(price, 2)
+        if price not in price_levels:
+            price_levels[price] = 0
+        price_levels[price] += time_interval
+    
+    # Calculate total time
+    total_time = sum(price_levels.values())
+    
+    # Log results
+    logger.info(f"\n--- Time Interval Analysis: {series_name} ---")
+    for price in sorted(price_levels.keys()):
+        duration = price_levels[price]
+        proportion = (duration / total_time * 100) if total_time > 0 else 0
+        logger.info(f"  ${price:.2f}: {duration:.1f}s ({proportion:.2f}% of total)")
+    logger.info(f"Total time coverage: {total_time:.1f}s")
+
 def downsample_for_plotting(df, max_points=50000):
     """Downsample dataframe to max_points for plotting to avoid rendering issues."""
     if len(df) <= max_points:
@@ -366,13 +419,22 @@ def plot_market_raw(df, yes_col, no_col, title, filename, time_range=None):
             final_row.index = [end_time]
             df = pd.concat([df, final_row])
     
+    # Analyze time intervals before downsampling
+    analyze_time_intervals(df[yes_col], f"{title} - Yes Price", df)
+    analyze_time_intervals(df[no_col], f"{title} - No Price", df)
+    
     # Downsample for plotting to avoid rendering issues
     df_plot = downsample_for_plotting(df, max_points=50000)
     logger.info(f"Plotting {title}: {len(df_plot)} points (downsampled from {len(df)})")
     
     plt.figure(figsize=(12, 6))
-    plt.plot(df_plot.index, df_plot[yes_col], drawstyle='steps-post', color='green', label='Yes', linewidth=1.5)
-    plt.plot(df_plot.index, df_plot[no_col], drawstyle='steps-post', color='red', label='No', linewidth=1.5, linestyle='--')
+    
+    # Get full labels from mapping
+    yes_label = f"{LABEL_NAMES.get(yes_col, yes_col)} Price"
+    no_label = f"{LABEL_NAMES.get(no_col, no_col)} Price"
+    
+    plt.plot(df_plot.index, df_plot[yes_col], drawstyle='steps-post', color='green', label=yes_label, linewidth=1.5)
+    plt.plot(df_plot.index, df_plot[no_col], drawstyle='steps-post', color='red', label=no_label, linewidth=1.5, linestyle='--')
     
     # We add a subtle fill to clearly show the spread for debugging, 
     # but the primary plot lines are the steps
@@ -380,8 +442,16 @@ def plot_market_raw(df, yes_col, no_col, title, filename, time_range=None):
     
     plt.title(title, fontsize=14)
     plt.legend(loc='upper left')
-    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
-    plt.ylim(-0.05, 1.05)
+    
+    # Set up y-axis with cent-based grid and ticks
+    # Grid at every 0.01 (cent), labels at every 0.01
+    y_ticks = np.arange(0, 1.01, 0.01)
+    plt.gca().set_yticks(y_ticks)
+    plt.gca().set_yticklabels([f'${y:.2f}' for y in y_ticks], fontsize=9)
+    plt.gca().grid(True, which='major', linestyle='-', linewidth=0.5, axis='y')
+    plt.gca().grid(True, which='minor', linestyle=':', linewidth=0.3, axis='x')
+    
+    plt.ylim(0, 1.0)
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
     plt.xticks(rotation=45)
     plt.tight_layout()
@@ -391,8 +461,12 @@ def plot_market_raw(df, yes_col, no_col, title, filename, time_range=None):
     plt.close()
     print(f"Saved plot: {path}")
 
+
 def plot_difference(df, col_name, title, filename):
     """Plots a difference series."""
+    # Analyze time intervals before downsampling
+    analyze_time_intervals(df[col_name], title, df)
+    
     # Downsample for plotting to avoid rendering issues
     df_plot = downsample_for_plotting(df, max_points=50000)
     logger.info(f"Plotting {title}: {len(df_plot)} points (downsampled from {len(df)})")
@@ -402,7 +476,20 @@ def plot_difference(df, col_name, title, filename):
     plt.axhline(0, color='black', linewidth=1, linestyle='-')
     
     plt.title(title, fontsize=14)
-    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+    
+    # Set up y-axis with cent-based grid and ticks for difference plots
+    # For difference plots, we can have negative values, so scale appropriately
+    y_min = df_plot[col_name].min()
+    y_max = df_plot[col_name].max()
+    y_min_rounded = np.floor(y_min * 100) / 100
+    y_max_rounded = np.ceil(y_max * 100) / 100
+    
+    y_ticks = np.arange(y_min_rounded, y_max_rounded + 0.01, 0.01)
+    plt.gca().set_yticks(y_ticks)
+    plt.gca().set_yticklabels([f'${y:.2f}' for y in y_ticks], fontsize=9)
+    plt.gca().grid(True, which='major', linestyle='-', linewidth=0.5, axis='y')
+    plt.gca().grid(True, which='minor', linestyle=':', linewidth=0.3, axis='x')
+    
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
     plt.xticks(rotation=45)
     plt.tight_layout()
@@ -411,6 +498,7 @@ def plot_difference(df, col_name, title, filename):
     plt.savefig(path)
     plt.close()
     print(f"Saved plot: {path}")
+
 
 async def main(time_range=None, debug=False):
     """
@@ -479,6 +567,22 @@ async def main(time_range=None, debug=False):
     df_all.dropna(inplace=True)
     logger.info(f"After alignment: {len(df_all)} rows")
 
+    # Print min/max for all 6 prices
+    print("\n--- Price Min/Max Values ---")
+    prices = [
+        ('poly_dem_yes', 'Poly Dem Yes'),
+        ('poly_dem_no', 'Poly Dem No'),
+        ('poly_rep_yes', 'Poly Rep Yes'),
+        ('poly_rep_no', 'Poly Rep No'),
+        ('kalshi_dem_yes', 'Kalshi Dem Yes'),
+        ('kalshi_dem_no', 'Kalshi Dem No'),
+    ]
+    for col, name in prices:
+        if col in df_all.columns:
+            min_val = df_all[col].min()
+            max_val = df_all[col].max()
+            print(f"{name}: Min=${min_val:.2f}, Max=${max_val:.2f}")
+
     # 4. Calculate Price Differences (7 Plots)
     
     # A) Internal Arbitrage: 1 - (yes + no) for each market
@@ -487,8 +591,8 @@ async def main(time_range=None, debug=False):
     df_all['diff_internal_kalshi_dem'] = 1.0 - (df_all['kalshi_dem_yes'] + df_all['kalshi_dem_no'])
     
     # B) Poly Complementary Arbitrage
-    df_all['diff_complementary_no'] = 1.0 - (df_all['poly_dem_no'] + df_all['poly_rep_no'])
-    df_all['diff_complementary_yes'] = 1.0 - (df_all['poly_dem_yes'] + df_all['poly_rep_yes'])
+    df_all['diff_complementary_no'] = abs(df_all['poly_dem_yes'] - df_all['poly_rep_no'])
+    df_all['diff_complementary_yes'] = abs(df_all['poly_dem_no'] - df_all['poly_rep_yes'])
     
     # C) Mirror Arbitrage (Poly vs Kalshi) - absolute difference
     df_all['diff_mirror_yes'] = abs(df_all['poly_dem_yes'] - df_all['kalshi_dem_yes'])
@@ -496,13 +600,13 @@ async def main(time_range=None, debug=False):
 
     # 5. Stats & Plots for Differences
     diffs = [
-        ('diff_internal_poly_dem', 'Internal Arb: Poly Dem (1 - Yes - No)', '4_diff_internal_poly_dem.png'),
-        ('diff_internal_poly_rep', 'Internal Arb: Poly Rep (1 - Yes - No)', '5_diff_internal_poly_rep.png'),
-        ('diff_internal_kalshi_dem', 'Internal Arb: Kalshi Dem (1 - Yes - No)', '6_diff_internal_kalshi_dem.png'),
-        ('diff_complementary_no', 'Poly Complementary Arb: |No Dem + No Rep - 1|', '7_diff_complementary_no.png'),
-        ('diff_complementary_yes', 'Poly Complementary Arb: |Yes Dem + Yes Rep - 1|', '8_diff_complementary_yes.png'),
-        ('diff_mirror_yes', 'Mirror Arb: |Yes Poly Dem - Yes Kalshi|', '9_diff_mirror_yes.png'),
-        ('diff_mirror_no', 'Mirror Arb: |No Poly Dem - No Kalshi|', '10_diff_mirror_no.png')
+        ('diff_internal_poly_dem', 'Internal Arbitrage: 1 - Poly Dem Yes Price - Poly Dem No Price', '4_diff_internal_poly_dem.png'),
+        ('diff_internal_poly_rep', 'Internal Arbitrage: 1 - Poly Rep Yes Price - Poly Rep No Price', '5_diff_internal_poly_rep.png'),
+        ('diff_internal_kalshi_dem', 'Internal Arbitrage: 1 - Kalshi Dem Yes Price - Kalshi Dem No Price', '6_diff_internal_kalshi_dem.png'),
+        ('diff_complementary_no', 'Poly Complementary Arbitrage: |Poly Dem Yes Price - Poly Rep No Price|', '7_diff_complementary_no.png'),
+        ('diff_complementary_yes', 'Poly Complementary Arbitrage: |Poly Dem No Price - Poly Rep Yes Price|', '8_diff_complementary_yes.png'),
+        ('diff_mirror_yes', 'Mirror Arbitrage: |Poly Dem Yes Price - Kalshi Dem Yes Price|', '9_diff_mirror_yes.png'),
+        ('diff_mirror_no', 'Mirror Arbitrage: |Poly Dem No Price - Kalshi Dem No Price|', '10_diff_mirror_no.png')
     ]
 
     for col, title, fname in diffs:

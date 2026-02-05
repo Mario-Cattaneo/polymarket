@@ -125,7 +125,7 @@ async def get_market_and_assets(pool, utc_time_str):
         )
         
         if not row:
-            logger.warning("❌ No matching Polymarket found.")
+            logger.warning(" No matching Polymarket found.")
             return None, None
 
         market_id = row['market_id']
@@ -302,7 +302,7 @@ async def main():
         if not events:
             logger.warning("No OrdersMatched or OrderFilled events found in this window.")
         else:
-            logger.info(f"✅ Found {len(events)} events in the window.")
+            logger.info(f"Found {len(events)} events in the window.")
             
             # Decode and sample events
             logger.info("\n--- DECODING SAMPLE EVENTS ---")
@@ -311,14 +311,14 @@ async def main():
             order_filled_events = [e for e in events if e['event_name'] == 'OrderFilled']
             
             if orders_matched_events:
-                logger.info(f"\n📋 OrdersMatched Events: {len(orders_matched_events)} total")
+                logger.info(f"\nOrdersMatched Events: {len(orders_matched_events)} total")
                 sample = orders_matched_events[0]
                 topics = sample['topics'] if isinstance(sample['topics'], list) else json.loads(sample['topics'].strip('{}').replace("'", '"'))
                 decoded = decode_orders_matched(topics, sample['data'])
                 logger.info(f"   Sample decoded: {json.dumps(decoded, indent=2)}")
             
             if order_filled_events:
-                logger.info(f"\n📋 OrderFilled Events: {len(order_filled_events)} total")
+                logger.info(f"\n OrderFilled Events: {len(order_filled_events)} total")
                 sample = order_filled_events[0]
                 topics = sample['topics'] if isinstance(sample['topics'], list) else json.loads(sample['topics'].strip('{}').replace("'", '"'))
                 decoded = decode_order_filled(topics, sample['data'])
@@ -330,7 +330,7 @@ async def main():
             logger.info("="*80)
             
             # First, show what asset IDs are actually in the events
-            logger.info(f"\n🔍 DEBUG: Unique asset IDs found in OrdersMatched events:")
+            logger.info(f"\nDEBUG: Unique asset IDs found in OrdersMatched events:")
             unique_matched_asset_ids = set()
             for event in orders_matched_events:
                 topics = event['topics'] if isinstance(event['topics'], list) else json.loads(event['topics'].strip('{}').replace("'", '"'))
@@ -345,7 +345,7 @@ async def main():
             for aid in sorted(list(unique_matched_asset_ids))[:10]:  # Show first 10
                 logger.info(f"     - {aid}")
             
-            logger.info(f"\n🔍 DEBUG: Unique asset IDs found in OrdersFilled events:")
+            logger.info(f"\n DEBUG: Unique asset IDs found in OrdersFilled events:")
             unique_filled_asset_ids = set()
             for event in order_filled_events:
                 topics = event['topics'] if isinstance(event['topics'], list) else json.loads(event['topics'].strip('{}').replace("'", '"'))
@@ -360,7 +360,7 @@ async def main():
             for aid in sorted(list(unique_filled_asset_ids))[:10]:  # Show first 10
                 logger.info(f"     - {aid}")
             
-            logger.info(f"\n🔍 DEBUG: Polymarket asset IDs to match:")
+            logger.info(f"\n DEBUG: Polymarket asset IDs to match:")
             for aid in asset_ids:
                 logger.info(f"   - {aid}")
             
@@ -369,7 +369,7 @@ async def main():
                 "4031132846844196883695870747593975059183828438525834177960621871803786384542",
                 "41404836665749362782624319574687607394745081822202452725583623357802975579587"
             ]
-            logger.info(f"\n🔍 DEBUG: Additional asset IDs to check:")
+            logger.info(f"\n DEBUG: Additional asset IDs to check:")
             for aid in debug_asset_ids:
                 logger.info(f"   - {aid}")
             
@@ -386,7 +386,7 @@ async def main():
             
             for asset_id in analysis_asset_ids:
                 asset_id_int = int(asset_id)
-                logger.info(f"\n📊 Asset ID: {asset_id}")
+                logger.info(f"\n Asset ID: {asset_id}")
                 
                 # Count last trades for this asset
                 asset_trades = [t for t in trades if int(t['asset_id']) == asset_id_int]
