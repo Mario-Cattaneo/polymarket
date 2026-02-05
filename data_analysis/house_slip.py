@@ -69,91 +69,179 @@ async def fetch_data(query: str) -> list:
         if conn:
             await conn.close()
 
+def decode_order_filled(data: str, topics: list) -> dict:
+    """Decode OrderFilled event exactly as understand_split_base.py does."""
+    try:
+        data_hex = bytes.fromhex(data[2:] if data.startswith('0x') else data)
+        decoded = decode(['uint256', 'uint256', 'uint256', 'uint256', 'uint256'], data_hex)
+        
+        maker = '0x' + topics[2][-40:] if len(topics) > 2 else None
+        taker = '0x' + topics[3][-40:] if len(topics) > 3 else None
+        maker_asset_id = int(decoded[0])
+        taker_asset_id = int(decoded[1])
+        making = int(decoded[2])
+        taking = int(decoded[3])
+        fee = int(decoded[4])
+        
+        return {
+            'maker': maker,
+            'taker': taker,
+            'makerAssetId': maker_asset_id,
+            'takerAssetId': taker_asset_id,
+            'making': making,
+            'taking': taking,
+            'fee': fee
+        }
+    except Exception as e:
+        logger.warning(f"Failed to decode OrderFilled: {e}")
+        return {}
+
 def calculate_slippage_from_settlements(records: list) -> pd.DataFrame:
     """
     Processes settlement records to calculate slippage for each multi-fill transaction.
+    
+    Logic:
+    1. Decode all OrderFilled events from raw topics/data
+    2. Filter out any where taker is the exchange
+    3. If more than 1 fill exists, calculate slippage
+    4. For each fill: if takerAssetId == "0", maker is SELLING (price = taking/making)
+                      else maker is BUYING (price = making/taking)
+    5. Determine market price: min if makers selling, max if makers buying
+    6. Slippage = |p_market * total_shares - actual_usdc|
     """
     slippage_events = []
+    computation_count = 0
+    EXCHANGE_ADDRESS = "0xC5d563A36AE78145C45a50134d48A1215220f80a"
 
     for row in records:
         try:
             trade = json.loads(row['trade'])
             
-            # A transaction needs OrdersMatched and multiple OrderFilled to have slippage
             if not trade.get('orders_matched') or len(trade.get('orders_filled', [])) < 2:
                 continue
-
-            # 1. Identify the Taker and their goal from OrdersMatched
-            orders_matched = trade['orders_matched'][0]
-            taker_address = '0x' + orders_matched['topics'][2][-40:]
             
-            om_data_hex = bytes.fromhex(orders_matched['data'][2:])
-            om_decoded = decode(['uint256', 'uint256', 'uint256', 'uint256'], om_data_hex)
-            om_maker_asset, om_taker_asset = str(om_decoded[0]), str(om_decoded[1])
+            computation_count += 1
+            
+            logger.info(f"[TX #{computation_count}] Hash: {row['transaction_hash']} | Type: {row.get('type', 'N/A')}")
+            logger.info(f"  Total OrderFilled events: {len(trade.get('orders_filled', []))}")
 
-            taker_is_buying_shares = (om_maker_asset != COLLATERAL_ASSET_ID and om_taker_asset == COLLATERAL_ASSET_ID)
-            taker_is_selling_shares = (om_taker_asset != COLLATERAL_ASSET_ID and om_maker_asset == COLLATERAL_ASSET_ID)
+            # 0. Decode all OrderFilled events using the exact same logic as understand_split_base.py
+            all_fills = []
+            exchange_fill = None
+            for idx, fill in enumerate(trade.get('orders_filled', [])):
+                decoded_fill = decode_order_filled(fill['data'], fill['topics'])
+                if decoded_fill:
+                    is_exchange_fill = (decoded_fill['taker'].lower() == EXCHANGE_ADDRESS.lower())
+                    
+                    logger.info(f"  OrderFilled #{idx+1}: Maker={decoded_fill['maker']} | Taker={decoded_fill['taker']} | MakerAsset={decoded_fill['makerAssetId']} | TakerAsset={decoded_fill['takerAssetId']} | making={decoded_fill['making']}, taking={decoded_fill['taking']} | IsExchange={is_exchange_fill}")
+                    
+                    decoded_fill['is_exchange'] = is_exchange_fill
+                    all_fills.append(decoded_fill)
+                    
+                    if is_exchange_fill:
+                        exchange_fill = decoded_fill
 
-            if not (taker_is_buying_shares or taker_is_selling_shares):
+            # 1. Find the exchange fill to determine taker direction
+            if not exchange_fill:
+                logger.info(f"  Skipping: No exchange fill found")
+                continue
+            
+            # Determine taker (exchange) direction: BUY if makerAssetId==0, else SELL
+            if exchange_fill['makerAssetId'] == 0:
+                taker_is_buying = True
+                logger.info(f"  Exchange taker direction: BUYING (makerAssetId == 0)")
+            else:
+                taker_is_buying = False
+                logger.info(f"  Exchange taker direction: SELLING (makerAssetId != 0)")
+
+            # 2. Extract taker vs maker fills (exclude the exchange fill)
+            taker_vs_maker_fills = [f for f in all_fills if not f['is_exchange']]
+            
+            logger.info(f"  → Selected {len(taker_vs_maker_fills)} taker vs maker fills (excluded taker=exchange={EXCHANGE_ADDRESS[:10]}...)")
+            
+            # Slippage requires more than 1 taker vs maker fill
+            if len(taker_vs_maker_fills) < 2:
+                logger.info(f"  Skipping: Need at least 2 taker vs maker fills, only found {len(taker_vs_maker_fills)}")
                 continue
 
-            # 2. Isolate the fills against maker orders
-            maker_fills = []
-            for fill in trade.get('orders_filled', []):
-                fill_taker = '0x' + fill['topics'][3][-40:]
-                if fill_taker.lower() == taker_address.lower():
-                    maker_fills.append(fill)
+            # 3. For each maker fill: compute direction, price, then convert if same as taker
+            fills_info = []
             
-            # Slippage only occurs with 2 or more maker fills
-            if len(maker_fills) < 2:
+            for idx, fill in enumerate(taker_vs_maker_fills):
+                maker_asset_id = fill['makerAssetId']
+                taker_asset_id = fill['takerAssetId']
+                making_raw = Decimal(fill['making'])
+                taking_raw = Decimal(fill['taking'])
+                
+                # Determine if maker is buying or selling: BUY if makerAssetId==0, else SELL
+                maker_is_buying = (maker_asset_id == 0)
+                
+                # Price is always min/max to keep in [0,1]
+                price_per_token = min(making_raw, taking_raw) / max(making_raw, taking_raw)
+                
+                # Determine amounts based on asset IDs
+                if taker_asset_id == 0:
+                    # takerAssetId == 0 means taker receives USDC, so maker gives shares (SELLING)
+                    amount_shares = making_raw / SHARE_SCALAR
+                    amount_usdc = taking_raw / USDC_SCALAR
+                    side_label = "SELLING"
+                else:
+                    # takerAssetId != 0 means taker receives shares, so maker receives USDC (BUYING)
+                    amount_shares = taking_raw / SHARE_SCALAR
+                    amount_usdc = making_raw / USDC_SCALAR
+                    side_label = "BUYING"
+                
+                logger.info(f"    Fill #{idx+1} (Maker={fill['maker'][:10]}...): Maker {side_label} (makerAssetId={'0' if maker_is_buying else 'shares'}) | making={making_raw}, taking={taking_raw}")
+                
+                # If maker is on same side as taker, convert price to taker's perspective
+                original_price = price_per_token
+                if maker_is_buying == taker_is_buying:
+                    price_per_token = Decimal(1) - price_per_token
+                    logger.info(f"      Same side as taker (both {'BUYING' if taker_is_buying else 'SELLING'}): converted price from {original_price} to {price_per_token}")
+                else:
+                    logger.info(f"      Opposite side as taker: keep price {original_price}")
+                
+                logger.info(f"      → Price per token: {price_per_token} | Shares: {amount_shares} | USDC: {amount_usdc}")
+                
+                fills_info.append({
+                    'price_per_token': price_per_token,
+                    'amount_shares': amount_shares,
+                    'amount_usdc': amount_usdc
+                })
+
+            # 4. Determine market price based on taker direction
+            if len(fills_info) >= 2:
+                prices = [f['price_per_token'] for f in fills_info]
+                if taker_is_buying:
+                    p_best = min(prices)
+                    logger.info(f"  Taker BUYING - Best price (min): {p_best}")
+                else:
+                    p_best = max(prices)
+                    logger.info(f"  Taker SELLING - Best price (max): {p_best}")
+
+                # 5. Calculate slippage using exchange fill amounts
+                exchange_making = Decimal(exchange_fill['making'])
+                exchange_taking = Decimal(exchange_fill['taking'])
+                amount_shares = max(exchange_making, exchange_taking) / SHARE_SCALAR
+                actual_cost = min(exchange_making, exchange_taking) / USDC_SCALAR
+                expected_cost = p_best * amount_shares
+                tx_slippage = abs(expected_cost - actual_cost)
+                
+                logger.info(f"  Exchange making: {exchange_making}, taking: {exchange_taking}")
+                logger.info(f"  Amount shares: {amount_shares}")
+                logger.info(f"  Actual cost: {actual_cost}")
+                logger.info(f"  Expected cost (p_best × amount_shares): {expected_cost}")
+                logger.info(f"  SLIPPAGE: ${tx_slippage}")
+            else:
                 continue
-
-            # 3. Calculate price and quantity for each maker fill
-            fill_details = []
-            for fill in maker_fills:
-                data_hex = bytes.fromhex(fill['data'][2:])
-                decoded = decode(['uint256', 'uint256', 'uint256', 'uint256', 'uint256'], data_hex)
-                maker_asset, taker_asset = str(decoded[0]), str(decoded[1])
-                making, taking = Decimal(decoded[2]), Decimal(decoded[3])
-                
-                price, quantity = Decimal(0), Decimal(0)
-                
-                # Case A: Maker is selling shares (giving shares, taking USDC)
-                if taker_asset == COLLATERAL_ASSET_ID:
-                    price = (taking / USDC_SCALAR) / (making / SHARE_SCALAR)
-                    quantity = making / SHARE_SCALAR
-                # Case B: Maker is buying shares (giving USDC, taking shares)
-                elif maker_asset == COLLATERAL_ASSET_ID:
-                    price = (making / USDC_SCALAR) / (taking / SHARE_SCALAR)
-                    quantity = taking / SHARE_SCALAR
-                
-                if price > 0 and quantity > 0:
-                    fill_details.append({'price': price, 'quantity': quantity})
-
-            if not fill_details:
-                continue
-
-            # 4. Find best price and calculate total slippage for the transaction
-            prices = [d['price'] for d in fill_details]
-            tx_slippage = Decimal(0)
-            
-            if taker_is_buying_shares: # Taker wants lowest price
-                best_price = min(prices)
-                for detail in fill_details:
-                    tx_slippage += (detail['price'] - best_price) * detail['quantity']
-                slippage_type = 'maker_selling' # Makers were selling to the taker
-            
-            else: # Taker is selling shares, wants highest price
-                best_price = max(prices)
-                for detail in fill_details:
-                    tx_slippage += (best_price - detail['price']) * detail['quantity']
-                slippage_type = 'maker_buying' # Makers were buying from the taker
 
             if tx_slippage > 0:
+                # Categorize based on taker direction (which we now know)
+                slippage_type = 'buying' if taker_is_buying else 'selling'
                 slippage_events.append({
                     'timestamp': pd.to_datetime(block_to_timestamp(row['block_number']), unit='s'),
-                    'maker_buying_slippage': tx_slippage if slippage_type == 'maker_buying' else Decimal(0),
-                    'maker_selling_slippage': tx_slippage if slippage_type == 'maker_selling' else Decimal(0)
+                    'maker_buying_slippage': tx_slippage if taker_is_buying else Decimal(0),
+                    'maker_selling_slippage': tx_slippage if not taker_is_buying else Decimal(0)
                 })
 
         except Exception as e:
@@ -210,7 +298,7 @@ def plot_cumulative_slippage(df: pd.DataFrame):
 
 async def main():
     logger.info("Fetching all settlement data for slippage analysis...")
-    settlement_records = await fetch_data("SELECT block_number, transaction_hash, trade FROM settlements_house")
+    settlement_records = await fetch_data("SELECT block_number, transaction_hash, type, trade FROM settlements_house")
     
     logger.info("Calculating slippage from settlement data...")
     df_slippage = calculate_slippage_from_settlements(settlement_records)

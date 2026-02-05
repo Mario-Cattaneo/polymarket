@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
 """
-Decoder for settlements table (Block Number Schema).
-UPDATED: Correctly maps OrdersMatched topic 2 to 'takerOrderMaker'.
+Fully decode settlement transactions from the database.
+Decodes all OrderFilled events, OrdersMatched, and position_events for investigation.
 """
 
 import os
 import asyncio
-import asyncpg
 import json
+import logging
+from typing import Optional
 from eth_abi import decode
-from typing import Dict, Any, List
+import asyncpg
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 # Database Credentials
 PG_HOST = os.getenv("PG_SOCKET")
@@ -18,25 +27,26 @@ DB_NAME = os.getenv("POLY_DB")
 DB_USER = os.getenv("POLY_DB_CLI")
 DB_PASS = os.getenv("POLY_DB_CLI_PASS")
 
-# Event signatures
-EVENT_SIGS = {
-    'OrderFilled': '0xd0a08e8c493f9c94f29311604c9de1b4e8c8d4c06bd0c789af57f2d65bfec0f6',
-    'OrdersMatched': '0x63bf4d16b7fa898ef4c4b2b6d90fd201e9c56313b65638af6088d149d2ce956c',
-    'PositionSplit': '0x2e6bb91f8cbcda0c93623c54d0403a43514fabc40084ec96b6d5379a74786298',
-    'PositionsMerge': '0x6f13ca62553fcc2bcd2372180a43949c1e4cebba603901ede2f4e14f36b282ca',
+# Constants
+COLLATERAL_ASSET_ID = "0"
+EXCHANGE_ADDRESS = "0xC5d563A36AE78145C45a50134d48A1215220f80a"
+
+# Asset ID mapping
+ASSET_IDS = {
+    "33156410999665902694": "SHARE_TOKEN_1",
+    "83247781037352156539": "SHARE_TOKEN_2",
 }
 
-def identify_event(topics: List[str]) -> str:
-    if not topics: return 'Unknown'
-    sig = topics[0]
-    for event_name, event_sig in EVENT_SIGS.items():
-        if sig.lower() == event_sig.lower(): return event_name
-    return 'Unknown'
 
-def decode_order_filled(data: str, topics: List[str]) -> Dict[str, Any]:
-    # Topics: [sig, orderHash, maker, taker]
-    # maker is topics[2], taker is topics[3]
-    # Data: makerAssetId, takerAssetId, making, taking, fee
+def get_asset_name(asset_id: str) -> str:
+    """Get human-readable asset name."""
+    if asset_id == COLLATERAL_ASSET_ID:
+        return "USDC"
+    return ASSET_IDS.get(asset_id, f"ASSET_{asset_id[:8]}...")
+
+
+def decode_order_filled(data: str, topics: list) -> dict:
+    """Decode OrderFilled event exactly like understand_split_base.py"""
     try:
         data_hex = bytes.fromhex(data[2:] if data.startswith('0x') else data)
         decoded = decode(['uint256', 'uint256', 'uint256', 'uint256', 'uint256'], data_hex)
@@ -49,15 +59,10 @@ def decode_order_filled(data: str, topics: List[str]) -> Dict[str, Any]:
         taking = int(decoded[3])
         fee = int(decoded[4])
         
-        # Determine maker's side and calculate price per token (USDC/token, in [0,1])
         if taker_asset_id == 0:
-            # Maker is SELLING tokens (gives tokens, receives USDC)
-            # Price = USDC / tokens = taking / making
             side = 'SELL'
             price = taking / making if making > 0 else 0
         elif maker_asset_id == 0:
-            # Maker is BUYING tokens (gives USDC, receives tokens)
-            # Price = USDC / tokens = making / taking
             side = 'BUY'
             price = making / taking if taking > 0 else 0
         else:
@@ -70,33 +75,18 @@ def decode_order_filled(data: str, topics: List[str]) -> Dict[str, Any]:
             'taker': taker,
             'makerAssetId': str(maker_asset_id),
             'takerAssetId': str(taker_asset_id),
-            'making': str(making),
-            'taking': str(taking),
-            'fee': str(fee),
+            'making': making,
+            'taking': taking,
+            'fee': fee,
             'maker_side': side,
-            'price': round(price, 6)
+            'price': price
         }
-    except Exception as e: return {'event': 'OrderFilled', 'error': str(e)}
+    except:
+        return {}
 
-def decode_orders_matched(data: str, topics: List[str]) -> Dict[str, Any]:
-    # Topics: [sig, takerOrderHash, takerOrderMaker]
-    try:
-        data_hex = bytes.fromhex(data[2:] if data.startswith('0x') else data)
-        decoded = decode(['uint256', 'uint256', 'uint256', 'uint256'], data_hex)
-        return {
-            'event': 'OrdersMatched',
-            'takerOrderMaker': '0x' + topics[2][-40:] if len(topics) > 2 else None,
-            'makerAssetId': str(decoded[0]),
-            'takerAssetId': str(decoded[1]),
-            'makerAmountFilled': str(decoded[2]),
-            'takerAmountFilled': str(decoded[3])
-        }
-    except Exception as e: return {'event': 'OrdersMatched', 'error': str(e)}
 
-def decode_position_event(data: str, topics: List[str], event_name: str) -> Dict[str, Any]:
-    # For PositionSplit/PositionsMerge:
-    # topics[0]: signature, topics[1]: stakeholder (indexed), topics[2]: parentCollectionId (indexed), topics[3]: conditionId (indexed)
-    # data: collateralToken (address), partition (uint[]), amount (uint256)
+def decode_position_split(data: str, topics: list, event_name: str) -> dict:
+    """Decode PositionSplit/PositionsMerge event exactly like understand_split_base.py"""
     try:
         data_hex = bytes.fromhex(data[2:] if data.startswith('0x') else data)
         decoded = decode(['address', 'uint256[]', 'uint256'], data_hex)
@@ -107,88 +97,99 @@ def decode_position_event(data: str, topics: List[str], event_name: str) -> Dict
             'conditionId': topics[3] if len(topics) > 3 else None,
             'collateralToken': decoded[0],
             'partition': [str(x) for x in decoded[1]],
-            'amount': str(decoded[2])
+            'amount': int(decoded[2])
         }
-    except Exception as e: return {'event': event_name, 'error': str(e)}
+    except:
+        return {}
+        logger.info(f"  Stakeholder: {decoded.get('stakeholder', 'N/A')}")
+        logger.info(f"  Condition: {decoded.get('conditionId', 'N/A')}")
+        logger.info(f"  Amount: {decoded.get('amount', 'N/A')}")
+        logger.info(f"  Partition: {decoded.get('partition', [])}")
 
-def decode_event(data: str, topics: List[str]) -> Dict[str, Any]:
-    event_name = identify_event(topics)
-    if event_name == 'OrderFilled': return decode_order_filled(data, topics)
-    elif event_name == 'OrdersMatched': return decode_orders_matched(data, topics)
-    elif event_name in ['PositionSplit', 'PositionsMerge']: return decode_position_event(data, topics, event_name)
-    return {'event': 'Unknown'}
 
-def decode_settlement(settlement: Dict[str, Any]) -> Dict[str, Any]:
-    trade = settlement['trade']
-    if isinstance(trade, str): trade = json.loads(trade)
+async def decode_settlements_batch(tx_hashes: list) -> None:
+    """Decode multiple settlement transactions and output JSON."""
+    conn = await asyncpg.connect(
+        host=PG_HOST,
+        port=int(PG_PORT),
+        database=DB_NAME,
+        user=DB_USER,
+        password=DB_PASS,
+    )
     
-    decoded_trade = {'orders_matched': [], 'orders_filled': [], 'position_events': []}
-    
-    for om in trade.get('orders_matched', []):
-        decoded_trade['orders_matched'].append(decode_event(om['data'], om['topics']))
-    for of in trade.get('orders_filled', []):
-        decoded_trade['orders_filled'].append(decode_event(of['data'], of['topics']))
-    for pe in trade.get('position_events', []):
-        decoded_trade['position_events'].append(decode_event(pe['data'], pe['topics']))
-    
-    return {
-        'block_number': settlement['block_number'],
-        'transaction_hash': settlement['transaction_hash'],
-        'type': settlement['type'],
-        'exchange': settlement['exchange'],
-        'trade': decoded_trade
-    }
-
-async def test_decoder():
-    pool = await asyncpg.create_pool(host=PG_HOST, port=int(PG_PORT), database=DB_NAME, user=DB_USER, password=DB_PASS)
     try:
-        async with pool.acquire() as conn:
-            print("\n[TEST] Decoding complementary base settlements with >= 3 orders_filled...")
+        for tx_hash in tx_hashes:
+            row = await conn.fetchrow(
+                "SELECT * FROM settlements_house WHERE transaction_hash = $1",
+                tx_hash
+            )
             
-            # Query for complementary base settlements with at least 3 orders_filled
-            rows = await conn.fetch("""
-                SELECT * FROM settlements
-                WHERE type = 'complementary'
-                AND exchange = 'base'
-                AND jsonb_array_length(trade->'orders_filled') >= 3
-                LIMIT 2
-            """)
+            if not row:
+                logger.error(f"Not found: {tx_hash}")
+                continue
             
-            if rows:
-                for i, row in enumerate(rows, 1):
-                    print(f"\n{'='*80}")
-                    print(f"Base Complementary Settlement #{i}")
-                    print(f"{'='*80}")
-                    decoded = decode_settlement(dict(row))
-                    print(json.dumps(decoded, indent=2))
-            else:
-                print("No matching base complementary settlements found.")
+            row = dict(row)
+            trade = row['trade']
+            if isinstance(trade, str):
+                trade = json.loads(trade)
             
-            # Query for negrisk settlements (split, merge, conversion)
-            print("\n" + "="*80)
-            print("[TEST] Decoding NegRisk settlements (split, merge, conversion)...")
-            print("="*80)
+            # Decode all events
+            orders_matched = [
+                decode_orders_matched(om['data'], om['topics']) 
+                for om in trade.get('orders_matched', [])
+            ]
+            orders_filled = [
+                decode_order_filled(of['data'], of['topics']) 
+                for of in trade.get('orders_filled', [])
+            ]
+            # For position events, identify event type from signature
+            position_events = []
+            for pe in trade.get('position_events', []):
+                sig = pe['topics'][0] if pe.get('topics') else ''
+                event_name = 'PositionSplit' if sig == '0x2e6bb91f8cbcda0c93623c54d0403a43514fabc40084ec96b6d5379a74786298' else \
+                             'PositionsMerge' if sig == '0xbbed930dbfb7907ae2d60ddf78345610214f26419a0128df39b6cc3d9e5df9b0' else \
+                             'Unknown'
+                position_events.append(decode_position_split(pe['data'], pe['topics'], event_name))
             
-            for stype in ['split', 'merge', 'conversion']:
-                print(f"\n>>> {stype.upper()} <<<")
-                rows = await conn.fetch("""
-                    SELECT * FROM settlements
-                    WHERE type = $1
-                    AND exchange = 'negrisk'
-                    LIMIT 2
-                """, stype)
-                
-                if rows:
-                    for i, row in enumerate(rows, 1):
-                        print(f"\n{'-'*80}")
-                        print(f"NegRisk {stype.capitalize()} Settlement #{i}")
-                        print(f"{'-'*80}")
-                        decoded = decode_settlement(dict(row))
-                        print(json.dumps(decoded, indent=2))
-                else:
-                    print(f"No {stype} settlements found.")
+            decoded = {
+                'block_number': row['block_number'],
+                'transaction_hash': row['transaction_hash'],
+                'type': row['type'],
+                'exchange': row['exchange'],
+                'trade': {
+                    'orders_matched': orders_matched,
+                    'orders_filled': orders_filled,
+                    'position_events': position_events
+                }
+            }
+            
+            print(json.dumps(decoded, indent=2))
+            print()
     finally:
-        await pool.close()
+        await conn.close()
 
-if __name__ == "__main__":
-    asyncio.run(test_decoder())
+
+def decode_orders_matched(data: str, topics: list) -> dict:
+    """Decode OrdersMatched event exactly like understand_split_base.py"""
+    try:
+        data_hex = bytes.fromhex(data[2:] if data.startswith('0x') else data)
+        decoded = decode(['uint256', 'uint256', 'uint256', 'uint256'], data_hex)
+        return {
+            'event': 'OrdersMatched',
+            'takerOrderMaker': '0x' + topics[2][-40:] if len(topics) > 2 else None,
+            'makerAssetId': str(decoded[0]),
+            'takerAssetId': str(decoded[1]),
+            'makerAmountFilled': int(decoded[2]),
+            'takerAmountFilled': int(decoded[3])
+        }
+    except:
+        return {}
+
+
+if __name__ == '__main__':
+    # Transaction hashes to decode
+    TX_HASHES = [
+        '0xb31e4beb82438a7508da21475a3f3a9799d483bf51805ba89341a74cc1d19000'
+    ]
+    
+    asyncio.run(decode_settlements_batch(TX_HASHES))

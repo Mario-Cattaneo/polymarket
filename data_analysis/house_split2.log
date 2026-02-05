@@ -1,0 +1,719 @@
+
+====================================================================================================
+SPLIT with 1 PositionSplit event
+====================================================================================================
+{
+  "block_number": 79172085,
+  "transaction_hash": "0xc66e572880dc47ffd19fd52204c047be28d3e7859d841a5bf4ab907e1ee30544",
+  "type": "split",
+  "exchange": "base",
+  "trade": {
+    "orders_matched": [
+      {
+        "event": "OrdersMatched",
+        "takerOrderMaker": "0x37c5dc901223e421bbd21132176a7932983ab081",
+        "makerAssetId": "0",
+        "takerAssetId": "45637595741552508677684355640587628518200536551196000953198506282379613405153",
+        "makerAmountFilled": 87357600,
+        "takerAmountFilled": 88240000
+      }
+    ],
+    "orders_filled": [
+      {
+        "event": "OrderFilled",
+        "maker": "0x7c962e7444c2c1f7b4f376c2ff13fefdbc2cc94b",
+        "taker": "0x37c5dc901223e421bbd21132176a7932983ab081",
+        "makerAssetId": "0",
+        "takerAssetId": "76516933749399500332022987310065176893747677685073558317642800540334580725096",
+        "making": 882400,
+        "taking": 88240000,
+        "fee": 0,
+        "maker_side": "BUY",
+        "price": 0.01
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0x37c5dc901223e421bbd21132176a7932983ab081",
+        "taker": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "makerAssetId": "0",
+        "takerAssetId": "45637595741552508677684355640587628518200536551196000953198506282379613405153",
+        "making": 87357600,
+        "taking": 88240000,
+        "fee": 0,
+        "maker_side": "BUY",
+        "price": 0.99
+      }
+    ],
+    "position_events": [
+      {
+        "event": null,
+        "stakeholder": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "parentCollectionId": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "conditionId": "0x748964791f25fd9d10e2d999b67184812c726d1984730485fba2460edcaae8b7",
+        "collateralToken": "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",
+        "partition": [
+          "1",
+          "2"
+        ],
+        "amount": 88240000
+      }
+    ]
+  }
+}
+
+
+====================================================================================================
+SPLIT with 2 PositionSplit events
+====================================================================================================
+{
+  "block_number": 79172085,
+  "transaction_hash": "0xe25228ad1cc431f7299671116bc23d7fa7408a9c210c0ff9526cc244704ad535",
+  "type": "split",
+  "exchange": "base",
+  "trade": {
+    "orders_matched": [
+      {
+        "event": "OrdersMatched",
+        "takerOrderMaker": "0xd8f2d2fe92ef1422a348989781d6b2f81c3c4ade",
+        "makerAssetId": "0",
+        "takerAssetId": "14519409983300759806847776166062127105164802667671063351444952180950946398617",
+        "makerAmountFilled": 8950500,
+        "takerAmountFilled": 17550000
+      }
+    ],
+    "orders_filled": [
+      {
+        "event": "OrderFilled",
+        "maker": "0x4e976fe1c461a668757c778c86db9ff44acace14",
+        "taker": "0xd8f2d2fe92ef1422a348989781d6b2f81c3c4ade",
+        "makerAssetId": "0",
+        "takerAssetId": "111232834811362767859525281687948396885646467256788747803105376942157226931070",
+        "making": 6860000,
+        "taking": 14000000,
+        "fee": 0,
+        "maker_side": "BUY",
+        "price": 0.49
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0x228c059d97e7426696ec3bb872d5ef6fb23b6073",
+        "taker": "0xd8f2d2fe92ef1422a348989781d6b2f81c3c4ade",
+        "makerAssetId": "0",
+        "takerAssetId": "111232834811362767859525281687948396885646467256788747803105376942157226931070",
+        "making": 1739500,
+        "taking": 3550000,
+        "fee": 0,
+        "maker_side": "BUY",
+        "price": 0.49
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0xd8f2d2fe92ef1422a348989781d6b2f81c3c4ade",
+        "taker": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "makerAssetId": "0",
+        "takerAssetId": "14519409983300759806847776166062127105164802667671063351444952180950946398617",
+        "making": 8950500,
+        "taking": 17550000,
+        "fee": 0,
+        "maker_side": "BUY",
+        "price": 0.51
+      }
+    ],
+    "position_events": [
+      {
+        "event": null,
+        "stakeholder": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "parentCollectionId": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "conditionId": "0x12e6bba6da8825278046df4f4b6d9376e1450e25c5aec86fffbd9b7c6bb79a92",
+        "collateralToken": "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",
+        "partition": [
+          "1",
+          "2"
+        ],
+        "amount": 14000000
+      },
+      {
+        "event": null,
+        "stakeholder": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "parentCollectionId": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "conditionId": "0x12e6bba6da8825278046df4f4b6d9376e1450e25c5aec86fffbd9b7c6bb79a92",
+        "collateralToken": "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",
+        "partition": [
+          "1",
+          "2"
+        ],
+        "amount": 3550000
+      }
+    ]
+  }
+}
+
+
+====================================================================================================
+SPLIT with 3 PositionSplit events
+====================================================================================================
+{
+  "block_number": 79172095,
+  "transaction_hash": "0x50bd7fa3222549cf3bb04e44fd02a6829c486add36136f45bca982bc54771075",
+  "type": "split",
+  "exchange": "base",
+  "trade": {
+    "orders_matched": [
+      {
+        "event": "OrdersMatched",
+        "takerOrderMaker": "0xf247584e41117bbbe4cc06e4d2c95741792a5216",
+        "makerAssetId": "0",
+        "takerAssetId": "37486821126512935033211274243061585079799955825167145318083815135005734780282",
+        "makerAmountFilled": 19500000,
+        "takerAmountFilled": 40625000
+      }
+    ],
+    "orders_filled": [
+      {
+        "event": "OrderFilled",
+        "maker": "0x4c620618ec2a7869289793441b526b0be0ecf233",
+        "taker": "0xf247584e41117bbbe4cc06e4d2c95741792a5216",
+        "makerAssetId": "0",
+        "takerAssetId": "61469189034854356740127512977717251048195186665566912985325804319332956773109",
+        "making": 5943600,
+        "taking": 11430000,
+        "fee": 0,
+        "maker_side": "BUY",
+        "price": 0.52
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0xd0bbce14d4a5fdc43b89174987330b5b740eb00e",
+        "taker": "0xf247584e41117bbbe4cc06e4d2c95741792a5216",
+        "makerAssetId": "0",
+        "takerAssetId": "61469189034854356740127512977717251048195186665566912985325804319332956773109",
+        "making": 11960000,
+        "taking": 23000000,
+        "fee": 0,
+        "maker_side": "BUY",
+        "price": 0.52
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0x665b7118996fbad859e3bfbe584a8b06f503f81e",
+        "taker": "0xf247584e41117bbbe4cc06e4d2c95741792a5216",
+        "makerAssetId": "0",
+        "takerAssetId": "61469189034854356740127512977717251048195186665566912985325804319332956773109",
+        "making": 3221400,
+        "taking": 6195000,
+        "fee": 0,
+        "maker_side": "BUY",
+        "price": 0.52
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0xf247584e41117bbbe4cc06e4d2c95741792a5216",
+        "taker": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "makerAssetId": "0",
+        "takerAssetId": "37486821126512935033211274243061585079799955825167145318083815135005734780282",
+        "making": 19500000,
+        "taking": 40625000,
+        "fee": 0,
+        "maker_side": "BUY",
+        "price": 0.48
+      }
+    ],
+    "position_events": [
+      {
+        "event": null,
+        "stakeholder": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "parentCollectionId": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "conditionId": "0x681e84c3cfd60bdacf6446a11d7232a36fe7a7540e6dd1751e6dc3539ba4ec76",
+        "collateralToken": "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",
+        "partition": [
+          "1",
+          "2"
+        ],
+        "amount": 11430000
+      },
+      {
+        "event": null,
+        "stakeholder": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "parentCollectionId": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "conditionId": "0x681e84c3cfd60bdacf6446a11d7232a36fe7a7540e6dd1751e6dc3539ba4ec76",
+        "collateralToken": "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",
+        "partition": [
+          "1",
+          "2"
+        ],
+        "amount": 23000000
+      },
+      {
+        "event": null,
+        "stakeholder": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "parentCollectionId": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "conditionId": "0x681e84c3cfd60bdacf6446a11d7232a36fe7a7540e6dd1751e6dc3539ba4ec76",
+        "collateralToken": "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",
+        "partition": [
+          "1",
+          "2"
+        ],
+        "amount": 6195000
+      }
+    ]
+  }
+}
+
+
+====================================================================================================
+MERGE with 1 PositionsMerge event
+====================================================================================================
+{
+  "block_number": 79172085,
+  "transaction_hash": "0x7c0d8d46ad5f66e42dd7cd791f96fdc4a89c96fd6c4ce9caa4eb054114831cd1",
+  "type": "merge",
+  "exchange": "base",
+  "trade": {
+    "orders_matched": [
+      {
+        "event": "OrdersMatched",
+        "takerOrderMaker": "0x7d81681b4428796141a4c61e6b5d8aa3fa41259b",
+        "makerAssetId": "7172304381032695680819619001721064107210605062658438469933858895744330268046",
+        "takerAssetId": "0",
+        "makerAmountFilled": 26920000,
+        "takerAmountFilled": 26650800
+      }
+    ],
+    "orders_filled": [
+      {
+        "event": "OrderFilled",
+        "maker": "0x23cb796cf58bfa12352f0164f479deedbd50658e",
+        "taker": "0x7d81681b4428796141a4c61e6b5d8aa3fa41259b",
+        "makerAssetId": "115464838775384326095421980635052530306310827215689203524016622569894409049524",
+        "takerAssetId": "0",
+        "making": 26920000,
+        "taking": 269200,
+        "fee": 0,
+        "maker_side": "SELL",
+        "price": 0.01
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0x7d81681b4428796141a4c61e6b5d8aa3fa41259b",
+        "taker": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "makerAssetId": "7172304381032695680819619001721064107210605062658438469933858895744330268046",
+        "takerAssetId": "0",
+        "making": 26920000,
+        "taking": 26650800,
+        "fee": 0,
+        "maker_side": "SELL",
+        "price": 0.99
+      }
+    ],
+    "position_events": [
+      {
+        "event": null,
+        "stakeholder": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "parentCollectionId": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "conditionId": "0x1049d98d91b676e09c59c9bd689d226a66a5956160f681c0a70ecda72b46ab81",
+        "collateralToken": "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",
+        "partition": [
+          "1",
+          "2"
+        ],
+        "amount": 26920000
+      }
+    ]
+  }
+}
+
+
+====================================================================================================
+MERGE with 2 PositionsMerge events
+====================================================================================================
+{
+  "block_number": 79172098,
+  "transaction_hash": "0x9f642e0ca075855be18498204fba00d6af1dc4e4ac7d9eda8e6fe2058b1de955",
+  "type": "merge",
+  "exchange": "base",
+  "trade": {
+    "orders_matched": [
+      {
+        "event": "OrdersMatched",
+        "takerOrderMaker": "0x57c7f42032dbe6af305b8276f0dcaac5f28ba2fe",
+        "makerAssetId": "78490642434213550855600439825729670852317345211936381977390919619271067452728",
+        "takerAssetId": "0",
+        "makerAmountFilled": 3108500000,
+        "takerAmountFilled": 1691039100
+      }
+    ],
+    "orders_filled": [
+      {
+        "event": "OrderFilled",
+        "maker": "0x3969b3ec94f4490816ccde65fae1cf8e1f246e2c",
+        "taker": "0x57c7f42032dbe6af305b8276f0dcaac5f28ba2fe",
+        "makerAssetId": "4960072122879914031540087398045925546763584182114633893203762140348078315559",
+        "takerAssetId": "0",
+        "making": 15100000,
+        "taking": 6870500,
+        "fee": 0,
+        "maker_side": "SELL",
+        "price": 0.455
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0x3969b3ec94f4490816ccde65fae1cf8e1f246e2c",
+        "taker": "0x57c7f42032dbe6af305b8276f0dcaac5f28ba2fe",
+        "makerAssetId": "4960072122879914031540087398045925546763584182114633893203762140348078315559",
+        "takerAssetId": "0",
+        "making": 93400000,
+        "taking": 42590400,
+        "fee": 0,
+        "maker_side": "SELL",
+        "price": 0.456
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0xcc500cbcc8b7cf5bd21975ebbea34f21b5644c82",
+        "taker": "0x57c7f42032dbe6af305b8276f0dcaac5f28ba2fe",
+        "makerAssetId": "0",
+        "takerAssetId": "78490642434213550855600439825729670852317345211936381977390919619271067452728",
+        "making": 1632000000,
+        "taking": 3000000000,
+        "fee": 0,
+        "maker_side": "BUY",
+        "price": 0.544
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0x57c7f42032dbe6af305b8276f0dcaac5f28ba2fe",
+        "taker": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "makerAssetId": "78490642434213550855600439825729670852317345211936381977390919619271067452728",
+        "takerAssetId": "0",
+        "making": 3108500000,
+        "taking": 1691039100,
+        "fee": 0,
+        "maker_side": "SELL",
+        "price": 0.5440048576483835
+      }
+    ],
+    "position_events": [
+      {
+        "event": null,
+        "stakeholder": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "parentCollectionId": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "conditionId": "0xffcbecbfa6983b3cdd5e91d078088beb5738d0c746bcedceb62f7bfed0470af5",
+        "collateralToken": "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",
+        "partition": [
+          "1",
+          "2"
+        ],
+        "amount": 15100000
+      },
+      {
+        "event": null,
+        "stakeholder": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "parentCollectionId": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "conditionId": "0xffcbecbfa6983b3cdd5e91d078088beb5738d0c746bcedceb62f7bfed0470af5",
+        "collateralToken": "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",
+        "partition": [
+          "1",
+          "2"
+        ],
+        "amount": 93400000
+      }
+    ]
+  }
+}
+
+
+====================================================================================================
+MERGE with 3 PositionsMerge events
+====================================================================================================
+{
+  "block_number": 79172132,
+  "transaction_hash": "0xe36354312a2b96425d3b57fd4658e9dab5e03b5ce42e34f727b70e356dcd187d",
+  "type": "merge",
+  "exchange": "base",
+  "trade": {
+    "orders_matched": [
+      {
+        "event": "OrdersMatched",
+        "takerOrderMaker": "0x491952b03ecf9ff4c3d0189b7e4f13431584067e",
+        "makerAssetId": "32915172045130582917964947903812851358453405101351914444477985913955849289820",
+        "takerAssetId": "0",
+        "makerAmountFilled": 400000000,
+        "takerAmountFilled": 69591500
+      }
+    ],
+    "orders_filled": [
+      {
+        "event": "OrderFilled",
+        "maker": "0x076ca0207aaa48365da2eb6a917edcbdee5e4e7b",
+        "taker": "0x491952b03ecf9ff4c3d0189b7e4f13431584067e",
+        "makerAssetId": "43921528416127747755995678186007852634317246079481323514186378885265571609009",
+        "takerAssetId": "0",
+        "making": 103150000,
+        "taking": 84583000,
+        "fee": 0,
+        "maker_side": "SELL",
+        "price": 0.82
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0x076ca0207aaa48365da2eb6a917edcbdee5e4e7b",
+        "taker": "0x491952b03ecf9ff4c3d0189b7e4f13431584067e",
+        "makerAssetId": "43921528416127747755995678186007852634317246079481323514186378885265571609009",
+        "takerAssetId": "0",
+        "making": 56000000,
+        "taking": 45920000,
+        "fee": 0,
+        "maker_side": "SELL",
+        "price": 0.82
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0xbaa2bcb5439e985ce4ccf815b4700027d1b92c73",
+        "taker": "0x491952b03ecf9ff4c3d0189b7e4f13431584067e",
+        "makerAssetId": "43921528416127747755995678186007852634317246079481323514186378885265571609009",
+        "takerAssetId": "0",
+        "making": 240850000,
+        "taking": 199905500,
+        "fee": 0,
+        "maker_side": "SELL",
+        "price": 0.83
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0x491952b03ecf9ff4c3d0189b7e4f13431584067e",
+        "taker": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "makerAssetId": "32915172045130582917964947903812851358453405101351914444477985913955849289820",
+        "takerAssetId": "0",
+        "making": 400000000,
+        "taking": 69591500,
+        "fee": 0,
+        "maker_side": "SELL",
+        "price": 0.17397875
+      }
+    ],
+    "position_events": [
+      {
+        "event": null,
+        "stakeholder": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "parentCollectionId": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "conditionId": "0x1d039941b393f61a08567d37ef2e45bc3e7b19984d186c5e7ab4e06243c3ad9d",
+        "collateralToken": "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",
+        "partition": [
+          "1",
+          "2"
+        ],
+        "amount": 103150000
+      },
+      {
+        "event": null,
+        "stakeholder": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "parentCollectionId": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "conditionId": "0x1d039941b393f61a08567d37ef2e45bc3e7b19984d186c5e7ab4e06243c3ad9d",
+        "collateralToken": "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",
+        "partition": [
+          "1",
+          "2"
+        ],
+        "amount": 56000000
+      },
+      {
+        "event": null,
+        "stakeholder": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "parentCollectionId": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "conditionId": "0x1d039941b393f61a08567d37ef2e45bc3e7b19984d186c5e7ab4e06243c3ad9d",
+        "collateralToken": "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",
+        "partition": [
+          "1",
+          "2"
+        ],
+        "amount": 240850000
+      }
+    ]
+  }
+}
+
+
+====================================================================================================
+COMPLEMENTARY with 2 OrderFilled events
+====================================================================================================
+{
+  "block_number": 79172085,
+  "transaction_hash": "0xb500c84af004f931a30f3acce978d49a5eaaf4951672dc4373366bfed5fee44d",
+  "type": "complementary",
+  "exchange": "base",
+  "trade": {
+    "orders_matched": [
+      {
+        "event": "OrdersMatched",
+        "takerOrderMaker": "0xa58afb2ad195a187df4c8bff2d4478527b36293c",
+        "makerAssetId": "0",
+        "takerAssetId": "31784216631001805305743051225715757286725124697966829219610484294142813142006",
+        "makerAmountFilled": 4835880,
+        "takerAmountFilled": 84840000
+      }
+    ],
+    "orders_filled": [
+      {
+        "event": "OrderFilled",
+        "maker": "0xf0b0ef1d6320c6be896b4c9c54dd74407e7f8cab",
+        "taker": "0xa58afb2ad195a187df4c8bff2d4478527b36293c",
+        "makerAssetId": "31784216631001805305743051225715757286725124697966829219610484294142813142006",
+        "takerAssetId": "0",
+        "making": 84840000,
+        "taking": 4835880,
+        "fee": 0,
+        "maker_side": "SELL",
+        "price": 0.057
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0xa58afb2ad195a187df4c8bff2d4478527b36293c",
+        "taker": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "makerAssetId": "0",
+        "takerAssetId": "31784216631001805305743051225715757286725124697966829219610484294142813142006",
+        "making": 4835880,
+        "taking": 84840000,
+        "fee": 0,
+        "maker_side": "BUY",
+        "price": 0.057
+      }
+    ],
+    "position_events": []
+  }
+}
+
+
+====================================================================================================
+COMPLEMENTARY with 3 OrderFilled events
+====================================================================================================
+{
+  "block_number": 79172097,
+  "transaction_hash": "0xfbca2fb17e965bd4f7a556b33131ad42306ff0c562e4d7da47ddf51148b9b7db",
+  "type": "complementary",
+  "exchange": "base",
+  "trade": {
+    "orders_matched": [
+      {
+        "event": "OrdersMatched",
+        "takerOrderMaker": "0x8c573be6f79a6207b895eb726c3cf408db50cf0e",
+        "makerAssetId": "111232834811362767859525281687948396885646467256788747803105376942157226931070",
+        "takerAssetId": "0",
+        "makerAmountFilled": 10940000,
+        "takerAmountFilled": 5360600
+      }
+    ],
+    "orders_filled": [
+      {
+        "event": "OrderFilled",
+        "maker": "0xdb9c2e152d90fc79f92da47b8b22e36e8480a8be",
+        "taker": "0x8c573be6f79a6207b895eb726c3cf408db50cf0e",
+        "makerAssetId": "0",
+        "takerAssetId": "111232834811362767859525281687948396885646467256788747803105376942157226931070",
+        "making": 2450000,
+        "taking": 5000000,
+        "fee": 0,
+        "maker_side": "BUY",
+        "price": 0.49
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0x0b509b9834be18384dd273e02c4ed138d263c917",
+        "taker": "0x8c573be6f79a6207b895eb726c3cf408db50cf0e",
+        "makerAssetId": "0",
+        "takerAssetId": "111232834811362767859525281687948396885646467256788747803105376942157226931070",
+        "making": 2910600,
+        "taking": 5940000,
+        "fee": 0,
+        "maker_side": "BUY",
+        "price": 0.49
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0x8c573be6f79a6207b895eb726c3cf408db50cf0e",
+        "taker": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "makerAssetId": "111232834811362767859525281687948396885646467256788747803105376942157226931070",
+        "takerAssetId": "0",
+        "making": 10940000,
+        "taking": 5360600,
+        "fee": 0,
+        "maker_side": "SELL",
+        "price": 0.49
+      }
+    ],
+    "position_events": []
+  }
+}
+
+
+====================================================================================================
+COMPLEMENTARY with 4 OrderFilled events
+====================================================================================================
+{
+  "block_number": 79172123,
+  "transaction_hash": "0x415a1a71472b0d67988f4a93206a78878b72a6cd436c9154c22c9b1bd94aa8a0",
+  "type": "complementary",
+  "exchange": "base",
+  "trade": {
+    "orders_matched": [
+      {
+        "event": "OrdersMatched",
+        "takerOrderMaker": "0x919567f2466daf2627ae3582ef6a2502ad5772a4",
+        "makerAssetId": "38228822869151281971968118952587146075754369376540227197460378462251508367913",
+        "takerAssetId": "0",
+        "makerAmountFilled": 600000000,
+        "takerAmountFilled": 432100000
+      }
+    ],
+    "orders_filled": [
+      {
+        "event": "OrderFilled",
+        "maker": "0x6031b6eed1c97e853c6e0f03ad3ce3529351f96d",
+        "taker": "0x919567f2466daf2627ae3582ef6a2502ad5772a4",
+        "makerAssetId": "0",
+        "takerAssetId": "38228822869151281971968118952587146075754369376540227197460378462251508367913",
+        "making": 7300000,
+        "taking": 10000000,
+        "fee": 0,
+        "maker_side": "BUY",
+        "price": 0.73
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0xb2a922eda6b288af1248f461afc7ab8504cf0a5d",
+        "taker": "0x919567f2466daf2627ae3582ef6a2502ad5772a4",
+        "makerAssetId": "0",
+        "takerAssetId": "38228822869151281971968118952587146075754369376540227197460378462251508367913",
+        "making": 34812000,
+        "taking": 48350000,
+        "fee": 0,
+        "maker_side": "BUY",
+        "price": 0.72
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0xd71304743e49f7254e5d9329c9e4b9ec5b6f7ff5",
+        "taker": "0x919567f2466daf2627ae3582ef6a2502ad5772a4",
+        "makerAssetId": "0",
+        "takerAssetId": "38228822869151281971968118952587146075754369376540227197460378462251508367913",
+        "making": 389988000,
+        "taking": 541650000,
+        "fee": 0,
+        "maker_side": "BUY",
+        "price": 0.72
+      },
+      {
+        "event": "OrderFilled",
+        "maker": "0x919567f2466daf2627ae3582ef6a2502ad5772a4",
+        "taker": "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e",
+        "makerAssetId": "38228822869151281971968118952587146075754369376540227197460378462251508367913",
+        "takerAssetId": "0",
+        "making": 600000000,
+        "taking": 432100000,
+        "fee": 0,
+        "maker_side": "SELL",
+        "price": 0.7201666666666666
+      }
+    ],
+    "position_events": []
+  }
+}
