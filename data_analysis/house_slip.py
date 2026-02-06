@@ -6,8 +6,8 @@ Slippage is defined as the value lost by a taker for accepting prices worse than
 best price available to them within a single atomic trade filled by multiple makers.
 
 This script generates one plot with three lines:
-- Cumulative slippage when makers are buying (taker is selling).
-- Cumulative slippage when makers are selling (taker is buying).
+- Cumulative slippage for takers with "Democrats Win" intention.
+- Cumulative slippage for takers with "Republicans Win" intention.
 - Combined total cumulative slippage.
 """
 
@@ -47,12 +47,35 @@ USDC_SCALAR = Decimal("1_000_000")
 SHARE_SCALAR = Decimal("1_000_000")
 COLLATERAL_ASSET_ID = "0"
 
+# --- Taker Intention Asset IDs ---
+# Democrats Win: buying Democrats Yes tokens OR selling Republicans (Yes or No) tokens
+DEMOCRATS_YES = 83247781037352156539108067944461291821683755894607244160607042790356561625563
+DEMOCRATS_NO = 33156410999665902694791064431724433042010245771106314074312009703157423879038
+REPUBLICANS_YES = 65139230827417363158752884968303867495725894165574887635816574090175320800482
+REPUBLICANS_NO = 17371217118862125782438074585166210555214661810823929795910191856905580975576
+
+DEMOCRATS_ASSETS = {DEMOCRATS_YES, DEMOCRATS_NO}
+REPUBLICANS_ASSETS = {REPUBLICANS_YES, REPUBLICANS_NO}
+
 # ----------------------------------------------------------------
 # HELPER & DATA PROCESSING FUNCTIONS
 # ----------------------------------------------------------------
 
 def block_to_timestamp(block_number: int) -> int:
     return ((block_number - REF_BLOCK_NUMBER) * SECONDS_PER_BLOCK) + REF_UNIX_TIMESTAMP
+
+def determine_taker_intention(asset_id: int, taker_is_buying: bool) -> str:
+    """
+    Determine taker's intention based on which asset they're trading and their direction.
+    - BUYING Democrats tokens or SELLING Republicans tokens → "Democrats"
+    - BUYING Republicans tokens or SELLING Democrats tokens → "Republicans"
+    """
+    if asset_id in DEMOCRATS_ASSETS:
+        return "Democrats" if taker_is_buying else "Republicans"
+    elif asset_id in REPUBLICANS_ASSETS:
+        return "Republicans" if taker_is_buying else "Democrats"
+    else:
+        return "Unknown"
 
 async def fetch_data(query: str) -> list:
     conn = None
@@ -236,12 +259,16 @@ def calculate_slippage_from_settlements(records: list) -> pd.DataFrame:
                 continue
 
             if tx_slippage > 0:
-                # Categorize based on taker direction (which we now know)
-                slippage_type = 'buying' if taker_is_buying else 'selling'
+                # Determine taker's intention based on the non-zero asset ID
+                non_zero_asset_id = exchange_fill['makerAssetId'] if exchange_fill['takerAssetId'] == 0 else exchange_fill['takerAssetId']
+                taker_intention = determine_taker_intention(non_zero_asset_id, taker_is_buying)
+                
+                logger.info(f"  Taker intention: {taker_intention} (based on asset {non_zero_asset_id})")
+                
                 slippage_events.append({
                     'timestamp': pd.to_datetime(block_to_timestamp(row['block_number']), unit='s'),
-                    'maker_buying_slippage': tx_slippage if taker_is_buying else Decimal(0),
-                    'maker_selling_slippage': tx_slippage if not taker_is_buying else Decimal(0)
+                    'democrats_slippage': tx_slippage if taker_intention == "Democrats" else Decimal(0),
+                    'republicans_slippage': tx_slippage if taker_intention == "Republicans" else Decimal(0)
                 })
 
         except Exception as e:
@@ -260,9 +287,9 @@ def plot_cumulative_slippage(df: pd.DataFrame):
         return
 
     df.sort_values('timestamp', inplace=True)
-    df['cum_maker_buying'] = df['maker_buying_slippage'].cumsum()
-    df['cum_maker_selling'] = df['maker_selling_slippage'].cumsum()
-    df['cum_combined'] = df['cum_maker_buying'] + df['cum_maker_selling']
+    df['cum_democrats'] = df['democrats_slippage'].cumsum()
+    df['cum_republicans'] = df['republicans_slippage'].cumsum()
+    df['cum_combined'] = df['cum_democrats'] + df['cum_republicans']
 
     plt.style.use('seaborn-v0_8-whitegrid')
     fig, ax = plt.subplots(figsize=(16, 9))
@@ -272,11 +299,11 @@ def plot_cumulative_slippage(df: pd.DataFrame):
         total = series.iloc[-1]
         return f"{base_label} (Total: ${total:,.2f})"
 
-    ax.plot(df['timestamp'], df['cum_maker_buying'], color='crimson', linestyle='-', linewidth=2, label=get_legend_label('Maker Buying Slippage', df['cum_maker_buying']))
-    ax.plot(df['timestamp'], df['cum_maker_selling'], color='royalblue', linestyle='-', linewidth=2, label=get_legend_label('Maker Selling Slippage', df['cum_maker_selling']))
+    ax.plot(df['timestamp'], df['cum_democrats'], color='steelblue', linestyle='-', linewidth=2, label=get_legend_label('Democrats Win Intention', df['cum_democrats']))
+    ax.plot(df['timestamp'], df['cum_republicans'], color='crimson', linestyle='-', linewidth=2, label=get_legend_label('Republicans Win Intention', df['cum_republicans']))
     ax.plot(df['timestamp'], df['cum_combined'], color='black', linestyle='--', linewidth=2.5, label=get_legend_label('Combined Slippage', df['cum_combined']))
 
-    ax.set_title('Cumulative Slippage in On-Chain Settlements', fontsize=18, pad=20)
+    ax.set_title('Cumulative Slippage in On-Chain Settlements by Taker Intention', fontsize=18, pad=20)
     ax.set_xlabel('Date', fontsize=14)
     ax.set_ylabel('Cumulative Slippage (in USDC)', fontsize=14)
     ax.legend(loc='best', fontsize='large')

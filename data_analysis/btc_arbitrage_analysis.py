@@ -191,10 +191,14 @@ def plot_interval_comparison(df, interval_num, interval_dt):
 
 def create_heatmap(all_data, metric_name, title, filename):
     """Create heatmap of arbitrage metric across cycles."""
-    # Initialize heatmap grid
+    # Initialize heatmap grid and statistics
     # Y-axis: price buckets (RANGE_DEN buckets of size 1/RANGE_DEN)
     # X-axis: time buckets (DOMAIN_DEN buckets)
     heatmap = np.zeros((RANGE_DEN, DOMAIN_DEN))
+    time_bucket_stats = {}  # Store values per time bucket for mean/std calculation
+    
+    for i in range(DOMAIN_DEN):
+        time_bucket_stats[i] = []
     
     for cycle_data in all_data:
         if cycle_data is None or len(cycle_data) == 0:
@@ -228,31 +232,89 @@ def create_heatmap(all_data, metric_name, title, filename):
             time_bucket = min(time_bucket, DOMAIN_DEN - 1)
             
             heatmap[price_bucket, time_bucket] += 1
+            time_bucket_stats[time_bucket].append(value_clamped)
     
-    # Plot heatmap
-    fig, ax = plt.subplots(figsize=(16, 10))
+    # Calculate expected value and std for each time bucket
+    expected_values = np.zeros(DOMAIN_DEN)
+    std_values = np.zeros(DOMAIN_DEN)
     
-    im = ax.imshow(heatmap, aspect='auto', origin='lower', cmap='YlOrRd', interpolation='nearest')
+    for i in range(DOMAIN_DEN):
+        if time_bucket_stats[i]:
+            expected_values[i] = np.mean(time_bucket_stats[i])
+            std_values[i] = np.std(time_bucket_stats[i])
+        else:
+            expected_values[i] = np.nan
+            std_values[i] = np.nan
+    
+    # Find max value in heatmap for dynamic range adjustment
+    max_value = np.nanmax(heatmap)
+    max_y_idx = np.where((heatmap > 0).any(axis=1))[0]
+    if len(max_y_idx) > 0:
+        max_y_idx = max_y_idx[-1] + 1
+    else:
+        max_y_idx = RANGE_DEN
+    
+    # Plot heatmap with statistics
+    fig = plt.figure(figsize=(16, 12))
+    gs = fig.add_gridspec(3, 1, height_ratios=[4, 1, 1], hspace=0.3)
+    
+    # Main heatmap
+    ax_hm = fig.add_subplot(gs[0])
+    heatmap_trimmed = heatmap[:max_y_idx, :]
+    
+    im = ax_hm.imshow(heatmap_trimmed, aspect='auto', origin='lower', cmap='YlOrRd', interpolation='nearest')
     
     # Labels
-    ax.set_xlabel('Time (seconds into cycle)')
-    ax.set_ylabel('Value (buckets of 1/RANGE_DEN)')
-    ax.set_title(title)
+    bucket_width = 1.0 / RANGE_DEN
+    time_window_s = 15 * 60
+    time_bucket_width_s = time_window_s / DOMAIN_DEN
+    
+    ax_hm.set_xlabel(f'Time (bucket width: {time_bucket_width_s:.1f}s into cycle)')
+    ax_hm.set_ylabel(f'Value (bucket height: {bucket_width:.4f}, width: {bucket_width:.4f})')
+    ax_hm.set_title(title)
     
     # Set tick labels
-    ax.set_xticks(np.linspace(0, DOMAIN_DEN-1, 10))
-    ax.set_xticklabels([f'{int(i * 15*60 / DOMAIN_DEN)}' for i in np.linspace(0, DOMAIN_DEN-1, 10)])
+    ax_hm.set_xticks(np.linspace(0, DOMAIN_DEN-1, 10))
+    ax_hm.set_xticklabels([f'{int(i * time_window_s / DOMAIN_DEN)}' for i in np.linspace(0, DOMAIN_DEN-1, 10)])
     
-    ax.set_yticks(np.linspace(0, RANGE_DEN-1, 11))
-    ax.set_yticklabels([f'{i/RANGE_DEN:.2f}' for i in np.linspace(0, RANGE_DEN, 11)])
+    # Adjust y-ticks to match trimmed heatmap
+    n_ticks = min(11, max_y_idx + 1)
+    ax_hm.set_yticks(np.linspace(0, max_y_idx-1, n_ticks))
+    ax_hm.set_yticklabels([f'{i*bucket_width:.3f}' for i in np.linspace(0, max_y_idx, n_ticks)])
     
-    cbar = plt.colorbar(im, ax=ax)
+    cbar = plt.colorbar(im, ax=ax_hm)
     cbar.set_label('Observation Count')
     
-    plt.tight_layout()
+    # Expected value plot
+    ax_ev = fig.add_subplot(gs[1])
+    valid_idx = ~np.isnan(expected_values)
+    ax_ev.plot(np.where(valid_idx)[0], expected_values[valid_idx], 'b-', linewidth=2, label='Expected Value')
+    ax_ev.fill_between(np.where(valid_idx)[0], 
+                        expected_values[valid_idx] - std_values[valid_idx],
+                        expected_values[valid_idx] + std_values[valid_idx],
+                        alpha=0.3, label='±1 Std Dev')
+    ax_ev.set_ylabel('Expected Value')
+    ax_ev.set_xlim(0, DOMAIN_DEN-1)
+    ax_ev.grid(True, alpha=0.3)
+    ax_ev.legend(loc='upper right')
+    ax_ev.set_xticks(np.linspace(0, DOMAIN_DEN-1, 10))
+    ax_ev.set_xticklabels([f'{int(i * time_window_s / DOMAIN_DEN)}' for i in np.linspace(0, DOMAIN_DEN-1, 10)])
+    
+    # Standard deviation plot
+    ax_std = fig.add_subplot(gs[2])
+    ax_std.plot(np.where(valid_idx)[0], std_values[valid_idx], 'r-', linewidth=2, label='Standard Deviation')
+    ax_std.set_ylabel('Std Dev')
+    ax_std.set_xlabel(f'Time (seconds into cycle, bucket width: {time_bucket_width_s:.1f}s)')
+    ax_std.set_xlim(0, DOMAIN_DEN-1)
+    ax_std.grid(True, alpha=0.3)
+    ax_std.legend(loc='upper right')
+    ax_std.set_xticks(np.linspace(0, DOMAIN_DEN-1, 10))
+    ax_std.set_xticklabels([f'{int(i * time_window_s / DOMAIN_DEN)}' for i in np.linspace(0, DOMAIN_DEN-1, 10)])
+    
+    plt.suptitle(title, fontsize=14, fontweight='bold', y=0.995)
     
     filepath = os.path.join(PLOT_DIR, filename)
-    plt.savefig(filepath, dpi=100)
+    plt.savefig(filepath, dpi=100, bbox_inches='tight')
     plt.close()
     logger.info(f"Saved heatmap: {filepath}")
 
