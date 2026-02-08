@@ -1,0 +1,7 @@
+2026-02-06 20:52:07 | 🚀 Processing settlements from block 79172085 to 79222085
+2026-02-06 20:52:45 |   Blocks 79,172,085-79,222,085: 222797 settlements, batch volume: $35506334.75
+2026-02-06 20:52:45 | 
+✅ Analyzed 222797 settlements
+2026-02-06 20:52:45 | 📊 Cumulative volume - SPLIT: $23384350.69, MERGE: $6862814.26, COMPLEMENTARY: $5259169.81
+2026-02-06 20:52:45 |    Total: $35506334.75
+2026-02-06 20:52:46 | ✅ Plot saved to volume_all_matchtype.png

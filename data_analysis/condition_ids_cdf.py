@@ -41,9 +41,9 @@ ORACLE_ALIASES = {
 }
 
 # --- Dynamic Time Filtering (Will be set in main()) ---
-FILTER_BY_TIME = False
-START_TIME = None
-END_TIME = None
+FILTER_BY_BLOCK = True
+START_BLOCK = 79172086  # Nov 18, 2025 (inclusive)
+END_BLOCK = 81225971    # Jan 5, 2026 00:00 UTC (inclusive)
 
 # --- PMF Configuration ---
 # Define the desired bin width (step size) in seconds for the PMF plot
@@ -69,9 +69,13 @@ async def fetch_data(pool, query, params=[]):
             elapsed = time.time() - start
             if elapsed > 1.0:
                 logger.info(f"Query fetched {len(rows):,} rows in {elapsed:.2f}s")
+            if not rows:
+                logger.warning(f"Query returned 0 rows. Query preview: {query[:200]}...")
             return pd.DataFrame([dict(row) for row in rows]) if rows else pd.DataFrame()
     except Exception as e:
         logger.error(f"SQL Error: {e}")
+        logger.error(f"Query: {query}")
+        logger.error(f"Params: {params}")
         return pd.DataFrame()
 
 async def fetch_time_range(pool):
@@ -527,7 +531,9 @@ def analyze_and_print_stats(df_matched_all, total_prepared_events, oracle_totals
 # ----------------------------------------------------------------
 
 async def main():
-    global START_TIME, END_TIME, FILTER_BY_TIME
+    global START_BLOCK, END_BLOCK, FILTER_BY_BLOCK
+    
+    logger.info(f"Using block range: {START_BLOCK} to {END_BLOCK} (inclusive)")
     
     # 1. Load CSV Data (ALL markets, no time filter yet)
     df_markets = load_market_data(POLY_CSV_PATH)
@@ -540,39 +546,26 @@ async def main():
     pool = await asyncpg.create_pool(user=DB_USER, password=DB_PASS, database=DB_NAME, host=PG_HOST, port=PG_PORT)
     logger.info("Connected to database.")
 
-    # 3. Determine Dynamic Time Range
-    START_TIME, END_TIME = await fetch_time_range(pool)
-    if START_TIME is None:
-        await pool.close()
-        return
-    FILTER_BY_TIME = True # Enable filtering now that the range is set
+    # Note: Block-based filtering is applied in SQL queries below
 
-    # Convert ms timestamps to datetime objects for later filtering
-    start_dt = pd.to_datetime(START_TIME, unit='ms', utc=True)
-    end_dt = pd.to_datetime(END_TIME, unit='ms', utc=True)
-
-    def build_time_clause(column_name, current_params):
-        """Builds the WHERE clause using the dynamically set START_TIME/END_TIME."""
-        if not FILTER_BY_TIME: return "", current_params
-        clauses = []
-        new_params = current_params.copy()
-        if START_TIME:
-            new_params.append(START_TIME)
-            clauses.append(f"{column_name} >= ${len(new_params)}")
-        if END_TIME:
-            new_params.append(END_TIME)
-            clauses.append(f"{column_name} <= ${len(new_params)}")
-        return (" AND " + " AND ".join(clauses) if clauses else ""), new_params
-
-    # 4. Fetch CTF ConditionPreparation events (ALL, no time filter yet)
-    logger.info("Fetching CTF ConditionPreparation data (all events)...")
+    # 4. Fetch CTF ConditionPreparation events (with block range filter)
+    logger.info("Fetching CTF ConditionPreparation data...")
     q_ctf = """
-        SELECT topics[2] as condition_id, timestamp_ms as timestamp, '0x' || substring(topics[3] from 27) as oracle 
+        SELECT topics[2] as condition_id, timestamp_ms as timestamp, '0x' || substring(topics[3] from 27) as oracle, block_number
         FROM events_conditional_tokens 
         WHERE event_name = 'ConditionPreparation' 
         AND LOWER(contract_address) = $1
+        AND block_number >= $2
+        AND block_number <= $3
     """
-    df_ctf = await fetch_data(pool, q_ctf, [ADDR['conditional_tokens']])
+    df_ctf = await fetch_data(pool, q_ctf, [ADDR['conditional_tokens'], START_BLOCK, END_BLOCK])
+    
+    if df_ctf.empty:
+        logger.error(f"No ConditionPreparation events found in block range {START_BLOCK} to {END_BLOCK}.")
+        logger.error(f"Try adjusting these block numbers.")
+        await pool.close()
+        return
+    
     df_ctf['condition_id'] = df_ctf['condition_id'].str.lower()
     df_ctf['timestamp'] = pd.to_datetime(df_ctf['timestamp'], unit='ms', utc=True)
     
@@ -625,15 +618,17 @@ async def main():
     logger.info("Fetching ALL events from matching oracles (set A)...")
     pool_for_all_events = await asyncpg.create_pool(user=DB_USER, password=DB_PASS, database=DB_NAME, host=PG_HOST, port=PG_PORT)
     
-    q_all_events = f"""
-        SELECT topics[2] as condition_id, timestamp_ms as timestamp, '0x' || substring(topics[3] from 27) as oracle 
+    q_all_events = """
+        SELECT topics[2] as condition_id, timestamp_ms as timestamp, '0x' || substring(topics[3] from 27) as oracle, block_number
         FROM events_conditional_tokens 
         WHERE event_name = 'ConditionPreparation' 
         AND LOWER(contract_address) = $1
         AND '0x' || substring(topics[3] from 27) = ANY($2::text[])
+        AND block_number >= $3
+        AND block_number <= $4
     """
     oracle_addresses = list(oracles_with_matches)
-    df_all_events_A = await fetch_data(pool_for_all_events, q_all_events, [ADDR['conditional_tokens'], oracle_addresses])
+    df_all_events_A = await fetch_data(pool_for_all_events, q_all_events, [ADDR['conditional_tokens'], oracle_addresses, START_BLOCK, END_BLOCK])
     df_all_events_A['condition_id'] = df_all_events_A['condition_id'].str.lower()
     df_all_events_A['timestamp_dt'] = pd.to_datetime(df_all_events_A['timestamp'], unit='ms', utc=True)
     
@@ -641,32 +636,25 @@ async def main():
     df_all_events_A = df_all_events_A.sort_values('timestamp_dt').drop_duplicates(subset='condition_id', keep='first')
     logger.info(f"Set A (all events from matching oracles): {len(df_all_events_A):,} unique condition_ids")
     
-    # 7. Create filtered subsets: B, C, D
-    df_B = df_all_events_A[
-        (df_all_events_A['timestamp_dt'] >= start_dt) & 
-        (df_all_events_A['timestamp_dt'] <= end_dt)
-    ].copy()
-    logger.info(f"Set B (createdAt/timestamp in range): {len(df_B):,} events")
+    # 7. Create filtered subsets: B, C, D (all events already filtered by block range)
+    df_B = df_all_events_A.copy()
+    logger.info(f"Set B (events in block range): {len(df_B):,} events")
     
-    # For C, we need markets with startDate in range, then find matching events
+    # For C, we need markets with startDate, then find matching events
     df_markets_with_start_in_range = df_markets[
-        (df_markets['startDate_dt'].notna()) & 
-        (df_markets['startDate_dt'] >= start_dt) & 
-        (df_markets['startDate_dt'] <= end_dt)
+        df_markets['startDate_dt'].notna()
     ].copy()
     condition_ids_C = set(df_markets_with_start_in_range['conditionId'].unique())
     df_C = df_all_events_A[df_all_events_A['condition_id'].isin(condition_ids_C)].copy()
-    logger.info(f"Set C (markets with startDate in range): {len(df_C):,} events")
+    logger.info(f"Set C (markets with startDate, events in block range): {len(df_C):,} events")
     
-    # For D, we need markets with acceptingOrdersTimestamp in range
+    # For D, we need markets with acceptingOrdersTimestamp
     df_markets_with_accepting_in_range = df_markets[
-        (df_markets['acceptingOrdersTimestamp_dt'].notna()) & 
-        (df_markets['acceptingOrdersTimestamp_dt'] >= start_dt) & 
-        (df_markets['acceptingOrdersTimestamp_dt'] <= end_dt)
+        df_markets['acceptingOrdersTimestamp_dt'].notna()
     ].copy()
     condition_ids_D = set(df_markets_with_accepting_in_range['conditionId'].unique())
     df_D = df_all_events_A[df_all_events_A['condition_id'].isin(condition_ids_D)].copy()
-    logger.info(f"Set D (markets with acceptingOrdersTimestamp in range): {len(df_D):,} events")
+    logger.info(f"Set D (markets with acceptingOrdersTimestamp, events in block range): {len(df_D):,} events")
     
     await pool_for_all_events.close()
     
@@ -681,14 +669,11 @@ async def main():
     )
     logger.info(f"Matched {len(df_matched_all):,} markets with ConditionPreparation events (all time).")
     
-    # 9. For statistics, get matched markets in time range
-    df_matched_filtered = df_matched_all[
-        (df_matched_all['createdAt_dt'] >= start_dt) & 
-        (df_matched_all['createdAt_dt'] <= end_dt)
-    ].copy()
+    # 9. For statistics, all matched markets where corresponding events are in block range
+    df_matched_filtered = df_matched_all.copy()
     
     total_markets_in_range = len(df_matched_filtered)
-    logger.info(f"After applying time range filter: {total_markets_in_range:,} markets in the time window.")
+    logger.info(f"Matched markets (events in block range {START_BLOCK}-{END_BLOCK}): {total_markets_in_range:,} markets.")
     
     # Log total ConditionPreparation events (before dedup) from matched dataset
     logger.info("\n--- ConditionPreparation Events from All Matches (before deduplication) ---")

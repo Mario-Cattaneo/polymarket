@@ -36,21 +36,24 @@ Prerequest: TypeAlias = Callable[['RequestHandler'], Coroutine[None, None, bool]
 
 
 class HttpTaskConfig:
-    __slots__ = ('base_back_off_s', 'max_back_off_s', 'back_off_rate', 'request_break_s')
+    __slots__ = ('base_back_off_s', 'max_back_off_s', 'back_off_rate', 'request_break_s', 'timeout_s')
 
     def __init__(self, 
                  base_back_off_s: float = 1.0, 
                  max_back_off_s: float = 90.0, 
                  back_off_rate: float = 2.0, 
-                 request_break_s: float = 0.1):
+                 request_break_s: float = 0.1,
+                 timeout_s: float = 30.0):
         if not isinstance(base_back_off_s, (int, float)) or base_back_off_s < 0: raise ValueError(f"'base_back_off_s' must be a non-negative number, but got {base_back_off_s}")
         if not isinstance(max_back_off_s, (int, float)) or max_back_off_s < base_back_off_s: raise ValueError(f"'max_back_off_s' must be a number >= base_back_off_s, but got {max_back_off_s}")
         if not isinstance(back_off_rate, float) or back_off_rate < 1.0: raise ValueError(f"'back_off_rate' must be a float >= 1.0, but got {back_off_rate}")
         if not isinstance(request_break_s, (int, float)) or request_break_s < 0: raise ValueError(f"'request_break_s' must be a non-negative number, but got {request_break_s}")
+        if not isinstance(timeout_s, (int, float)) or timeout_s < 0: raise ValueError(f"'timeout_s' must be a non-negative number, but got {timeout_s}")
         self.base_back_off_s = base_back_off_s
         self.max_back_off_s = max_back_off_s
         self.back_off_rate = back_off_rate
         self.request_break_s = request_break_s
+        self.timeout_s = timeout_s
 
     def to_dict(self) -> dict:
         return {attr: getattr(self, attr) for attr in self.__slots__}
@@ -139,9 +142,9 @@ class RequestHandler:
                 self.last_request_time_s = time.monotonic()
                 
                 if self.method == Method.GET:
-                    response = await client.get(self.url, headers=self.headers)
+                    response = await client.get(self.url, headers=self.headers, timeout=config.timeout_s)
                 elif self.method == Method.POST:
-                    response = await client.post(self.url, content=self.payload, headers=self.headers)
+                    response = await client.post(self.url, content=self.payload, headers=self.headers, timeout=config.timeout_s)
       
                 if handler_task.cancelled():
                     return

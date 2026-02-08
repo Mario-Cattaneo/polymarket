@@ -113,6 +113,7 @@ class EventCollector:
         # Watchdog for hang detection
         self.last_progress_time: float = 0.0
         self.last_progress_block: int = 0
+        self.last_save_time: float = 0.0
         self.watchdog_timeout_s: float = 300  # 5 minutes of no progress = force completion
 
         # Contiguous Progress Tracking
@@ -215,7 +216,13 @@ class EventCollector:
             max_connections=self.general['max_concurrent'],
             max_keepalive_connections=self.general['max_concurrent']
         )
-        task_config = HttpTaskConfig(request_break_s=1.0 / self.general['global_rate_limit'])
+        task_config = HttpTaskConfig(
+            request_break_s=1.0 / self.general['global_rate_limit'],
+            timeout_s=180.0,  # 3 minute timeout - high-volume blocks need time
+            base_back_off_s=0.5,  # Start with 0.5s instead of 1s
+            max_back_off_s=30.0,  # Cap backoff at 30s instead of 90s
+            back_off_rate=1.5  # Slower exponential growth: 0.5→0.75→1.1→1.7→2.6→3.9→5.8→8.7→13→19→28→30s
+        )
 
         for contract in self.config['contracts']:
             self.current_contract_address = contract['address']
@@ -272,6 +279,7 @@ class EventCollector:
                 # Initialize progress tracking
                 self.last_progress_time = time.time()
                 self.last_progress_block = start_block - 1
+                self.last_save_time = time.time()
                 
                 callbacks = HttpTaskCallbacks(
                     next_request=self.next_request,
@@ -287,8 +295,16 @@ class EventCollector:
                 
                 producer.start()
                 
+                save_interval_s = self.general.get('save_interval_seconds', 15)
+                
                 while not self.processing_complete:
                     await asyncio.sleep(1)
+                    
+                    # Periodic save of progress
+                    current_time = time.time()
+                    if current_time - self.last_save_time >= save_interval_s:
+                        self.save_config()
+                        self.last_save_time = current_time
                     
                     # Standard completion check
                     if (self.next_start_block > self.global_end_block and 
@@ -306,8 +322,8 @@ class EventCollector:
                         if time_since_progress > self.watchdog_timeout_s:
                             logger.warning(f"WATCHDOG: No progress for {time_since_progress:.0f}s. "
                                          f"Active requests: {self.active_requests}, "
-                                         f"Retry queue: {len(self.retry_queue)}. "
-                                         f"Force completing.")
+                                         f"Retry queue size: {len(self.retry_queue)}. "
+                                         f"Will keep retrying stuck chunks.\")")
                             self.processing_complete = True
                 
                 producer.stop()
@@ -319,7 +335,7 @@ class EventCollector:
         logger.info("All events collected.")
 
     def next_request(self) -> Tuple[Any, str, Method, Optional[dict], Optional[bytes]]:
-        # 1. Retry Queue
+        # 1. Retry Queue - keep retrying stuck chunks indefinitely until success
         if self.retry_queue:
             start, end = self.retry_queue.popleft()
             self.active_requests += 1
@@ -422,6 +438,7 @@ class EventCollector:
                     self._handle_failure(start, end, req_type)
                     return True
             
+            # CRITICAL: Only mark range complete AFTER successful DB insertion
             self._update_metrics(start, end, len(logs), req_type)
             self._mark_range_complete(start, end)
             

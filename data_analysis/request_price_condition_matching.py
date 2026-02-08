@@ -45,6 +45,11 @@ ORACLE_ALIASES = {
 MOOV2_REQ_TABLE = 'events_managed_oracle'
 MOOV2_ADAPTER_ORACLE = "0x65070be91477460d8a7aeeb94ef92fe056c2f2a7"
 
+# Block range filtering (set to None to disable)
+START_BLOCK_NR = 79172086 # Set to a specific block number to start filtering
+END_BLOCK_NR = 81225971   # Set to a specific block number to end filtering
+BLOCK_BATCH_SIZE = 100000  # Process in batches of N blocks
+
 # Percentiles to calculate (as requested)
 PERCENTILES_TO_CALCULATE = [0.01, 0.50, 0.99]
 
@@ -117,12 +122,14 @@ def format_timedelta(seconds):
 # 2. DATABASE FUNCTIONS
 # ----------------------------------------------------------------
 
-async def fetch_request_price_events(pool, table_name: str) -> List[Dict]:
-    """Fetch and decode RequestPrice events, including timestamp_ms."""
+async def fetch_request_price_events(pool, table_name: str, batch_start: int, batch_end: int) -> List[Dict]:
+    """Fetch and decode RequestPrice events for a specific block range."""
+    where_clause = f"event_name = 'RequestPrice' AND block_number >= {batch_start} AND block_number <= {batch_end}"
+    
     query = f'''
-        SELECT block_number, timestamp_ms, data, topics
+        SELECT block_number, timestamp_ms, transaction_hash, data, topics
         FROM "{table_name}"
-        WHERE event_name = 'RequestPrice'
+        WHERE {where_clause}
         ORDER BY block_number
     '''
     
@@ -174,6 +181,8 @@ async def fetch_request_price_events(pool, table_name: str) -> List[Dict]:
                         all_events.append({
                             'market_id': market_id,
                             'req_timestamp_ms': block_timestamp_ms,
+                            'req_block_nr': record['block_number'],
+                            'req_tx_hash': record['transaction_hash'],
                             'req_table': table_name
                         })
                 
@@ -186,15 +195,16 @@ async def fetch_request_price_events(pool, table_name: str) -> List[Dict]:
     
     return all_events
 
-async def fetch_condition_preparation_events(pool) -> List[Dict]:
-    """Fetch ConditionPreparation events, including timestamp_ms and oracle."""
-    logger.info("Fetching ConditionPreparation events...")
+async def fetch_condition_preparation_events(pool, batch_start: int, batch_end: int) -> List[Dict]:
+    """Fetch ConditionPreparation events for a specific block range, including timestamp_ms and oracle."""
+    logger.info(f"Fetching ConditionPreparation events for blocks {batch_start:,} to {batch_end:,}...")
+    
+    where_clause = f"event_name = 'ConditionPreparation' AND LOWER(contract_address) = $1 AND block_number >= {batch_start} AND block_number <= {batch_end}"
     
     query = f"""
-        SELECT topics[2] as condition_id, timestamp_ms as prep_timestamp_ms, '0x' || substring(topics[3] from 27) as oracle 
+        SELECT block_number, topics[2] as condition_id, timestamp_ms as prep_timestamp_ms, transaction_hash, '0x' || substring(topics[3] from 27) as oracle 
         FROM events_conditional_tokens 
-        WHERE event_name = 'ConditionPreparation' 
-        AND LOWER(contract_address) = $1
+        WHERE {where_clause}
     """
     
     try:
@@ -212,6 +222,10 @@ async def fetch_condition_preparation_events(pool) -> List[Dict]:
                 
                 if isinstance(event['oracle'], str):
                     event['oracle'] = event['oracle'].lower()
+                
+                # Store transaction_hash for later matching
+                event['prep_tx_hash'] = event.get('transaction_hash')
+                event['prep_block_nr'] = event.get('block_number')
             
             return events
             
@@ -277,28 +291,63 @@ async def main():
     logger.info("Connected to database.")
     
     try:
-        # 3. Fetch RequestPrice Events
-        req_price_events_oov2 = await fetch_request_price_events(pool, 'oov2')
-        req_price_events_moov2 = await fetch_request_price_events(pool, 'events_managed_oracle')
+        # 3. Fetch RequestPrice Events (in batches)
+        logger.info(f"Fetching RequestPrice events in batches of {BLOCK_BATCH_SIZE:,} blocks from {START_BLOCK_NR:,} to {END_BLOCK_NR:,}...")
+        all_req_price_events = []
+        prep_events = []
         
-        all_req_price_events = req_price_events_oov2 + req_price_events_moov2
+        current_block = START_BLOCK_NR
+        batch_num = 0
+        
+        while current_block <= END_BLOCK_NR:
+            batch_num += 1
+            batch_end = min(current_block + BLOCK_BATCH_SIZE - 1, END_BLOCK_NR)
+            logger.info(f"Batch {batch_num}: blocks {current_block:,} to {batch_end:,}")
+            
+            # Fetch RequestPrice events for this batch
+            req_price_events_oov2 = await fetch_request_price_events(pool, 'oov2', current_block, batch_end)
+            req_price_events_moov2 = await fetch_request_price_events(pool, 'events_managed_oracle', current_block, batch_end)
+            
+            batch_req_price = req_price_events_oov2 + req_price_events_moov2
+            all_req_price_events.extend(batch_req_price)
+            logger.info(f"  Fetched {len(batch_req_price):,} RequestPrice events in this batch")
+            
+            # Fetch ConditionPreparation events for this batch
+            batch_prep_events = await fetch_condition_preparation_events(pool, current_block, batch_end)
+            prep_events.extend(batch_prep_events)
+            logger.info(f"  Fetched {len(batch_prep_events):,} ConditionPreparation events in this batch")
+            
+            current_block = batch_end + 1
+        
         df_req_price = pd.DataFrame(all_req_price_events)
         
         total_req_price = len(df_req_price)
-        logger.info(f"Total RequestPrice events with extracted market_id: {total_req_price:,}")
+        logger.info(f"\n{'='*80}")
+        logger.info("EVENT FETCH SUMMARY")
+        logger.info(f"{'='*80}")
+        
+        # Breakdown by table
+        if not df_req_price.empty:
+            req_by_table = df_req_price['req_table'].value_counts().to_dict()
+            for table_name in ['oov2', 'events_managed_oracle']:
+                table_alias = "OOV2" if table_name == "oov2" else "MOOV2"
+                count = req_by_table.get(table_name, 0)
+                logger.info(f"RequestPrice Events ({table_alias}): {count:,}")
+        
+        logger.info(f"RequestPrice Events (Total): {total_req_price:,}")
         
         if df_req_price.empty:
             logger.info("No RequestPrice events to process.")
             return
         
-        # 4. Fetch ConditionPreparation Events
-        prep_events = await fetch_condition_preparation_events(pool)
+        # 4. Process ConditionPreparation Events
         df_prep_event = pd.DataFrame(prep_events)
         
         # Deduplicate ConditionPreparation events by condition_id, keeping the earliest one
         df_prep_event = df_prep_event.sort_values('prep_timestamp_ms').drop_duplicates(subset='condition_id', keep='first')
         total_prep_event = len(df_prep_event)
-        logger.info(f"Total unique ConditionPreparation events: {total_prep_event:,}")
+        logger.info(f"ConditionPreparation Events (Total, deduplicated): {total_prep_event:,}")
+        logger.info(f"{'='*80}\n")
         
         if df_prep_event.empty:
             logger.info("No ConditionPreparation events to process.")
@@ -319,43 +368,95 @@ async def main():
         # This creates the final DataFrame containing ONLY the matched pairs and their timestamps/metadata
         df_final_match = pd.merge(
             df_matched_req_csv, 
-            df_prep_event[['condition_id', 'oracle', 'prep_timestamp_ms']], 
+            df_prep_event[['condition_id', 'oracle', 'prep_timestamp_ms', 'prep_tx_hash', 'prep_block_nr']], 
             left_on='conditionId', 
             right_on='condition_id', 
             how='inner'
         )
         
         total_matched = len(df_final_match)
-        logger.info(f"Total Matched RequestPrice <-> ConditionPreparation: {total_matched:,}")
+        
+        logger.info(f"\n{'='*80}")
+        logger.info("MATCHING SUMMARY")
+        logger.info(f"{'='*80}")
+        logger.info(f"RequestPrice <-> CSV Mapping: {len(df_matched_req_csv):,} matches")
+        logger.info(f"RequestPrice <-> ConditionPreparation: {total_matched:,} matches")
         
         if total_matched == 0:
             logger.info("No events were successfully matched.")
             return
         
+        # Analyze timestamp and tx_hash matching among matched pairs
+        same_timestamp = (df_final_match['req_timestamp_ms'] == df_final_match['prep_timestamp_ms']).sum()
+        same_timestamp_pct = (same_timestamp / total_matched) * 100
+        
+        same_tx_hash = (df_final_match['req_tx_hash'] == df_final_match['prep_tx_hash']).sum()
+        same_tx_hash_pct = (same_tx_hash / total_matched) * 100
+        
+        logger.info(f"\nMatched Pairs with Same Timestamp: {same_timestamp:,} ({same_timestamp_pct:.2f}%)")
+        logger.info(f"Matched Pairs with Same Transaction Hash: {same_tx_hash:,} ({same_tx_hash_pct:.2f}%)")
+        logger.info(f"{'='*80}\n")
+        
+        # Analyze matching breakdown by table and oracle
+        logger.info("DETAILED MATCHING BY TABLE")
+        logger.info(f"{'='*80}")
+        
+        for req_table in ['oov2', 'events_managed_oracle']:
+            table_alias = "OOV2" if req_table == "oov2" else "MOOV2"
+            table_matches = df_final_match[df_final_match['req_table'] == req_table]
+            
+            if table_matches.empty:
+                continue
+            
+            logger.info(f"\n{table_alias}:")
+            
+            for oracle in table_matches['oracle'].unique():
+                oracle_alias = ORACLE_ALIASES.get(oracle, oracle)
+                oracle_matches = table_matches[table_matches['oracle'] == oracle]
+                n_matches = len(oracle_matches)
+                
+                # Same block number
+                same_block = (oracle_matches['req_block_nr'] == oracle_matches['prep_block_nr']).sum()
+                same_block_pct = (same_block / n_matches) * 100
+                
+                # Same transaction hash
+                same_tx = (oracle_matches['req_tx_hash'] == oracle_matches['prep_tx_hash']).sum()
+                same_tx_pct = (same_tx / n_matches) * 100
+                
+                logger.info(f"  {oracle_alias} (n={n_matches:,}):")
+                logger.info(f"    - Same Block Number: {same_block:,} ({same_block_pct:.2f}%)")
+                logger.info(f"    - Same Transaction Hash: {same_tx:,} ({same_tx_pct:.2f}%)")
+        
+        logger.info(f"{'='*80}\n")
+        
         # 6. Cardinality Analysis
         
         match_counts = df_final_match.groupby(['req_table', 'oracle']).size().reset_index(name='match_count')
         
-        logger.info("\n--- Detailed Match Cardinality (RequestPrice Source vs. ConditionPreparation Oracle) ---")
+        logger.info("CARDINALITY BREAKDOWN (RequestPrice Source vs. ConditionPreparation Oracle)")
+        logger.info(f"{'='*80}")
         
         for req_table in ['oov2', 'events_managed_oracle']:
-            table_alias = "MOOV2" if req_table == "events_managed_oracle" else "OOV2"
-            logger.info(f"\nMatches for {table_alias} ({req_table}):")
+            table_alias = "OOV2" if req_table == "oov2" else "MOOV2"
             
             table_matches = match_counts[match_counts['req_table'] == req_table]
             
             if table_matches.empty:
-                logger.info("  No matches found for this table.")
                 continue
                 
             total_for_table = table_matches['match_count'].sum()
-            logger.info(f"  Total matches for {table_alias}: {total_for_table:,}")
+            logger.info(f"{table_alias}: {total_for_table:,} matches")
             
             for index, row in table_matches.sort_values(by='match_count', ascending=False).iterrows():
                 oracle_alias = ORACLE_ALIASES.get(row['oracle'], row['oracle'])
-                logger.info(f"    - Oracle {oracle_alias}: {row['match_count']:,}")
+                pct = (row['match_count'] / total_matched) * 100
+                logger.info(f"  - {oracle_alias}: {row['match_count']:,} ({pct:.2f}%)")
+        
+        logger.info(f"{'='*80}\n")
         
         # 7. Comprehensive Timing Analysis (Min, Max, Mean, Std, Skew, Kurtosis, Percentiles)
+        logger.info("TIMING ANALYSIS (T_prep - T_req) on Matched Pairs")
+        logger.info(f"{'='*80}")
         
         # Calculate time difference: Delta T = T_prep - T_req (in seconds)
         df_final_match['time_diff_sec'] = (df_final_match['prep_timestamp_ms'] - df_final_match['req_timestamp_ms']) / 1000
@@ -375,8 +476,6 @@ async def main():
         
         # Step 7.3: Merge all statistics
         timing_stats = pd.merge(timing_stats, quantile_stats, on=['req_table', 'oracle'], how='left')
-        
-        logger.info("\n--- Comprehensive Timing Analysis (T_prep - T_req) on Matched Pairs ---")
         
         MIN_COUNT_FOR_MOMENTS = 5 # Threshold to print Skewness/Kurtosis
         
@@ -406,7 +505,9 @@ async def main():
                 col_name = f'p{int(p*100)}'
                 value = row[col_name]
                 logger.info(f"  {p*100:.0f}th Percentile: {format_timedelta(value)} ({value:.2f} seconds)")
-            
+        
+        logger.info(f"{'='*80}\n")
+        
         # 8. Zero/Non-Zero Difference Analysis for ALL Combinations with Tag Analysis
         
         logger.info("\n--- Zero/Non-Zero Time Difference Analysis for All Combinations ---")

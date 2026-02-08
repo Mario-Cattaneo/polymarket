@@ -2,7 +2,7 @@
   "general": {
     "rpc_env_var": "INFURA_KEY_2",
     "rpc_base_url": "https://polygon-mainnet.infura.io/v3/",
-    "max_concurrent": 30,
+    "max_concurrent": 50,
     "global_rate_limit": 1,
     "save_interval_seconds": 15,
     "batch_size": {
@@ -19,7 +19,7 @@
   },
   "collection_range": {
     "start_block": 79172085,
-    "end_block": null
+    "end_block": 82633241
   },
   "contracts": [
     {
@@ -33,28 +33,28 @@
           "init_batch_size": 1200,
           "collected_range": [
             79172085,
-            82206149
+            82633241
           ]
         },
         {
           "signature": "NewAdmin(address,address)",
           "collected_range": [
             79172085,
-            82590524
+            82633241
           ]
         },
         {
           "signature": "NewOperator(address,address)",
           "collected_range": [
             79172085,
-            82590524
+            82633241
           ]
         },
         {
           "signature": "OrderCancelled(bytes32)",
           "collected_range": [
             79172085,
-            82590524
+            82633241
           ]
         },
         {
@@ -62,7 +62,7 @@
           "init_batch_size": 350,
           "collected_range": [
             79172085,
-            82032690
+            82526499
           ]
         },
         {
@@ -70,35 +70,35 @@
           "init_batch_size": 1200,
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         },
         {
           "signature": "ProxyFactoryUpdated(address,address)",
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         },
         {
           "signature": "RemovedAdmin(address,address)",
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         },
         {
           "signature": "RemovedOperator(address,address)",
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         },
         {
           "signature": "SafeFactoryUpdated(address,address)",
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         },
         {
@@ -106,21 +106,21 @@
           "init_batch_size": 180000,
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         },
         {
           "signature": "TradingPaused(address)",
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         },
         {
           "signature": "TradingUnpaused(address)",
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         }
       ]
@@ -136,28 +136,28 @@
           "signature": "FeeCharged(address,uint256,uint256)",
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         },
         {
           "signature": "NewAdmin(address,address)",
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         },
         {
           "signature": "NewOperator(address,address)",
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         },
         {
           "signature": "OrderCancelled(bytes32)",
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         },
         {
@@ -165,7 +165,7 @@
           "init_batch_size": 350,
           "collected_range": [
             79172085,
-            82147723
+            82174612
           ]
         },
         {

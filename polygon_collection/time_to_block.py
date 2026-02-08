@@ -40,7 +40,7 @@ def get_block_by_timestamp(target_timestamp):
     return low
 
 # Define target time
-start_ts = 1767864474  # Use integer timestamp directly
+start_ts = 	1767571200  # Use integer timestamp directly
 
 print(f"Target Timestamp: {start_ts}")
 
