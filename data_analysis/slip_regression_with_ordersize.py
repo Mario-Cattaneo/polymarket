@@ -503,6 +503,72 @@ def plot_stratified_analysis(df: pd.DataFrame):
     logger.info(f"✅ Stratified analysis saved to {filename}")
     plt.close()
 
+def compute_statistics(inflows: np.ndarray, slippages: np.ndarray) -> dict:
+    """
+    Compute comprehensive statistics for:
+    1. Taker USDC Amount (inflows)
+    2. Slippage
+    3. Slippage / Taker USDC Amount ratio (measured individually over all)
+    Returns dictionary with variance, std dev, and expected value for each.
+    """
+    # Compute ratio (slippage / inflow) for each settlement individually
+    # Handle division by zero by filtering out inflows that are 0
+    ratio = np.divide(slippages, inflows, where=inflows != 0, out=np.full_like(slippages, np.nan))
+    # Remove NaN values from ratio for statistical calculation
+    ratio_clean = ratio[~np.isnan(ratio)]
+    
+    stats_dict = {
+        'taker_usdc_amount': {
+            'expected_value': np.mean(inflows),
+            'variance': np.var(inflows, ddof=1),
+            'std_dev': np.std(inflows, ddof=1),
+            'count': len(inflows)
+        },
+        'slippage': {
+            'expected_value': np.mean(slippages),
+            'variance': np.var(slippages, ddof=1),
+            'std_dev': np.std(slippages, ddof=1),
+            'count': len(slippages)
+        },
+        'slippage_per_usdc': {
+            'expected_value': np.mean(ratio_clean),
+            'variance': np.var(ratio_clean, ddof=1),
+            'std_dev': np.std(ratio_clean, ddof=1),
+            'count': len(ratio_clean)
+        }
+    }
+    
+    return stats_dict
+
+def log_statistics_summary(stats_dict: dict):
+    """Log the computed statistics in a formatted way."""
+    logger.info("\n" + "="*70)
+    logger.info("STATISTICAL ANALYSIS (Filtered Time Range)")
+    logger.info("="*70)
+    
+    # Taker USDC Amount
+    logger.info("\n1. TAKER USDC AMOUNT:")
+    logger.info(f"   Expected Value (Mean):  ${stats_dict['taker_usdc_amount']['expected_value']:.6f}")
+    logger.info(f"   Variance:               {stats_dict['taker_usdc_amount']['variance']:.10f}")
+    logger.info(f"   Std Deviation:          ${stats_dict['taker_usdc_amount']['std_dev']:.6f}")
+    logger.info(f"   Sample Size:            {stats_dict['taker_usdc_amount']['count']:,}")
+    
+    # Slippage
+    logger.info("\n2. SLIPPAGE:")
+    logger.info(f"   Expected Value (Mean):  ${stats_dict['slippage']['expected_value']:.6f}")
+    logger.info(f"   Variance:               {stats_dict['slippage']['variance']:.10f}")
+    logger.info(f"   Std Deviation:          ${stats_dict['slippage']['std_dev']:.6f}")
+    logger.info(f"   Sample Size:            {stats_dict['slippage']['count']:,}")
+    
+    # Slippage / USDC Amount Ratio
+    logger.info("\n3. SLIPPAGE / TAKER USDC AMOUNT:")
+    logger.info(f"   Expected Value (Mean):  {stats_dict['slippage_per_usdc']['expected_value']:.6f}")
+    logger.info(f"   Variance:               {stats_dict['slippage_per_usdc']['variance']:.10f}")
+    logger.info(f"   Std Deviation:          {stats_dict['slippage_per_usdc']['std_dev']:.6f}")
+    logger.info(f"   Sample Size:            {stats_dict['slippage_per_usdc']['count']:,}")
+    
+    logger.info("\n" + "="*70 + "\n")
+
 # ----------------------------------------------------------------
 # MAIN EXECUTION
 # ----------------------------------------------------------------
@@ -604,6 +670,10 @@ async def main():
             'slippage': slippages_arr
         })
         plot_stratified_analysis(df)
+        
+        # Compute and log comprehensive statistics
+        stats_dict = compute_statistics(inflows_arr, slippages_arr)
+        log_statistics_summary(stats_dict)
         
         # Summary statistics
         logger.info("\n### SUMMARY STATISTICS ###\n")

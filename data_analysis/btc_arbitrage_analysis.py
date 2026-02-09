@@ -451,7 +451,7 @@ def plot_expected_value(all_data, metric_name, title, filename):
     logger.info(f"Saved expected value plot: {filepath}")
 
 def plot_stacked_expected_values(all_data, num_cycles):
-    """Create 4 vertically stacked expected value plots in one image using percentiles."""
+    """Create 4 vertically stacked expected value plots in one image with double percentile bands."""
     
     metrics = [
         ('poly_internal', 'Polymarket Internal Price Discrepancy: 1 - (Price YES + Price NO)'),
@@ -461,7 +461,7 @@ def plot_stacked_expected_values(all_data, num_cycles):
     ]
     
     fig, axes = plt.subplots(4, 1, figsize=(22, 12))
-    fig.suptitle(f'Median Price Discrepancy Across All Metrics ({num_cycles} cycles)', 
+    fig.suptitle(f'Price Discrepancy Distributions from {num_cycles} Cycles', 
                  fontsize=28, fontweight='bold', y=0.995)
     
     # Font sizes
@@ -475,17 +475,26 @@ def plot_stacked_expected_values(all_data, num_cycles):
     for idx, (metric_name, title) in enumerate(metrics):
         ax = axes[idx]
         
-        median_values, lower_pct, upper_pct = compute_heatmap_stats(all_data, metric_name)
+        median_values, inner_lower, inner_upper, outer_lower, outer_upper = compute_heatmap_stats(all_data, metric_name)
         valid_idx = ~np.isnan(median_values)
         
         x_data = np.where(valid_idx)[0]
         y_median = median_values[valid_idx]
-        y_lower = lower_pct[valid_idx]
-        y_upper = upper_pct[valid_idx]
+        y_inner_lower = inner_lower[valid_idx]
+        y_inner_upper = inner_upper[valid_idx]
+        y_outer_lower = outer_lower[valid_idx]
+        y_outer_upper = outer_upper[valid_idx]
         
+        # Plot outer band first (behind inner)
+        ax.fill_between(x_data, y_outer_lower, y_outer_upper, 
+                        alpha=0.15, color='blue', label='1st-99th Percentile')
+        
+        # Plot inner band
+        ax.fill_between(x_data, y_inner_lower, y_inner_upper, 
+                        alpha=0.35, color='blue', label='33rd-66th Percentile')
+        
+        # Plot median on top
         ax.plot(x_data, y_median, color='blue', linewidth=3.5, label='Median')
-        ax.fill_between(x_data, y_lower, y_upper, 
-                        alpha=0.35, color='blue', label='25th-75th Percentile ')
         
         ax.set_title(title, fontsize=subplot_title_fontsize, fontweight='bold', pad=15)
         ax.set_ylabel('Price Discrepancy', fontsize=label_fontsize, fontweight='bold')
@@ -497,7 +506,7 @@ def plot_stacked_expected_values(all_data, num_cycles):
         ax.grid(True, alpha=0.3, linewidth=0.8)
         
         # Legend centered above plot
-        ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.08), ncol=2,
+        ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.08), ncol=3,
                  fontsize=legend_fontsize, frameon=True, fancybox=True, shadow=True)
         
         # X-axis ticks

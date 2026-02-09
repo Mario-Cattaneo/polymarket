@@ -185,10 +185,13 @@ async def process_batch_slippage(settlements: list) -> tuple:
                 current_cumulative += tx_slippage
                 timestamp = block_to_timestamp(row['block_number'])
                 
-                # Track taker USDC inflow
+                # Track taker USDC inflow: making if makerAssetId == 0, else taking
                 exchange_making = Decimal(exchange_fill['making'])
                 exchange_taking = Decimal(exchange_fill['taking'])
-                exchange_usdc_volume = min(exchange_making, exchange_taking) / USDC_SCALAR
+                if exchange_fill['makerAssetId'] == 0:
+                    exchange_usdc_volume = exchange_making / USDC_SCALAR
+                else:
+                    exchange_usdc_volume = exchange_taking / USDC_SCALAR
                 current_taker_usdc += exchange_usdc_volume
                 
                 timestamps.append(timestamp)
@@ -255,15 +258,16 @@ def plot_usdc_to_slippage_ratio(ratio_data: dict):
     fig, ax = plt.subplots(figsize=(16, 9))
     
     ax.plot(df['timestamp'], df['ratio'], 
-           color='darkgreen', linewidth=2.5, label='Taker USDC / Slippage')
+           color='darkgreen', linewidth=2.5, label='Slippage / Taker USDC')
     
     ax.fill_between(df['timestamp'], df['ratio'], 
                     alpha=0.3, color='darkgreen')
     
     ax.set_xlabel('Time (UTC)', fontsize=22, fontweight='bold')
     ax.set_ylabel('Ratio (log scale)', fontsize=22, fontweight='bold')
-    ax.set_title('Cumulative Taker USDC Divided by Cumulative Slippage', fontsize=26, fontweight='bold')
+    ax.set_title('Cumulative Slippage Divided by Cumulative Taker USDC', fontsize=26, fontweight='bold')
     ax.set_yscale('log')
+    ax.set_ylim(0.001, 1)
     ax.legend(fontsize=24, loc='upper right', framealpha=0.95)
     ax.grid(True, which='both', linestyle='--', alpha=0.6)
     
@@ -280,7 +284,7 @@ def plot_usdc_to_slippage_ratio(ratio_data: dict):
     fig.subplots_adjust(left=0.15)
     plt.tight_layout()
     
-    filename = 'slip_usdc_to_slippage_ratio.png'
+    filename = 'slip_slippage_to_usdc_ratio.png'
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     logger.info(f"✅ Plot saved to {filename}")
     plt.close()
@@ -349,11 +353,11 @@ async def main():
         slippage_data = {'timestamps': all_timestamps, 'cumulative_slippage': all_cumulative}
         plot_slippage(slippage_data)
         
-        # Calculate and plot ratio (protecting against division by zero)
+        # Calculate and plot ratio (slippage / usdc, protecting against division by zero)
         ratio_values = []
         for usdc, slippage in zip(all_cumulative_taker_usdc, all_cumulative):
-            if slippage > 0:
-                ratio_values.append(usdc / slippage)
+            if usdc > 0:
+                ratio_values.append(slippage / usdc)
             else:
                 ratio_values.append(0)
         
