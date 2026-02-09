@@ -27,6 +27,11 @@ DB_PASS = os.getenv("POLY_DB_CLI_PASS")
 POLY_CSV_DIR = os.getenv("POLY_CSV")
 POLY_CSV_PATH = os.path.join(POLY_CSV_DIR, "gamma_markets.csv") if POLY_CSV_DIR else "gamma_markets.csv"
 
+# --- Block Range Filtering ---
+START_BLOCK_NR = 79172086  # Set to a specific block number to start filtering
+END_BLOCK_NR = 81225971    # Set to a specific block number to end filtering
+BLOCK_BATCH_SIZE = 100000  # Process in batches of N blocks
+
 # --- OOV2 Event ABIs and Argument Types ---
 # We only need DisputePrice for this script, but keeping ProposePrice for context
 OOV2_EVENT_DEFINITIONS = {
@@ -140,27 +145,77 @@ async def main():
         pool = await asyncpg.create_pool(user=DB_USER, password=DB_PASS, database=DB_NAME, host=PG_HOST, port=PG_PORT)
         logger.info("Database connection successful.")
 
-        # --- 3. Fetch Event Counts and Data ---
-        async with pool.acquire() as conn:
-            # Get total ProposePrice events from both tables
-            logger.info("Fetching ProposePrice event counts...")
-            propose_price_count_oov2 = await conn.fetchval("SELECT COUNT(*) FROM oov2 WHERE event_name = 'ProposePrice'")
-            propose_price_count_moov2 = await conn.fetchval("SELECT COUNT(*) FROM events_managed_oracle WHERE event_name = 'ProposePrice'")
-
-            # Get all DisputePrice events to decode them (need both topics and data for indexed + non-indexed args)
-            logger.info("Fetching all DisputePrice events from oov2 for analysis...")
-            dispute_price_records = await conn.fetch("SELECT data, topics FROM oov2 WHERE event_name = 'DisputePrice'")
-            dispute_price_count = len(dispute_price_records)
+        # --- 3. Fetch Events in Batches with Block Range Filtering ---
+        logger.info(f"Fetching events in batches of {BLOCK_BATCH_SIZE:,} blocks from {START_BLOCK_NR:,} to {END_BLOCK_NR:,}...")
+        
+        all_dispute_price_records_oov2 = []
+        all_dispute_price_records_moov2 = []
+        all_propose_price_records_oov2 = []
+        all_propose_price_records_moov2 = []
+        
+        propose_price_count_oov2 = 0
+        propose_price_count_moov2 = 0
+        dispute_price_count = 0
+        dispute_price_count_moov2 = 0
+        
+        current_block = START_BLOCK_NR
+        batch_num = 0
+        
+        while current_block <= END_BLOCK_NR:
+            batch_num += 1
+            batch_end = min(current_block + BLOCK_BATCH_SIZE - 1, END_BLOCK_NR)
+            logger.info(f"Batch {batch_num}: blocks {current_block:,} to {batch_end:,}")
             
-            # Get DisputePrice events from events_managed_oracle (moov2)
-            logger.info("Fetching all DisputePrice events from events_managed_oracle for analysis...")
-            dispute_price_records_moov2 = await conn.fetch("SELECT data, topics FROM events_managed_oracle WHERE event_name = 'DisputePrice'")
-            dispute_price_count_moov2 = len(dispute_price_records_moov2)
+            async with pool.acquire() as conn:
+                # Get ProposePrice event counts for this batch
+                batch_propose_count_oov2 = await conn.fetchval(
+                    f"SELECT COUNT(*) FROM oov2 WHERE event_name = 'ProposePrice' AND block_number >= {current_block} AND block_number <= {batch_end}"
+                )
+                batch_propose_count_moov2 = await conn.fetchval(
+                    f"SELECT COUNT(*) FROM events_managed_oracle WHERE event_name = 'ProposePrice' AND block_number >= {current_block} AND block_number <= {batch_end}"
+                )
+                
+                propose_price_count_oov2 += batch_propose_count_oov2
+                propose_price_count_moov2 += batch_propose_count_moov2
+                
+                # Fetch DisputePrice events for this batch
+                batch_dispute_records_oov2 = await conn.fetch(
+                    f"SELECT data, topics FROM oov2 WHERE event_name = 'DisputePrice' AND block_number >= {current_block} AND block_number <= {batch_end}"
+                )
+                all_dispute_price_records_oov2.extend(batch_dispute_records_oov2)
+                
+                batch_dispute_count_oov2 = len(batch_dispute_records_oov2)
+                dispute_price_count += batch_dispute_count_oov2
+                
+                # Fetch DisputePrice events from events_managed_oracle for this batch
+                batch_dispute_records_moov2 = await conn.fetch(
+                    f"SELECT data, topics FROM events_managed_oracle WHERE event_name = 'DisputePrice' AND block_number >= {current_block} AND block_number <= {batch_end}"
+                )
+                all_dispute_price_records_moov2.extend(batch_dispute_records_moov2)
+                
+                batch_dispute_count_moov2 = len(batch_dispute_records_moov2)
+                dispute_price_count_moov2 += batch_dispute_count_moov2
+                
+                # Fetch ProposePrice events for this batch
+                batch_propose_records_oov2 = await conn.fetch(
+                    f"SELECT data, topics FROM oov2 WHERE event_name = 'ProposePrice' AND block_number >= {current_block} AND block_number <= {batch_end}"
+                )
+                all_propose_price_records_oov2.extend(batch_propose_records_oov2)
+                
+                batch_propose_records_moov2 = await conn.fetch(
+                    f"SELECT data, topics FROM events_managed_oracle WHERE event_name = 'ProposePrice' AND block_number >= {current_block} AND block_number <= {batch_end}"
+                )
+                all_propose_price_records_moov2.extend(batch_propose_records_moov2)
+                
+                logger.info(f"  Batch {batch_num}: {batch_dispute_count_oov2:,} DisputePrice (oov2), {batch_dispute_count_moov2:,} DisputePrice (moov2), {batch_propose_count_oov2 + batch_propose_count_moov2:,} ProposePrice events")
             
-            # Get ProposePrice events records from both tables for matching analysis
-            logger.info("Fetching ProposePrice event records from oov2 and events_managed_oracle for analysis...")
-            propose_price_records = await conn.fetch("SELECT data, topics FROM oov2 WHERE event_name = 'ProposePrice'")
-            propose_price_records_moov2 = await conn.fetch("SELECT data, topics FROM events_managed_oracle WHERE event_name = 'ProposePrice'")
+            current_block = batch_end + 1
+        
+        # Reassign for consistency with downstream code
+        dispute_price_records = all_dispute_price_records_oov2
+        dispute_price_records_moov2 = all_dispute_price_records_moov2
+        propose_price_records = all_propose_price_records_oov2
+        propose_price_records_moov2 = all_propose_price_records_moov2
 
         if dispute_price_count == 0 and dispute_price_count_moov2 == 0:
             logger.warning("No DisputePrice events found. Exiting.")

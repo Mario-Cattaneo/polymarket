@@ -1,50 +1,139 @@
-nohup: ignoring input
-2026-02-07 23:27:20 | Processing settlements from block 79172085 to 81225971
-2026-02-07 23:27:57 |   Blocks 79,172,085-79,222,085: 35577 settlements, batch cumulative: $88153.5944
-2026-02-07 23:28:35 |   Blocks 79,222,085-79,272,085: 31804 settlements, batch cumulative: $81626.7410
-2026-02-07 23:29:16 |   Blocks 79,272,085-79,322,085: 29998 settlements, batch cumulative: $66112.1783
-2026-02-07 23:29:54 |   Blocks 79,322,085-79,372,085: 30370 settlements, batch cumulative: $61263.2317
-2026-02-07 23:30:41 |   Blocks 79,372,085-79,422,085: 30676 settlements, batch cumulative: $109159.6332
-2026-02-07 23:31:24 |   Blocks 79,422,085-79,472,085: 30683 settlements, batch cumulative: $74049.4703
-2026-02-07 23:32:23 |   Blocks 79,472,085-79,522,085: 44935 settlements, batch cumulative: $73706.3776
-2026-02-07 23:33:23 |   Blocks 79,522,085-79,572,085: 27091 settlements, batch cumulative: $67326.1979
-2026-02-07 23:34:20 |   Blocks 79,572,085-79,622,085: 28115 settlements, batch cumulative: $86915.3183
-2026-02-07 23:35:15 |   Blocks 79,622,085-79,672,085: 28120 settlements, batch cumulative: $69150.1542
-2026-02-07 23:36:05 |   Blocks 79,672,085-79,722,085: 29152 settlements, batch cumulative: $75283.9273
-2026-02-07 23:37:01 |   Blocks 79,722,085-79,772,085: 33940 settlements, batch cumulative: $163823.0121
-2026-02-07 23:38:06 |   Blocks 79,772,085-79,822,085: 38796 settlements, batch cumulative: $95882.6563
-2026-02-07 23:39:18 |   Blocks 79,822,085-79,872,085: 39556 settlements, batch cumulative: $123710.0514
-2026-02-07 23:40:30 |   Blocks 79,872,085-79,922,085: 35505 settlements, batch cumulative: $67041.5840
-2026-02-07 23:41:38 |   Blocks 79,922,085-79,972,085: 42775 settlements, batch cumulative: $103532.3198
-2026-02-07 23:42:41 |   Blocks 79,972,085-80,022,085: 44313 settlements, batch cumulative: $136715.7982
-2026-02-07 23:43:50 |   Blocks 80,022,085-80,072,085: 34691 settlements, batch cumulative: $65495.4821
-2026-02-07 23:45:15 |   Blocks 80,072,085-80,122,085: 40526 settlements, batch cumulative: $97313.5832
-2026-02-07 23:46:46 |   Blocks 80,122,085-80,172,085: 46754 settlements, batch cumulative: $146220.1714
-2026-02-07 23:47:36 |   Blocks 80,172,085-80,222,085: 28140 settlements, batch cumulative: $60638.1455
-2026-02-07 23:48:33 |   Blocks 80,222,085-80,272,085: 32854 settlements, batch cumulative: $72019.9004
-2026-02-07 23:49:41 |   Blocks 80,272,085-80,322,085: 34087 settlements, batch cumulative: $82098.3570
-2026-02-07 23:51:18 |   Blocks 80,322,085-80,372,085: 34689 settlements, batch cumulative: $60888.6433
-2026-02-07 23:52:54 |   Blocks 80,372,085-80,422,085: 36105 settlements, batch cumulative: $68359.0119
-2026-02-07 23:54:00 |   Blocks 80,422,085-80,472,085: 32585 settlements, batch cumulative: $86822.6222
-2026-02-07 23:55:28 |   Blocks 80,472,085-80,522,085: 35879 settlements, batch cumulative: $101553.3037
-2026-02-07 23:56:58 |   Blocks 80,522,085-80,572,085: 41181 settlements, batch cumulative: $167965.1241
-2026-02-07 23:58:31 |   Blocks 80,572,085-80,622,085: 34614 settlements, batch cumulative: $74683.2016
-2026-02-08 00:00:37 |   Blocks 80,622,085-80,672,085: 33473 settlements, batch cumulative: $72787.7358
-2026-02-08 00:02:18 |   Blocks 80,672,085-80,722,085: 32252 settlements, batch cumulative: $54372.7062
-2026-02-08 00:03:34 |   Blocks 80,722,085-80,772,085: 26917 settlements, batch cumulative: $45779.9694
-2026-02-08 00:05:00 |   Blocks 80,772,085-80,822,085: 29432 settlements, batch cumulative: $60963.3235
-2026-02-08 00:06:42 |   Blocks 80,822,085-80,872,085: 36041 settlements, batch cumulative: $69375.0968
-2026-02-08 00:08:17 |   Blocks 80,872,085-80,922,085: 29359 settlements, batch cumulative: $61801.4171
-2026-02-08 00:10:28 |   Blocks 80,922,085-80,972,085: 41784 settlements, batch cumulative: $135427.5589
-2026-02-08 00:12:54 |   Blocks 80,972,085-81,022,085: 40520 settlements, batch cumulative: $117312.5517
-2026-02-08 00:15:14 |   Blocks 81,022,085-81,072,085: 31199 settlements, batch cumulative: $47748.8290
-2026-02-08 00:17:11 |   Blocks 81,072,085-81,122,085: 36979 settlements, batch cumulative: $51565.0365
-2026-02-08 00:20:03 |   Blocks 81,122,085-81,172,085: 45963 settlements, batch cumulative: $111014.9873
-2026-02-08 00:22:57 |   Blocks 81,172,085-81,222,085: 44002 settlements, batch cumulative: $142558.7631
-2026-02-08 00:23:12 |   Blocks 81,222,085-81,225,971: 2521 settlements, batch cumulative: $3524.4951
-2026-02-08 00:23:12 | 
-Processed 1443953 settlements with valid slippage data.
-2026-02-08 00:23:12 | Total cumulative slippage: $3601742.2628
-2026-02-08 00:23:12 | Total taker USDC inflow: $513690250.69
-2026-02-08 00:23:19 | ✅ Plot saved to slip_cumulative.png
-2026-02-08 00:23:25 | ✅ Plot saved to slip_usdc_to_slippage_ratio.png
+2026-02-08 12:48:16 | Processing settlements from block 79172085 to 81225971
+2026-02-08 12:48:54 |   Blocks 79,172,085-79,222,085: 35577 valid settlements
+2026-02-08 12:49:32 |   Blocks 79,222,085-79,272,085: 31804 valid settlements
+2026-02-08 12:50:14 |   Blocks 79,272,085-79,322,085: 29998 valid settlements
+2026-02-08 12:50:52 |   Blocks 79,322,085-79,372,085: 30370 valid settlements
+2026-02-08 12:51:29 |   Blocks 79,372,085-79,422,085: 30676 valid settlements
+2026-02-08 12:52:09 |   Blocks 79,422,085-79,472,085: 30683 valid settlements
+2026-02-08 12:52:54 |   Blocks 79,472,085-79,522,085: 44935 valid settlements
+2026-02-08 12:53:38 |   Blocks 79,522,085-79,572,085: 27091 valid settlements
+2026-02-08 12:54:22 |   Blocks 79,572,085-79,622,085: 28115 valid settlements
+2026-02-08 12:55:08 |   Blocks 79,622,085-79,672,085: 28120 valid settlements
+2026-02-08 12:55:52 |   Blocks 79,672,085-79,722,085: 29152 valid settlements
+2026-02-08 12:56:41 |   Blocks 79,722,085-79,772,085: 33940 valid settlements
+2026-02-08 12:57:33 |   Blocks 79,772,085-79,822,085: 38796 valid settlements
+2026-02-08 12:58:28 |   Blocks 79,822,085-79,872,085: 39556 valid settlements
+2026-02-08 12:59:27 |   Blocks 79,872,085-79,922,085: 35505 valid settlements
+2026-02-08 13:00:23 |   Blocks 79,922,085-79,972,085: 42775 valid settlements
+2026-02-08 13:01:21 |   Blocks 79,972,085-80,022,085: 44313 valid settlements
+2026-02-08 13:02:22 |   Blocks 80,022,085-80,072,085: 34691 valid settlements
+2026-02-08 13:03:22 |   Blocks 80,072,085-80,122,085: 40526 valid settlements
+2026-02-08 13:04:27 |   Blocks 80,122,085-80,172,085: 46754 valid settlements
+2026-02-08 13:05:14 |   Blocks 80,172,085-80,222,085: 28140 valid settlements
+2026-02-08 13:06:16 |   Blocks 80,222,085-80,272,085: 32854 valid settlements
+2026-02-08 13:07:23 |   Blocks 80,272,085-80,322,085: 34087 valid settlements
+2026-02-08 13:08:40 |   Blocks 80,322,085-80,372,085: 34689 valid settlements
+2026-02-08 13:09:56 |   Blocks 80,372,085-80,422,085: 36105 valid settlements
+2026-02-08 13:10:55 |   Blocks 80,422,085-80,472,085: 32585 valid settlements
+2026-02-08 13:12:18 |   Blocks 80,472,085-80,522,085: 35879 valid settlements
+2026-02-08 13:13:34 |   Blocks 80,522,085-80,572,085: 41181 valid settlements
+2026-02-08 13:14:53 |   Blocks 80,572,085-80,622,085: 34614 valid settlements
+2026-02-08 13:16:19 |   Blocks 80,622,085-80,672,085: 33473 valid settlements
+2026-02-08 13:17:39 |   Blocks 80,672,085-80,722,085: 32252 valid settlements
+2026-02-08 13:18:50 |   Blocks 80,722,085-80,772,085: 26917 valid settlements
+2026-02-08 13:20:13 |   Blocks 80,772,085-80,822,085: 29432 valid settlements
+2026-02-08 13:21:39 |   Blocks 80,822,085-80,872,085: 36041 valid settlements
+2026-02-08 13:23:04 |   Blocks 80,872,085-80,922,085: 29359 valid settlements
+2026-02-08 13:24:51 |   Blocks 80,922,085-80,972,085: 41784 valid settlements
+2026-02-08 13:26:24 |   Blocks 80,972,085-81,022,085: 40520 valid settlements
+2026-02-08 13:27:49 |   Blocks 81,022,085-81,072,085: 31199 valid settlements
+2026-02-08 13:29:22 |   Blocks 81,072,085-81,122,085: 36979 valid settlements
+2026-02-08 13:31:09 |   Blocks 81,122,085-81,172,085: 45963 valid settlements
+2026-02-08 13:32:52 |   Blocks 81,172,085-81,222,085: 44002 valid settlements
+2026-02-08 13:33:04 |   Blocks 81,222,085-81,225,971: 2521 valid settlements
+2026-02-08 13:33:04 | 
+Total settlements: 1443953
+2026-02-08 13:33:04 | After timestamp filtering: 1412812 samples
+2026-02-08 13:33:05 | 
+### SIMPLE REGRESSION ANALYSES ###
+
+2026-02-08 13:33:05 | 
+======================================================================
+2026-02-08 13:33:05 | REGRESSION 1: Slippage vs Inflow
+2026-02-08 13:33:05 | ======================================================================
+2026-02-08 13:33:05 | Intercept:              2.04000138
+2026-02-08 13:33:05 | Slope:                  0.00126490
+2026-02-08 13:33:05 | R²:                     0.008242
+2026-02-08 13:33:05 | Correlation (R):        0.090785
+2026-02-08 13:33:05 | P-value:                0.00e+00
+2026-02-08 13:33:05 | Std Error:              0.00001167
+2026-02-08 13:33:05 | RMSE:                   69.07645969
+2026-02-08 13:33:05 | N samples:              1412812
+2026-02-08 13:33:05 | ======================================================================
+
+2026-02-08 13:33:05 | 
+======================================================================
+2026-02-08 13:33:05 | REGRESSION 2: Slippage vs Order Size
+2026-02-08 13:33:05 | ======================================================================
+2026-02-08 13:33:05 | Intercept:              1.44625972
+2026-02-08 13:33:05 | Slope:                  0.00090002
+2026-02-08 13:33:05 | R²:                     0.017649
+2026-02-08 13:33:05 | Correlation (R):        0.132848
+2026-02-08 13:33:05 | P-value:                0.00e+00
+2026-02-08 13:33:05 | Std Error:              0.00000565
+2026-02-08 13:33:05 | RMSE:                   68.74808934
+2026-02-08 13:33:05 | N samples:              1412812
+2026-02-08 13:33:05 | ======================================================================
+
+2026-02-08 13:33:05 | 
+### MULTIPLE REGRESSION ###
+
+2026-02-08 13:33:06 | 
+======================================================================
+2026-02-08 13:33:06 | REGRESSION 3: Slippage vs Inflow + Order Size
+2026-02-08 13:33:06 | ======================================================================
+2026-02-08 13:33:06 | Intercept:              1.42431081
+2026-02-08 13:33:06 | Coef (Inflow):          0.00039072 (p=0.00e+00)
+2026-02-08 13:33:06 | Coef (Order Size):      0.00079894 (p=0.00e+00)
+2026-02-08 13:33:06 | R²:                     0.018212
+2026-02-08 13:33:06 | RMSE:                   68.72835842
+2026-02-08 13:33:06 | N samples:              1412812
+2026-02-08 13:33:06 | ======================================================================
+
+2026-02-08 13:33:06 | 
+### CORRELATION ANALYSIS ###
+
+2026-02-08 13:33:06 | INFLOW vs SLIPPAGE:
+2026-02-08 13:33:06 |   Pearson r:   0.090785 (p=0.00e+00) - LINEAR correlation
+2026-02-08 13:33:06 |   Spearman ρ:  0.070797 (p=0.00e+00) - MONOTONIC correlation
+2026-02-08 13:33:06 |   ⚠️  Both weak: likely no strong monotonic relationship
+2026-02-08 13:33:06 | 
+ORDER SIZE vs SLIPPAGE:
+2026-02-08 13:33:06 |   Pearson r:   0.132848 (p=0.00e+00) - LINEAR correlation
+2026-02-08 13:33:06 |   Spearman ρ:  0.164067 (p=0.00e+00) - MONOTONIC correlation
+2026-02-08 13:33:06 | 
+2026-02-08 13:33:06 | 
+TESTING POLYNOMIAL FITS (Inflow vs Slippage):
+2026-02-08 13:33:06 |   Degree 1: R² = 0.008242, RMSE = 69.076460
+2026-02-08 13:33:06 |   Degree 2: R² = 0.012429, RMSE = 68.930500
+2026-02-08 13:33:07 |   Degree 3: R² = 0.016777, RMSE = 68.778584
+2026-02-08 13:33:07 |   → Best: Degree 3, improvement over linear: 103.6%
+2026-02-08 13:33:07 | 
+TESTING POLYNOMIAL FITS (Order Size vs Slippage):
+2026-02-08 13:33:07 |   Degree 1: R² = 0.017649, RMSE = 68.748089
+2026-02-08 13:33:07 |   Degree 2: R² = 0.020909, RMSE = 68.633914
+2026-02-08 13:33:07 |   Degree 3: R² = 0.022309, RMSE = 68.584817
+2026-02-08 13:33:07 |   → Best: Degree 3, improvement over linear: 26.4%
+2026-02-08 13:33:07 | 
+TESTING LOGARITHMIC FIT (Inflow vs Slippage):
+2026-02-08 13:33:07 |   Logarithmic: R² = 0.004704, RMSE = 69.199570
+2026-02-08 13:33:07 |   Model: slippage = 2.228746 * log(inflow) + -4.908428
+2026-02-08 13:33:08 | ✅ Plot saved to slip_vs_ordersize.png
+/home/mario_cattaneo/polymarket/data_analysis/slip_regression_with_ordersize.py:472: FutureWarning: The default of observed=False is deprecated and will be changed to True in a future version of pandas. Pass observed=False to retain current behavior or observed=True to adopt the future default and silence this warning.
+  bucket_stats = df.groupby('size_bucket')['slip_per_dollar'].agg(['mean', 'std', 'count'])
+/home/mario_cattaneo/polymarket/data_analysis/slip_regression_with_ordersize.py:477: UserWarning: set_ticklabels() should only be used with a fixed number of ticks, i.e. after set_ticks() or using a FixedLocator.
+  ax.set_xticklabels(bucket_stats.index)
+/home/mario_cattaneo/polymarket/data_analysis/slip_regression_with_ordersize.py:487: UserWarning: set_ticklabels() should only be used with a fixed number of ticks, i.e. after set_ticks() or using a FixedLocator.
+  ax.set_xticklabels(bucket_counts.index)
+/home/mario_cattaneo/polymarket/data_analysis/slip_regression_with_ordersize.py:492: FutureWarning: The default of observed=False is deprecated and will be changed to True in a future version of pandas. Pass observed=False to retain current behavior or observed=True to adopt the future default and silence this warning.
+  bucket_inflow = df.groupby('size_bucket')['inflow'].mean()
+/home/mario_cattaneo/polymarket/data_analysis/slip_regression_with_ordersize.py:497: UserWarning: set_ticklabels() should only be used with a fixed number of ticks, i.e. after set_ticks() or using a FixedLocator.
+  ax.set_xticklabels(bucket_inflow.index)
+2026-02-08 13:33:10 | ✅ Stratified analysis saved to slip_stratified_analysis.png
+2026-02-08 13:33:10 | 
+### SUMMARY STATISTICS ###
+
+2026-02-08 13:33:10 | Inflow:      mean=$356.44, median=$25.97, std=$4978.36
+2026-02-08 13:33:10 | Order Size:  mean=1160.64 shares, median=108.33, std=10238.40
+2026-02-08 13:33:10 | Slippage:    mean=$2.4909, median=$0.0000, std=$69.3629
+2026-02-08 13:33:10 | 

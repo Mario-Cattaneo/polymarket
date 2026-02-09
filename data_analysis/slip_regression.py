@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Calculate and plot cumulative slippage from all settlements.
-Similar to house_slip.py but uses the complete 'settlements' table.
+Linear regression analysis: slippage = a * inflow + b
+Performs regression on discrete settlement pairs to understand the relationship
+between taker USDC inflow and realized slippage.
 """
 
 import os
@@ -10,9 +11,10 @@ import asyncpg
 import logging
 import json
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
+import numpy as np
 from decimal import Decimal, getcontext
 from eth_abi import decode
+from scipy import stats
 
 # ----------------------------------------------------------------
 # CONFIGURATION
@@ -33,10 +35,19 @@ DB_PASS = os.getenv("POLY_DB_CLI_PASS")
 REF_BLOCK_NUMBER = 81372608
 REF_UNIX_TIMESTAMP = 1767864474
 SECONDS_PER_BLOCK = 2
+
 # --- Block Range Configuration ---
-START_BLOCK_NR = 79172085 # None = use database minimum
-END_BLOCK_NR = 81225971 # None = use database maximum
-BLOCK_BATCH_SIZE = 50_000  # Process in batches of N blocks
+START_BLOCK_NR = 79172085  # None = use database minimum
+END_BLOCK_NR = 81225971     # None = use database maximum
+BLOCK_BATCH_SIZE = 200_000  # Process in batches of N blocks
+
+# --- Regression Filter Range (Unix timestamps) ---
+# Set these to filter which settlements to include in regression
+# Leave as None to include all data
+# Example: Block 79172085 → timestamp 1763463428, Block 79372085 → timestamp 1763863428
+REGRESSION_START_TIMESTAMP = ((START_BLOCK_NR - REF_BLOCK_NUMBER) * SECONDS_PER_BLOCK) + REF_UNIX_TIMESTAMP + 24 * 60 * 60  # Set to first block's timestamp + offset to skip early artifacts
+REGRESSION_END_TIMESTAMP = None    # None = no upper limit
+
 # --- Constants ---
 USDC_SCALAR = Decimal("1_000_000")
 SHARE_SCALAR = Decimal("1_000_000")
@@ -84,21 +95,19 @@ def decode_order_filled(data: str, topics: list) -> dict:
             'fee': fee
         }
     except Exception as e:
-        logger.warning(f"Failed to decode OrderFilled: {e}")
+        logger.debug(f"Failed to decode OrderFilled: {e}")
         return {}
 
-async def process_batch_slippage(settlements: list) -> tuple:
+async def process_batch_for_regression(settlements: list) -> tuple:
     """
-    Calculate slippage from a batch of settlements.
-    Returns (timestamps, cumulative_values, count, cumulative, cumulative_taker_usdc_inflow).
+    Extract discrete (inflow, slippage) pairs from settlements.
+    Returns (timestamps, inflows, slippages) - three parallel lists of individual measurements.
     """
     EXCHANGE_ADDRESS = "0xC5d563A36AE78145C45a50134d48A1215220f80a"
     
     timestamps = []
-    cumulative_values = []
-    cumulative_taker_usdc_values = []
-    current_cumulative = Decimal(0)
-    current_taker_usdc = Decimal(0)
+    inflows = []
+    slippages = []
     count = 0
     
     for row in settlements:
@@ -122,7 +131,6 @@ async def process_batch_slippage(settlements: list) -> tuple:
                         exchange_fill = decoded_fill
             
             if not exchange_fill:
-                logger.debug(f"No exchange fill found in {row['transaction_hash']}")
                 continue
             
             # Determine taker direction
@@ -182,108 +190,132 @@ async def process_batch_slippage(settlements: list) -> tuple:
                 expected_cost = p_best * amount_shares
                 tx_slippage = abs(expected_cost - actual_cost)
                 
-                current_cumulative += tx_slippage
+                # Taker USDC inflow
+                exchange_usdc_volume = min(exchange_making, exchange_taking) / USDC_SCALAR
+                
                 timestamp = block_to_timestamp(row['block_number'])
                 
-                # Track taker USDC inflow
-                exchange_making = Decimal(exchange_fill['making'])
-                exchange_taking = Decimal(exchange_fill['taking'])
-                exchange_usdc_volume = min(exchange_making, exchange_taking) / USDC_SCALAR
-                current_taker_usdc += exchange_usdc_volume
-                
+                # Store discrete measurement
                 timestamps.append(timestamp)
-                cumulative_values.append(float(current_cumulative))
-                cumulative_taker_usdc_values.append(float(current_taker_usdc))
+                inflows.append(float(exchange_usdc_volume))
+                slippages.append(float(tx_slippage))
                 count += 1
 
         except Exception as e:
             continue
     
-    return timestamps, cumulative_values, cumulative_taker_usdc_values, count, current_cumulative, current_taker_usdc
+    return timestamps, inflows, slippages, count
 
-def plot_slippage(slippage_data: dict):
-    """Create cumulative slippage plot."""
-    if not slippage_data['timestamps'] or not slippage_data['cumulative_slippage']:
-        logger.warning("No slippage data to plot.")
-        return
+def filter_data_by_timestamp(timestamps: list, inflows: list, slippages: list) -> tuple:
+    """Filter data based on REGRESSION_START_TIMESTAMP and REGRESSION_END_TIMESTAMP."""
+    filtered_ts = []
+    filtered_inf = []
+    filtered_slip = []
     
-    import pandas as pd
+    for ts, inf, slip in zip(timestamps, inflows, slippages):
+        if REGRESSION_START_TIMESTAMP is not None and ts < REGRESSION_START_TIMESTAMP:
+            continue
+        if REGRESSION_END_TIMESTAMP is not None and ts > REGRESSION_END_TIMESTAMP:
+            continue
+        filtered_ts.append(ts)
+        filtered_inf.append(inf)
+        filtered_slip.append(slip)
     
-    # Convert timestamps to datetime
-    df = pd.DataFrame({
-        'timestamp': pd.to_datetime(slippage_data['timestamps'], unit='s'),
-        'cumulative_slippage': slippage_data['cumulative_slippage']
-    })
+    return filtered_ts, filtered_inf, filtered_slip
+
+def perform_regression(inflows: list, slippages: list) -> dict:
+    """
+    Perform linear regression: slippage = slope * inflow + intercept
+    Returns dict with regression results and statistics.
+    """
+    X = np.array(inflows)
+    y = np.array(slippages)
+    
+    # Using scipy.stats.linregress for comprehensive statistics
+    slope, intercept, r_value, p_value, std_err = stats.linregress(X, y)
+    
+    # Calculate additional metrics
+    y_pred = slope * X + intercept
+    residuals = y - y_pred
+    rmse = np.sqrt(np.mean(residuals ** 2))
+    
+    # R-squared
+    r_squared = r_value ** 2
+    
+    return {
+        'slope': slope,
+        'intercept': intercept,
+        'r_value': r_value,
+        'r_squared': r_squared,
+        'p_value': p_value,
+        'std_err': std_err,
+        'rmse': rmse,
+        'n_samples': len(X),
+        'X': X,
+        'y': y,
+        'y_pred': y_pred
+    }
+
+def plot_regression(regression_results: dict):
+    """Create scatter plot with regression line."""
+    X = regression_results['X']
+    y = regression_results['y']
+    y_pred = regression_results['y_pred']
+    slope = regression_results['slope']
+    intercept = regression_results['intercept']
+    r_squared = regression_results['r_squared']
     
     plt.style.use('seaborn-v0_8-whitegrid')
-    fig, ax = plt.subplots(figsize=(16, 9))
+    fig, ax = plt.subplots(figsize=(14, 9))
     
-    ax.plot(df['timestamp'], df['cumulative_slippage'], 
-           color='steelblue', linewidth=2.5, label='All Settlements')
+    # Scatter plot
+    ax.scatter(X, y, alpha=0.5, s=20, color='steelblue', label='Individual settlements')
     
-    ax.fill_between(df['timestamp'], df['cumulative_slippage'], 
-                    alpha=0.3, color='steelblue')
+    # Regression line
+    ax.plot(X, y_pred, 'r-', linewidth=2.5, label=f'Linear fit: slippage = {slope:.6f} * inflow + {intercept:.6f}')
     
-    ax.set_xlabel('Timestamp', fontsize=14)
-    ax.set_ylabel('Cumulative Slippage (USDC)', fontsize=14)
-    ax.set_title('Cumulative Slippage from All Settlements', fontsize=16)
+    ax.set_xlabel('Taker USDC Inflow', fontsize=14)
+    ax.set_ylabel('Slippage (USDC)', fontsize=14)
+    ax.set_title(f'Linear Regression: Slippage vs Inflow (R² = {r_squared:.4f})', fontsize=16)
     ax.legend(fontsize=12)
     ax.grid(True, alpha=0.3)
-    plt.xticks(rotation=45)
-    plt.tight_layout()
     
-    filename = 'slip_cumulative.png'
+    plt.tight_layout()
+    filename = 'slip_regression.png'
     plt.savefig(filename, dpi=150)
-    logger.info(f"✅ Plot saved to {filename}")
+    logger.info(f"✅ Regression plot saved to {filename}")
     plt.close()
 
-def plot_usdc_to_slippage_ratio(ratio_data: dict):
-    """Create cumulative taker USDC inflow divided by cumulative slippage plot."""
-    if not ratio_data['timestamps'] or not ratio_data['ratio']:
-        logger.warning("No ratio data to plot.")
-        return
+def log_regression_summary(regression_results: dict):
+    """Log comprehensive regression statistics."""
+    logger.info("\n" + "="*70)
+    logger.info("LINEAR REGRESSION RESULTS: slippage = slope * inflow + intercept")
+    logger.info("="*70)
+    logger.info(f"Slope (β):              {regression_results['slope']:.8f}")
+    logger.info(f"Intercept (b):          {regression_results['intercept']:.8f}")
+    logger.info(f"R² (variance explained): {regression_results['r_squared']:.6f}")
+    logger.info(f"R (correlation):        {regression_results['r_value']:.6f}")
+    logger.info(f"P-value:                {regression_results['p_value']:.2e}")
+    logger.info(f"Std Error (slope):      {regression_results['std_err']:.8f}")
+    logger.info(f"RMSE:                   {regression_results['rmse']:.8f}")
+    logger.info(f"N samples:              {regression_results['n_samples']}")
+    logger.info("="*70)
     
-    import pandas as pd
+    # Interpretation
+    if regression_results['p_value'] < 0.001:
+        significance = "highly significant (p < 0.001)"
+    elif regression_results['p_value'] < 0.01:
+        significance = "very significant (p < 0.01)"
+    elif regression_results['p_value'] < 0.05:
+        significance = "significant (p < 0.05)"
+    else:
+        significance = "not significant (p >= 0.05)"
     
-    # Convert timestamps to datetime
-    df = pd.DataFrame({
-        'timestamp': pd.to_datetime(ratio_data['timestamps'], unit='s'),
-        'ratio': ratio_data['ratio']
-    })
-    
-    plt.style.use('seaborn-v0_8-whitegrid')
-    fig, ax = plt.subplots(figsize=(16, 9))
-    
-    ax.plot(df['timestamp'], df['ratio'], 
-           color='darkgreen', linewidth=2.5, label='Taker USDC / Slippage')
-    
-    ax.fill_between(df['timestamp'], df['ratio'], 
-                    alpha=0.3, color='darkgreen')
-    
-    ax.set_xlabel('Time (UTC)', fontsize=22, fontweight='bold')
-    ax.set_ylabel('Ratio (log scale)', fontsize=22, fontweight='bold')
-    ax.set_title('Cumulative Taker USDC Divided by Cumulative Slippage', fontsize=26, fontweight='bold')
-    ax.set_yscale('log')
-    ax.legend(fontsize=24, loc='upper right', framealpha=0.95)
-    ax.grid(True, which='both', linestyle='--', alpha=0.6)
-    
-    # Format x-axis dates
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-    fig.autofmt_xdate(rotation=30, ha='right')
-    
-    # Increase tick label font sizes
-    ax.tick_params(axis='x', labelsize=20)
-    ax.tick_params(axis='y', labelsize=20)
-    
-    # Add left margin for y-axis label space
-    fig.subplots_adjust(left=0.15)
-    plt.tight_layout()
-    
-    filename = 'slip_usdc_to_slippage_ratio.png'
-    plt.savefig(filename, dpi=300, bbox_inches='tight')
-    logger.info(f"✅ Plot saved to {filename}")
-    plt.close()
+    logger.info(f"\nInterpretation:")
+    logger.info(f"  - Relationship is {significance}")
+    logger.info(f"  - For every $1 of inflow, slippage increases by ${regression_results['slope']:.6f}")
+    logger.info(f"  - Model explains {regression_results['r_squared']*100:.2f}% of variance in slippage")
+    logger.info("="*70 + "\n")
 
 # ----------------------------------------------------------------
 # MAIN EXECUTION
@@ -309,13 +341,11 @@ async def main():
         
         logger.info(f"Processing settlements from block {start_blk} to {end_blk}")
         
-        # Batch processing
+        # Batch processing - collect discrete measures
         all_timestamps = []
-        all_cumulative = []
-        all_cumulative_taker_usdc = []
-        total_settlements = 0
-        total_cumulative = Decimal(0)
-        total_taker_usdc = Decimal(0)
+        all_inflows = []
+        all_slippages = []
+        total_processed = 0
         
         curr_blk = start_blk
         
@@ -324,41 +354,39 @@ async def main():
             
             settlements = await fetch_batch(conn, curr_blk, next_blk)
             if settlements:
-                timestamps, cumulative_vals, cumulative_usdc_vals, count, batch_cumulative, batch_usdc = await process_batch_slippage(settlements)
-                
-                # Offset cumulative values for this batch to previous total
-                adjusted_cumulative = [float(total_cumulative) + val for val in cumulative_vals]
-                adjusted_cumulative_usdc = [float(total_taker_usdc) + val for val in cumulative_usdc_vals]
+                timestamps, inflows, slippages, count = await process_batch_for_regression(settlements)
                 
                 all_timestamps.extend(timestamps)
-                all_cumulative.extend(adjusted_cumulative)
-                all_cumulative_taker_usdc.extend(adjusted_cumulative_usdc)
-                total_settlements += count
-                total_cumulative += batch_cumulative
-                total_taker_usdc += batch_usdc
+                all_inflows.extend(inflows)
+                all_slippages.extend(slippages)
+                total_processed += count
                 
-                logger.info(f"  Blocks {curr_blk:,}-{next_blk:,}: {count} settlements, batch cumulative: ${batch_cumulative:.4f}")
+                logger.info(f"  Blocks {curr_blk:,}-{next_blk:,}: {count} valid settlements extracted")
             
             curr_blk = next_blk
         
-        logger.info(f"\nProcessed {total_settlements} settlements with valid slippage data.")
-        logger.info(f"Total cumulative slippage: ${total_cumulative:.4f}")
-        logger.info(f"Total taker USDC inflow: ${total_taker_usdc:.2f}")
+        logger.info(f"\nTotal settlements with valid slippage data: {total_processed}")
         
-        # Plot slippage
-        slippage_data = {'timestamps': all_timestamps, 'cumulative_slippage': all_cumulative}
-        plot_slippage(slippage_data)
+        # Filter data by timestamp range for regression
+        if REGRESSION_START_TIMESTAMP or REGRESSION_END_TIMESTAMP:
+            filtered_ts, filtered_inflows, filtered_slippages = filter_data_by_timestamp(
+                all_timestamps, all_inflows, all_slippages
+            )
+            logger.info(f"After timestamp filtering: {len(filtered_inflows)} samples")
+        else:
+            filtered_inflows = all_inflows
+            filtered_slippages = all_slippages
         
-        # Calculate and plot ratio (protecting against division by zero)
-        ratio_values = []
-        for usdc, slippage in zip(all_cumulative_taker_usdc, all_cumulative):
-            if slippage > 0:
-                ratio_values.append(usdc / slippage)
-            else:
-                ratio_values.append(0)
+        if len(filtered_inflows) < 2:
+            logger.error("Not enough samples for regression after filtering")
+            return
         
-        ratio_data = {'timestamps': all_timestamps, 'ratio': ratio_values}
-        plot_usdc_to_slippage_ratio(ratio_data)
+        # Perform regression
+        regression_results = perform_regression(filtered_inflows, filtered_slippages)
+        log_regression_summary(regression_results)
+        
+        # Plot
+        plot_regression(regression_results)
         
     finally:
         if conn:

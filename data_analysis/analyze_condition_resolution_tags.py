@@ -27,6 +27,11 @@ DB_PASS = os.getenv("POLY_DB_CLI_PASS")
 POLY_CSV_DIR = os.getenv("POLY_CSV")
 POLY_CSV_PATH = os.path.join(POLY_CSV_DIR, "gamma_markets.csv") if POLY_CSV_DIR else "gamma_markets.csv"
 
+# --- Block Range Filtering ---
+START_BLOCK_NR = 79172086  # Set to a specific block number to start filtering
+END_BLOCK_NR = 81225971    # Set to a specific block number to end filtering
+BLOCK_BATCH_SIZE = 100000  # Process in batches of N blocks
+
 # --- Conditional Tokens Address ---
 ADDR = {
     'conditional_tokens': "0x4d97dcd97ec945f40cf65f87097ace5ea0476045".lower(),
@@ -138,15 +143,30 @@ async def main():
         pool = await asyncpg.create_pool(user=DB_USER, password=DB_PASS, database=DB_NAME, host=PG_HOST, port=PG_PORT)
         logger.info("Database connection successful.")
 
-        # --- Fetch All ConditionResolution Events ---
-        async with pool.acquire() as conn:
-            logger.info("Fetching all ConditionResolution events...")
-            records = await conn.fetch(
-                "SELECT data, topics FROM events_conditional_tokens WHERE event_name = 'ConditionResolution' AND LOWER(contract_address) = $1",
-                ADDR['conditional_tokens']
-            )
+        # --- Fetch ConditionResolution Events in Batches with Block Range Filtering ---
+        logger.info(f"Fetching ConditionResolution events in batches of {BLOCK_BATCH_SIZE:,} blocks from {START_BLOCK_NR:,} to {END_BLOCK_NR:,}...")
+        
+        all_records = []
+        current_block = START_BLOCK_NR
+        batch_num = 0
+        
+        while current_block <= END_BLOCK_NR:
+            batch_num += 1
+            batch_end = min(current_block + BLOCK_BATCH_SIZE - 1, END_BLOCK_NR)
+            logger.info(f"Batch {batch_num}: blocks {current_block:,} to {batch_end:,}")
             
-        logger.info(f"Fetched {len(records):,} ConditionResolution events.")
+            async with pool.acquire() as conn:
+                batch_records = await conn.fetch(
+                    f"SELECT data, topics FROM events_conditional_tokens WHERE event_name = 'ConditionResolution' AND LOWER(contract_address) = $1 AND block_number >= {current_block} AND block_number <= {batch_end}",
+                    ADDR['conditional_tokens']
+                )
+                all_records.extend(batch_records)
+                logger.info(f"  Fetched {len(batch_records):,} ConditionResolution events in this batch")
+            
+            current_block = batch_end + 1
+        
+        records = all_records
+        logger.info(f"Total ConditionResolution events fetched: {len(records):,}")
 
         # --- Decode Events ---
         logger.info("Decoding ConditionResolution events...")

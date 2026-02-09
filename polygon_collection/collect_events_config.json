@@ -165,7 +165,7 @@
           "init_batch_size": 350,
           "collected_range": [
             79172085,
-            82174612
+            82497487
           ]
         },
         {
@@ -173,35 +173,35 @@
           "init_batch_size": 1200,
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         },
         {
           "signature": "ProxyFactoryUpdated(address,address)",
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         },
         {
           "signature": "RemovedAdmin(address,address)",
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         },
         {
           "signature": "RemovedOperator(address,address)",
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         },
         {
           "signature": "SafeFactoryUpdated(address,address)",
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         },
         {
@@ -209,21 +209,21 @@
           "init_batch_size": 180000,
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         },
         {
           "signature": "TradingPaused(address)",
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         },
         {
           "signature": "TradingUnpaused(address)",
           "collected_range": [
             79172085,
-            82147723
+            82633241
           ]
         }
       ]
@@ -239,7 +239,7 @@
           "init_batch_size": 200000,
           "collected_range": [
             79172085,
-            81959399
+            82009399
           ]
         },
         {
@@ -247,7 +247,7 @@
           "init_batch_size": 200000,
           "collected_range": [
             79172085,
-            82147723
+            82247723
           ]
         },
         {
@@ -255,7 +255,7 @@
           "init_batch_size": 450,
           "collected_range": [
             79172085,
-            82147723
+            82314405
           ]
         },
         {

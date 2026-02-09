@@ -254,9 +254,15 @@ def create_heatmap(all_data, metric_name, title, filename):
     else:
         max_y_idx = RANGE_DEN
     
-    # Plot heatmap with statistics
-    fig = plt.figure(figsize=(16, 12))
-    gs = fig.add_gridspec(3, 1, height_ratios=[4, 1, 1], hspace=0.3)
+    # Plot heatmap with statistics - ENHANCED VERSION
+    fig = plt.figure(figsize=(18, 10))
+    gs = fig.add_gridspec(3, 1, height_ratios=[3, 1.5, 1.5], hspace=0.35)
+    
+    # Font sizes
+    title_fontsize = 22
+    label_fontsize = 16
+    tick_fontsize = 14
+    legend_fontsize = 14
     
     # Main heatmap
     ax_hm = fig.add_subplot(gs[0])
@@ -269,54 +275,243 @@ def create_heatmap(all_data, metric_name, title, filename):
     time_window_s = 15 * 60
     time_bucket_width_s = time_window_s / DOMAIN_DEN
     
-    ax_hm.set_xlabel(f'Time (bucket width: {time_bucket_width_s:.1f}s into cycle)')
-    ax_hm.set_ylabel(f'Value (bucket height: {bucket_width:.4f}, width: {bucket_width:.4f})')
-    ax_hm.set_title(title)
+    ax_hm.set_ylabel('Value Bucket', fontsize=label_fontsize, fontweight='bold')
+    ax_hm.set_title(title, fontsize=title_fontsize, fontweight='bold', pad=20)
     
-    # Set tick labels
+    # Set tick labels with larger fonts
     ax_hm.set_xticks(np.linspace(0, DOMAIN_DEN-1, 10))
-    ax_hm.set_xticklabels([f'{int(i * time_window_s / DOMAIN_DEN)}' for i in np.linspace(0, DOMAIN_DEN-1, 10)])
+    ax_hm.set_xticklabels([f'{int(i * time_window_s / DOMAIN_DEN)}' for i in np.linspace(0, DOMAIN_DEN-1, 10)],
+                           fontsize=tick_fontsize)
+    ax_hm.tick_params(axis='y', labelsize=tick_fontsize)
     
     # Adjust y-ticks to match trimmed heatmap
     n_ticks = min(11, max_y_idx + 1)
     ax_hm.set_yticks(np.linspace(0, max_y_idx-1, n_ticks))
-    ax_hm.set_yticklabels([f'{i*bucket_width:.3f}' for i in np.linspace(0, max_y_idx, n_ticks)])
+    ax_hm.set_yticklabels([f'{i*bucket_width:.3f}' for i in np.linspace(0, max_y_idx, n_ticks)],
+                           fontsize=tick_fontsize)
     
     cbar = plt.colorbar(im, ax=ax_hm)
-    cbar.set_label('Observation Count')
+    cbar.set_label('Observation Count', fontsize=label_fontsize, fontweight='bold')
+    cbar.ax.tick_params(labelsize=tick_fontsize)
     
     # Expected value plot
     ax_ev = fig.add_subplot(gs[1])
     valid_idx = ~np.isnan(expected_values)
-    ax_ev.plot(np.where(valid_idx)[0], expected_values[valid_idx], 'b-', linewidth=2, label='Expected Value')
+    ax_ev.plot(np.where(valid_idx)[0], expected_values[valid_idx], 'b-', linewidth=2.5, label='Expected Value')
     ax_ev.fill_between(np.where(valid_idx)[0], 
                         expected_values[valid_idx] - std_values[valid_idx],
                         expected_values[valid_idx] + std_values[valid_idx],
-                        alpha=0.3, label='±1 Std Dev')
-    ax_ev.set_ylabel('Expected Value')
+                        alpha=0.3, color='blue', label='±1 Std Dev')
+    ax_ev.set_ylabel('Expected Value', fontsize=label_fontsize, fontweight='bold')
     ax_ev.set_xlim(0, DOMAIN_DEN-1)
-    ax_ev.grid(True, alpha=0.3)
-    ax_ev.legend(loc='upper right')
+    ax_ev.grid(True, alpha=0.3, linewidth=0.8)
+    
+    # Legend centered above the plot
+    ax_ev.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=2,
+                fontsize=legend_fontsize, frameon=True, fancybox=True, shadow=True)
+    
     ax_ev.set_xticks(np.linspace(0, DOMAIN_DEN-1, 10))
-    ax_ev.set_xticklabels([f'{int(i * time_window_s / DOMAIN_DEN)}' for i in np.linspace(0, DOMAIN_DEN-1, 10)])
+    ax_ev.set_xticklabels([f'{int(i * time_window_s / DOMAIN_DEN)}' for i in np.linspace(0, DOMAIN_DEN-1, 10)],
+                           fontsize=tick_fontsize)
+    ax_ev.tick_params(axis='y', labelsize=tick_fontsize)
     
     # Standard deviation plot
     ax_std = fig.add_subplot(gs[2])
-    ax_std.plot(np.where(valid_idx)[0], std_values[valid_idx], 'r-', linewidth=2, label='Standard Deviation')
-    ax_std.set_ylabel('Std Dev')
-    ax_std.set_xlabel(f'Time (seconds into cycle, bucket width: {time_bucket_width_s:.1f}s)')
+    ax_std.plot(np.where(valid_idx)[0], std_values[valid_idx], 'r-', linewidth=2.5, label='Standard Deviation')
+    ax_std.set_ylabel('Std Dev', fontsize=label_fontsize, fontweight='bold')
+    ax_std.set_xlabel('Time (seconds into cycle)', fontsize=label_fontsize, fontweight='bold')
     ax_std.set_xlim(0, DOMAIN_DEN-1)
-    ax_std.grid(True, alpha=0.3)
-    ax_std.legend(loc='upper right')
-    ax_std.set_xticks(np.linspace(0, DOMAIN_DEN-1, 10))
-    ax_std.set_xticklabels([f'{int(i * time_window_s / DOMAIN_DEN)}' for i in np.linspace(0, DOMAIN_DEN-1, 10)])
+    ax_std.grid(True, alpha=0.3, linewidth=0.8)
     
-    plt.suptitle(title, fontsize=14, fontweight='bold', y=0.995)
+    # Legend centered above the plot
+    ax_std.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15),
+                 fontsize=legend_fontsize, frameon=True, fancybox=True, shadow=True)
+    
+    ax_std.set_xticks(np.linspace(0, DOMAIN_DEN-1, 10))
+    ax_std.set_xticklabels([f'{int(i * time_window_s / DOMAIN_DEN)}' for i in np.linspace(0, DOMAIN_DEN-1, 10)],
+                            fontsize=tick_fontsize)
+    ax_std.tick_params(axis='y', labelsize=tick_fontsize)
     
     filepath = os.path.join(PLOT_DIR, filename)
-    plt.savefig(filepath, dpi=100, bbox_inches='tight')
+    plt.savefig(filepath, dpi=150, bbox_inches='tight', facecolor='white')
     plt.close()
     logger.info(f"Saved heatmap: {filepath}")
+
+def compute_heatmap_stats(all_data, metric_name):
+    """Compute median and double percentile bands for a metric across all cycles.
+    
+    Inner band: 33rd-66th percentile (middle third, ~68% of normal dist)
+    Outer band: 1st-99th percentile (almost all data)
+    """
+    time_bucket_stats = {i: [] for i in range(DOMAIN_DEN)}
+    
+    for cycle_data in all_data:
+        if cycle_data is None or len(cycle_data) == 0:
+            continue
+        
+        df = cycle_data
+        cycle_start = df.index[0]
+        cycle_end = df.index[-1]
+        cycle_duration_s = (cycle_end - cycle_start).total_seconds()
+        
+        for timestamp, row in df.iterrows():
+            value = row[metric_name]
+            
+            if np.isnan(value):
+                continue
+            
+            value_clamped = np.clip(value, 0, 1)
+            time_offset_s = (timestamp - cycle_start).total_seconds()
+            time_bucket = int((time_offset_s / cycle_duration_s) * DOMAIN_DEN)
+            time_bucket = min(time_bucket, DOMAIN_DEN - 1)
+            
+            time_bucket_stats[time_bucket].append(value_clamped)
+    
+    median_values = np.zeros(DOMAIN_DEN)
+    inner_lower = np.zeros(DOMAIN_DEN)  # 33rd percentile
+    inner_upper = np.zeros(DOMAIN_DEN)  # 66th percentile
+    outer_lower = np.zeros(DOMAIN_DEN)  # 1st percentile
+    outer_upper = np.zeros(DOMAIN_DEN)  # 99th percentile
+    
+    for i in range(DOMAIN_DEN):
+        if time_bucket_stats[i]:
+            median_values[i] = np.median(time_bucket_stats[i])
+            inner_lower[i] = np.percentile(time_bucket_stats[i], 33)
+            inner_upper[i] = np.percentile(time_bucket_stats[i], 66)
+            outer_lower[i] = np.percentile(time_bucket_stats[i], 1)
+            outer_upper[i] = np.percentile(time_bucket_stats[i], 99)
+        else:
+            median_values[i] = np.nan
+            inner_lower[i] = np.nan
+            inner_upper[i] = np.nan
+            outer_lower[i] = np.nan
+            outer_upper[i] = np.nan
+    
+    return median_values, inner_lower, inner_upper, outer_lower, outer_upper
+
+def plot_expected_value(all_data, metric_name, title, filename):
+    """Create individual expected value plot with double percentile bands."""
+    
+    median_values, inner_lower, inner_upper, outer_lower, outer_upper = compute_heatmap_stats(all_data, metric_name)
+    valid_idx = ~np.isnan(median_values)
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(18, 8))
+    
+    # Font sizes - all enlarged
+    title_fontsize = 26
+    label_fontsize = 18
+    tick_fontsize = 16
+    legend_fontsize = 16
+    
+    time_window_s = 15 * 60
+    
+    # Plot median and percentile bands
+    x_data = np.where(valid_idx)[0]
+    y_median = median_values[valid_idx]
+    y_inner_lower = inner_lower[valid_idx]
+    y_inner_upper = inner_upper[valid_idx]
+    y_outer_lower = outer_lower[valid_idx]
+    y_outer_upper = outer_upper[valid_idx]
+    
+    # Plot outer band first (behind inner)
+    ax.fill_between(x_data, y_outer_lower, y_outer_upper, 
+                    alpha=0.15, color='blue', label='1st-99th Percentile')
+    
+    # Plot inner band
+    ax.fill_between(x_data, y_inner_lower, y_inner_upper, 
+                    alpha=0.35, color='blue', label='33rd-66th Percentile')
+    
+    # Plot median on top
+    ax.plot(x_data, y_median, color='blue', linewidth=3.5, label='Median')
+    
+    ax.set_title(title, fontsize=title_fontsize, fontweight='bold', pad=25)
+    ax.set_ylabel('Price Discrepancy', fontsize=label_fontsize, fontweight='bold')
+    ax.set_xlabel('Time (seconds into cycle)', fontsize=label_fontsize, fontweight='bold')
+    
+    ax.set_xlim(0, DOMAIN_DEN-1)
+    ax.set_ylim(bottom=0)  # Constrain to non-negative
+    ax.grid(True, alpha=0.3, linewidth=0.8)
+    
+    # Legend below title, centered
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.05), ncol=3,
+             fontsize=legend_fontsize, frameon=True, fancybox=True, shadow=True)
+    
+    # X-axis ticks
+    ax.set_xticks(np.linspace(0, DOMAIN_DEN-1, 10))
+    ax.set_xticklabels([f'{int(i * time_window_s / DOMAIN_DEN)}' for i in np.linspace(0, DOMAIN_DEN-1, 10)],
+                       fontsize=tick_fontsize)
+    ax.tick_params(axis='y', labelsize=tick_fontsize)
+    
+    fig.tight_layout()
+    
+    filepath = os.path.join(PLOT_DIR, filename)
+    plt.savefig(filepath, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close()
+    logger.info(f"Saved expected value plot: {filepath}")
+
+def plot_stacked_expected_values(all_data, num_cycles):
+    """Create 4 vertically stacked expected value plots in one image using percentiles."""
+    
+    metrics = [
+        ('poly_internal', 'Polymarket Internal Price Discrepancy: 1 - (Price YES + Price NO)'),
+        ('kalshi_internal', 'Kalshi Internal Price Discrepancy: 1 - (Price YES + Price NO)'),
+        ('mirror_yes', 'Mirror YES Price Discrepancy: |Price YES Polymarket - Price YES Kalshi|'),
+        ('mirror_no', 'Mirror NO Price Discrepancy: |Price NO Polymarket - Price NO Kalshi|')
+    ]
+    
+    fig, axes = plt.subplots(4, 1, figsize=(22, 12))
+    fig.suptitle(f'Median Price Discrepancy Across All Metrics ({num_cycles} cycles)', 
+                 fontsize=28, fontweight='bold', y=0.995)
+    
+    # Font sizes
+    label_fontsize = 18
+    tick_fontsize = 16
+    legend_fontsize = 15
+    subplot_title_fontsize = 20
+    
+    time_window_s = 15 * 60
+    
+    for idx, (metric_name, title) in enumerate(metrics):
+        ax = axes[idx]
+        
+        median_values, lower_pct, upper_pct = compute_heatmap_stats(all_data, metric_name)
+        valid_idx = ~np.isnan(median_values)
+        
+        x_data = np.where(valid_idx)[0]
+        y_median = median_values[valid_idx]
+        y_lower = lower_pct[valid_idx]
+        y_upper = upper_pct[valid_idx]
+        
+        ax.plot(x_data, y_median, color='blue', linewidth=3.5, label='Median')
+        ax.fill_between(x_data, y_lower, y_upper, 
+                        alpha=0.35, color='blue', label='25th-75th Percentile ')
+        
+        ax.set_title(title, fontsize=subplot_title_fontsize, fontweight='bold', pad=15)
+        ax.set_ylabel('Price Discrepancy', fontsize=label_fontsize, fontweight='bold')
+        if idx == 3:  # Only label x-axis on bottom plot
+            ax.set_xlabel('Time (seconds into cycle)', fontsize=label_fontsize, fontweight='bold')
+        
+        ax.set_xlim(0, DOMAIN_DEN-1)
+        ax.set_ylim(bottom=0)  # Constrain to non-negative
+        ax.grid(True, alpha=0.3, linewidth=0.8)
+        
+        # Legend centered above plot
+        ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.08), ncol=2,
+                 fontsize=legend_fontsize, frameon=True, fancybox=True, shadow=True)
+        
+        # X-axis ticks
+        ax.set_xticks(np.linspace(0, DOMAIN_DEN-1, 10))
+        ax.set_xticklabels([f'{int(i * time_window_s / DOMAIN_DEN)}' for i in np.linspace(0, DOMAIN_DEN-1, 10)],
+                           fontsize=tick_fontsize)
+        ax.tick_params(axis='y', labelsize=tick_fontsize)
+    
+    fig.tight_layout()
+    
+    filepath = os.path.join(PLOT_DIR, 'stacked_expected_values.png')
+    plt.savefig(filepath, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close()
+    logger.info(f"Saved stacked expected values plot: {filepath}")
 
 async def main():
     """Main analysis function."""
@@ -433,6 +628,34 @@ async def main():
             create_heatmap(cycle_data_list, 'mirror_no', 
                           f'Mirror NO Arbitrage Heatmap ({len(cycle_data_list)} cycles)',
                           'heatmap_mirror_no.png')
+            
+            # Create individual expected value plots
+            logger.info(f"\n{'='*80}")
+            logger.info("Creating expected value plots...")
+            logger.info(f"{'='*80}\n")
+            
+            plot_expected_value(cycle_data_list, 'poly_internal',
+                              'Polymarket Internal Price Discrepancy 1 - (Price YES + Price NO)',
+                              'expected_value_poly_internal.png')
+            
+            plot_expected_value(cycle_data_list, 'kalshi_internal',
+                              'Kalshi Internal Price Discrepancy 1 - (Price YES + Price NO)',
+                              'expected_value_kalshi_internal.png')
+            
+            plot_expected_value(cycle_data_list, 'mirror_yes',
+                              'Mirror YES Price Discrepancy: |Price YES Polymarket - Price YES Kalshi|',
+                              'expected_value_mirror_yes.png')
+            
+            plot_expected_value(cycle_data_list, 'mirror_no',
+                              'Mirror NO Price Discrepancy: |Price NO Polymarket - Price NO Kalshi|',
+                              'expected_value_mirror_no.png')
+            
+            # Create stacked expected value plot
+            logger.info(f"\n{'='*80}")
+            logger.info("Creating stacked expected values plot...")
+            logger.info(f"{'='*80}\n")
+            
+            plot_stacked_expected_values(cycle_data_list, len(cycle_data_list))
         
         logger.info(f"\n{'='*80}")
         logger.info(f"Complete: Analyzed {len(cycle_data_list)} cycles")
