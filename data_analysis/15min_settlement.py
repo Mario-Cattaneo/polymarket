@@ -139,7 +139,7 @@ async def get_market_and_assets(pool, utc_time_str):
         except (json.JSONDecodeError, TypeError):
             asset_ids = []
 
-        logger.info(f"✅ Found Market: {market_id}")
+        logger.info(f"  Found Market: {market_id}")
         logger.info(f"   Question: {question}")
         logger.info(f"   Asset IDs: {asset_ids}")
         

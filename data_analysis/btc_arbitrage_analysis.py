@@ -340,7 +340,7 @@ def create_heatmap(all_data, metric_name, title, filename):
 def compute_heatmap_stats(all_data, metric_name):
     """Compute median and double percentile bands for a metric across all cycles.
     
-    Inner band: 33rd-66th percentile (middle third, ~68% of normal dist)
+    Inner band: 25th-75th percentile (middle third, ~68% of normal dist)
     Outer band: 1st-99th percentile (almost all data)
     """
     time_bucket_stats = {i: [] for i in range(DOMAIN_DEN)}
@@ -368,16 +368,16 @@ def compute_heatmap_stats(all_data, metric_name):
             time_bucket_stats[time_bucket].append(value_clamped)
     
     median_values = np.zeros(DOMAIN_DEN)
-    inner_lower = np.zeros(DOMAIN_DEN)  # 33rd percentile
-    inner_upper = np.zeros(DOMAIN_DEN)  # 66th percentile
+    inner_lower = np.zeros(DOMAIN_DEN)  # 25th percentile
+    inner_upper = np.zeros(DOMAIN_DEN)  # 75th percentile
     outer_lower = np.zeros(DOMAIN_DEN)  # 1st percentile
     outer_upper = np.zeros(DOMAIN_DEN)  # 99th percentile
     
     for i in range(DOMAIN_DEN):
         if time_bucket_stats[i]:
             median_values[i] = np.median(time_bucket_stats[i])
-            inner_lower[i] = np.percentile(time_bucket_stats[i], 33)
-            inner_upper[i] = np.percentile(time_bucket_stats[i], 66)
+            inner_lower[i] = np.percentile(time_bucket_stats[i], 25)
+            inner_upper[i] = np.percentile(time_bucket_stats[i], 75)
             outer_lower[i] = np.percentile(time_bucket_stats[i], 1)
             outer_upper[i] = np.percentile(time_bucket_stats[i], 99)
         else:
@@ -420,7 +420,7 @@ def plot_expected_value(all_data, metric_name, title, filename):
     
     # Plot inner band
     ax.fill_between(x_data, y_inner_lower, y_inner_upper, 
-                    alpha=0.35, color='blue', label='33rd-66th Percentile')
+                    alpha=0.35, color='blue', label='25th-75th Percentile')
     
     # Plot median on top
     ax.plot(x_data, y_median, color='blue', linewidth=3.5, label='Median')
@@ -460,15 +460,15 @@ def plot_stacked_expected_values(all_data, num_cycles):
         ('mirror_no', 'Mirror NO Price Discrepancy: |Price NO Polymarket - Price NO Kalshi|')
     ]
     
-    fig, axes = plt.subplots(4, 1, figsize=(22, 12))
-    fig.suptitle(f'Price Discrepancy Distributions from {num_cycles} Cycles', 
-                 fontsize=28, fontweight='bold', y=0.995)
+    fig, axes = plt.subplots(4, 1, figsize=(22, 20))
+    fig.suptitle(f'Price Discrepancy Distributions over {num_cycles} cycles', 
+                 fontsize=32, fontweight='bold', y=0.995)
     
-    # Font sizes
-    label_fontsize = 18
-    tick_fontsize = 16
-    legend_fontsize = 15
-    subplot_title_fontsize = 20
+    # Font sizes - all enlarged for better readability
+    label_fontsize = 24
+    tick_fontsize = 24
+    legend_fontsize = 22
+    subplot_title_fontsize = 24
     
     time_window_s = 15 * 60
     
@@ -491,13 +491,12 @@ def plot_stacked_expected_values(all_data, num_cycles):
         
         # Plot inner band
         ax.fill_between(x_data, y_inner_lower, y_inner_upper, 
-                        alpha=0.35, color='blue', label='33rd-66th Percentile')
+                        alpha=0.35, color='blue', label='25th-75th Percentile')
         
         # Plot median on top
         ax.plot(x_data, y_median, color='blue', linewidth=3.5, label='Median')
         
         ax.set_title(title, fontsize=subplot_title_fontsize, fontweight='bold', pad=15)
-        ax.set_ylabel('Price Discrepancy', fontsize=label_fontsize, fontweight='bold')
         if idx == 3:  # Only label x-axis on bottom plot
             ax.set_xlabel('Time (seconds into cycle)', fontsize=label_fontsize, fontweight='bold')
         

@@ -636,6 +636,33 @@ async def main():
         order_sizes_arr = np.array(filtered_sizes)
         slippages_arr = np.array(filtered_slippages)
         
+        # --- ZERO-SLIPPAGE DIAGNOSTICS ---
+        zero_mask = slippages_arr == 0
+        n_zero = int(np.sum(zero_mask))
+        pct_zero = (n_zero / len(slippages_arr)) * 100 if len(slippages_arr) > 0 else 0.0
+        max_taker_zero = float(inflows_arr[zero_mask].max()) if n_zero > 0 else 0.0
+        logger.info("\nZERO-SLIPPAGE DIAGNOSTICS:")
+        logger.info(f"  Count with slippage == 0: {n_zero:,} ({pct_zero:.6f}%)")
+        logger.info(f"  Max taker USDC amount among zero-slip settlements: ${max_taker_zero:.6f}")
+
+        # --- MAX SLIPPAGE / TAKER_USDC DIAGNOSTIC ---
+        # Compute slippage per dollar where inflow != 0
+        valid_mask = inflows_arr != 0
+        if np.any(valid_mask):
+            ratios = np.divide(slippages_arr, inflows_arr, out=np.full_like(slippages_arr, np.nan), where=valid_mask)
+            if np.all(np.isnan(ratios)):
+                logger.info("No valid slippage/inflow ratios available")
+            else:
+                idx_max = int(np.nanargmax(ratios))
+                max_ratio = float(ratios[idx_max])
+                taker_amount_at_max = float(inflows_arr[idx_max])
+                slippage_at_max = float(slippages_arr[idx_max])
+                logger.info("\nMAX SLIPPAGE-per-TAKER USD DIAGNOSTIC:")
+                logger.info(f"  Max slippage/taker_usdc ratio: {max_ratio:.6f}")
+                logger.info(f"  Corresponding taker USDC amount: ${taker_amount_at_max:.6f}")
+                logger.info(f"  Corresponding slippage: ${slippage_at_max:.6f}")
+        else:
+            logger.info("No non-zero taker inflows to compute slippage-per-dollar ratio")
         # --- SIMPLE REGRESSIONS ---
         logger.info("\n### SIMPLE REGRESSION ANALYSES ###\n")
         
