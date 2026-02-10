@@ -131,6 +131,15 @@ async def process_batch_slippage(settlements: list) -> tuple:
             else:
                 taker_is_buying = False
             
+            # Get taker USDC amount and tokens from exchange fill
+            exchange_making = Decimal(exchange_fill['making'])
+            exchange_taking = Decimal(exchange_fill['taking'])
+            
+            # taker_usdc_amount = min(making, taking)
+            # taker_tokens = max(making, taking)
+            taker_usdc_amount = min(exchange_making, exchange_taking) / USDC_SCALAR
+            taker_tokens = max(exchange_making, exchange_taking) / SHARE_SCALAR
+            
             # Process maker fills
             maker_fills = [f for f in all_fills if not f['is_exchange']]
             
@@ -138,61 +147,37 @@ async def process_batch_slippage(settlements: list) -> tuple:
                 continue
             
             # Calculate prices for all maker fills
-            fills_info = []
+            maker_prices = []
             for fill in maker_fills:
-                maker_is_buying = (fill['makerAssetId'] == 0)
-                
                 making_raw = Decimal(fill['making'])
                 taking_raw = Decimal(fill['taking'])
                 
-                # Price is always min/max to keep in [0,1]
-                price_per_token = min(making_raw, taking_raw) / max(making_raw, taking_raw)
+                # Determine maker side from makerAssetId
+                maker_is_buying = (fill['makerAssetId'] == 0)
                 
-                # Determine amounts based on asset IDs
-                if fill['takerAssetId'] == 0:
-                    amount_shares = making_raw / SHARE_SCALAR
-                    amount_usdc = taking_raw / USDC_SCALAR
-                else:
-                    amount_shares = taking_raw / SHARE_SCALAR
-                    amount_usdc = making_raw / USDC_SCALAR
+                # price_per_share = min/max
+                price_per_share = min(making_raw, taking_raw) / max(making_raw, taking_raw)
                 
-                # If maker is on same side as taker, convert price to taker's perspective
+                # If maker is on same side as taker, flip price
                 if maker_is_buying == taker_is_buying:
-                    price_per_token = Decimal(1) - price_per_token
+                    price_per_share = Decimal(1) - price_per_share
                 
-                fills_info.append({
-                    'price_per_token': price_per_token,
-                    'amount_shares': amount_shares,
-                    'amount_usdc': amount_usdc
-                })
+                maker_prices.append(price_per_share)
             
-            # Only compute slippage if we have at least 2 maker fills
-            if len(fills_info) >= 2:
-                prices = [f['price_per_token'] for f in fills_info]
-                if taker_is_buying:
-                    p_best = min(prices)
-                else:
-                    p_best = max(prices)
-
-                # Calculate slippage
-                exchange_making = Decimal(exchange_fill['making'])
-                exchange_taking = Decimal(exchange_fill['taking'])
-                amount_shares = max(exchange_making, exchange_taking) / SHARE_SCALAR
-                actual_cost = min(exchange_making, exchange_taking) / USDC_SCALAR
-                expected_cost = p_best * amount_shares
-                tx_slippage = abs(expected_cost - actual_cost)
+            # Only compute slippage if we have at least 1 maker fill
+            if len(maker_prices) >= 1:
+                # best_price = minimum price (buying at min price is best)
+                best_price_per_share = min(maker_prices)
+                
+                # slippage = taker_usdc_amount - best_price_per_share * taker_tokens
+                expected_cost = best_price_per_share * taker_tokens
+                tx_slippage = taker_usdc_amount - expected_cost
                 
                 current_cumulative += tx_slippage
                 timestamp = block_to_timestamp(row['block_number'])
                 
-                # Track taker USDC inflow: making if makerAssetId == 0, else taking
-                exchange_making = Decimal(exchange_fill['making'])
-                exchange_taking = Decimal(exchange_fill['taking'])
-                if exchange_fill['makerAssetId'] == 0:
-                    exchange_usdc_volume = exchange_making / USDC_SCALAR
-                else:
-                    exchange_usdc_volume = exchange_taking / USDC_SCALAR
-                current_taker_usdc += exchange_usdc_volume
+                # Track taker USDC inflow
+                current_taker_usdc += taker_usdc_amount
                 
                 timestamps.append(timestamp)
                 cumulative_values.append(float(current_cumulative))

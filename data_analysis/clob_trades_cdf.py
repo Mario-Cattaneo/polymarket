@@ -50,10 +50,10 @@ async def get_db_connection():
             user=os.getenv(DB_CONFIG['user_env']),
             password=os.getenv(DB_CONFIG['pass_env'])
         )
-        logger.info("✅ Database connection established")
+        logger.info("Database connection established")
         return conn
     except Exception as e:
-        logger.error(f"❌ Database connection failed: {e}")
+        logger.error(f"Database connection failed: {e}")
         return None
 
 async def sample_buffer_last_trade_times(conn):
@@ -124,7 +124,7 @@ def plot_cdf(times):
     os.makedirs(PLOTS_DIR, exist_ok=True)
     output_path = os.path.join(PLOTS_DIR, 'buffer_last_trade_time_cdf_fastest.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    logger.info(f"✅ Plot saved to: {output_path}")
+    logger.info(f"Plot saved to: {output_path}")
     
     plt.close()
 

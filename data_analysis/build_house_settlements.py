@@ -139,7 +139,7 @@ async def create_tables(conn):
         );
         CREATE INDEX IF NOT EXISTS idx_cft_house_block ON CFT_no_exchange_house(block_number);
     """)
-    logger.info("✅ 'house' tables ready with unique constraints")
+    logger.info(" 'house' tables ready with unique constraints")
 
 async def get_global_bounds(conn):
     """Gets the min and max block number from the source tables."""
@@ -169,17 +169,17 @@ async def get_safe_start_block(conn, global_min):
     
     # If no data has been collected yet, start from the hardcoded block number.
     if current_max == 0:
-        logger.info(f"🌱 No data in target tables. Starting from hardcoded block: {HARDCODED_START_BLOCK}")
+        logger.info(f" No data in target tables. Starting from hardcoded block: {HARDCODED_START_BLOCK}")
         return HARDCODED_START_BLOCK
 
     # If resuming, rewind by one batch size to handle potential partial writes from a crash.
     safe_start = max(global_min, current_max - BLOCK_BATCH_SIZE)
-    logger.info(f"🔎 Found Max Block: {current_max}. Resuming from safe block {safe_start}.")
+    logger.info(f" Found Max Block: {current_max}. Resuming from safe block {safe_start}.")
     return safe_start
 
 async def clean_overlap(conn, start_block):
     """Deletes overlapping data from target tables to prevent duplicates on resume."""
-    logger.info(f"🧹 Cleaning overlap from block {start_block} in 'house' tables...")
+    logger.info(f" Cleaning overlap from block {start_block} in 'house' tables...")
     await conn.execute("DELETE FROM settlements_house WHERE block_number >= $1", start_block)
     await conn.execute("DELETE FROM CFT_no_exchange_house WHERE block_number >= $1", start_block)
 
@@ -281,10 +281,10 @@ async def main():
             await clean_overlap(conn, start_blk)
 
             if start_blk >= max_blk:
-                logger.info("✅ All blocks already processed.")
+                logger.info(" All blocks already processed.")
                 return
 
-            logger.info(f"🚀 Starting processing from Block {start_blk} to {max_blk}")
+            logger.info(f" Starting processing from Block {start_blk} to {max_blk}")
 
             curr = start_blk
             while curr < max_blk:
@@ -300,7 +300,7 @@ async def main():
                 
                 curr = next_blk
             
-            logger.info("✅ Processing complete.")
+            logger.info(" Processing complete.")
                 
     finally:
         await pool.close()

@@ -454,8 +454,8 @@ def plot_stacked_expected_values(all_data, num_cycles):
     """Create 4 vertically stacked expected value plots in one image with double percentile bands."""
     
     metrics = [
-        ('poly_internal', 'Polymarket Internal Price Discrepancy: 1 - (Price YES + Price NO)'),
-        ('kalshi_internal', 'Kalshi Internal Price Discrepancy: 1 - (Price YES + Price NO)'),
+        ('poly_internal', 'Polymarket Internal Price Discrepancy: |1 - (Price YES + Price NO)|'),
+        ('kalshi_internal', 'Kalshi Internal Price Discrepancy: |1 - (Price YES + Price NO)|'),
         ('mirror_yes', 'Mirror YES Price Discrepancy: |Price YES Polymarket - Price YES Kalshi|'),
         ('mirror_no', 'Mirror NO Price Discrepancy: |Price NO Polymarket - Price NO Kalshi|')
     ]

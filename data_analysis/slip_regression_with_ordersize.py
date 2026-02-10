@@ -41,11 +41,11 @@ SECONDS_PER_BLOCK = 2
 
 # --- Block Range Configuration ---
 START_BLOCK_NR = 79172085
-END_BLOCK_NR = 81225971
+END_BLOCK_NR = 79172085 + 400_000 #81225971
 BLOCK_BATCH_SIZE = 50_000
 
 # --- Regression Filter Range ---
-REGRESSION_START_TIMESTAMP = ((START_BLOCK_NR - REF_BLOCK_NUMBER) * SECONDS_PER_BLOCK) + REF_UNIX_TIMESTAMP + 24 * 60 * 60
+REGRESSION_START_TIMESTAMP = 0 #((START_BLOCK_NR - REF_BLOCK_NUMBER) * SECONDS_PER_BLOCK) + REF_UNIX_TIMESTAMP + 24 * 60 * 60
 REGRESSION_END_TIMESTAMP = None
 
 # --- Constants ---
@@ -101,7 +101,7 @@ def decode_order_filled(data: str, topics: list) -> dict:
 async def process_batch_for_regression(settlements: list) -> tuple:
     """
     Extract discrete (inflow, order_size, slippage) tuples from settlements.
-    Returns (timestamps, inflows, order_sizes, slippages).
+    Returns (timestamps, inflows, order_sizes, slippages, settlement_data).
     """
     EXCHANGE_ADDRESS = "0xC5d563A36AE78145C45a50134d48A1215220f80a"
     
@@ -109,6 +109,7 @@ async def process_batch_for_regression(settlements: list) -> tuple:
     inflows = []
     order_sizes = []
     slippages = []
+    settlement_data = []
     count = 0
     
     for row in settlements:
@@ -134,11 +135,20 @@ async def process_batch_for_regression(settlements: list) -> tuple:
             if not exchange_fill:
                 continue
             
-            # Determine taker direction
+            # Determine taker direction (from exchange fill)
             if exchange_fill['makerAssetId'] == 0:
                 taker_is_buying = True
             else:
                 taker_is_buying = False
+            
+            # Get taker USDC amount and tokens from exchange fill
+            exchange_making = Decimal(exchange_fill['making'])
+            exchange_taking = Decimal(exchange_fill['taking'])
+            
+            # taker_usdc_amount = min(making, taking)
+            # taker_tokens = max(making, taking)
+            taker_usdc_amount = min(exchange_making, exchange_taking) / USDC_SCALAR
+            taker_tokens = max(exchange_making, exchange_taking) / SHARE_SCALAR
             
             # Process maker fills
             maker_fills = [f for f in all_fills if not f['is_exchange']]
@@ -147,78 +157,63 @@ async def process_batch_for_regression(settlements: list) -> tuple:
                 continue
             
             # Calculate prices for all maker fills
-            fills_info = []
+            maker_prices = []
             for fill in maker_fills:
-                maker_is_buying = (fill['makerAssetId'] == 0)
-                
                 making_raw = Decimal(fill['making'])
                 taking_raw = Decimal(fill['taking'])
                 
-                # Price is always min/max to keep in [0,1]
-                price_per_token = min(making_raw, taking_raw) / max(making_raw, taking_raw)
+                # Determine maker side from makerAssetId
+                maker_is_buying = (fill['makerAssetId'] == 0)
                 
-                # Determine amounts based on asset IDs
-                if fill['takerAssetId'] == 0:
-                    amount_shares = making_raw / SHARE_SCALAR
-                    amount_usdc = taking_raw / USDC_SCALAR
-                else:
-                    amount_shares = taking_raw / SHARE_SCALAR
-                    amount_usdc = making_raw / USDC_SCALAR
+                # price_per_share = min/max
+                price_per_share = min(making_raw, taking_raw) / max(making_raw, taking_raw)
                 
-                # If maker is on same side as taker, convert price to taker's perspective
+                # If maker is on same side as taker, flip price
                 if maker_is_buying == taker_is_buying:
-                    price_per_token = Decimal(1) - price_per_token
+                    price_per_share = Decimal(1) - price_per_share
                 
-                fills_info.append({
-                    'price_per_token': price_per_token,
-                    'amount_shares': amount_shares,
-                    'amount_usdc': amount_usdc
-                })
+                maker_prices.append(price_per_share)
             
-            # Only compute slippage if we have at least 2 maker fills
-            if len(fills_info) >= 2:
-                prices = [f['price_per_token'] for f in fills_info]
-                if taker_is_buying:
-                    p_best = min(prices)
-                else:
-                    p_best = max(prices)
-
-                # Calculate slippage
-                exchange_making = Decimal(exchange_fill['making'])
-                exchange_taking = Decimal(exchange_fill['taking'])
-                amount_shares = max(exchange_making, exchange_taking) / SHARE_SCALAR
-                actual_cost = min(exchange_making, exchange_taking) / USDC_SCALAR
-                expected_cost = p_best * amount_shares
-                tx_slippage = abs(expected_cost - actual_cost)
+            # Only compute slippage if we have at least 1 maker fill
+            if len(maker_prices) >= 1:
+                # best_price = minimum price (buying at min price is best)
+                best_price_per_share = min(maker_prices)
                 
-                # Taker USDC inflow
-                exchange_usdc_volume = min(exchange_making, exchange_taking) / USDC_SCALAR
-                
-                # Order size (in shares)
-                order_size_shares = float(amount_shares)
+                # slippage = taker_usdc_amount - best_price_per_share * taker_tokens
+                expected_cost = best_price_per_share * taker_tokens
+                tx_slippage = taker_usdc_amount - expected_cost
                 
                 timestamp = block_to_timestamp(row['block_number'])
                 
+                # Order size (in shares)
+                order_size_shares = float(taker_tokens)
+                
                 # Store discrete measurement
                 timestamps.append(timestamp)
-                inflows.append(float(exchange_usdc_volume))
+                inflows.append(float(taker_usdc_amount))
                 order_sizes.append(order_size_shares)
                 slippages.append(float(tx_slippage))
+                settlement_data.append({
+                    'transaction_hash': row['transaction_hash'],
+                    'block_number': row['block_number'],
+                    'trade': trade
+                })
                 count += 1
 
         except Exception as e:
             continue
     
-    return timestamps, inflows, order_sizes, slippages, count
+    return timestamps, inflows, order_sizes, slippages, settlement_data, count
 
-def filter_data_by_timestamp(timestamps: list, inflows: list, order_sizes: list, slippages: list) -> tuple:
+def filter_data_by_timestamp(timestamps: list, inflows: list, order_sizes: list, slippages: list, settlement_data: list) -> tuple:
     """Filter data based on timestamp range."""
     filtered_ts = []
     filtered_inf = []
     filtered_size = []
     filtered_slip = []
+    filtered_settlement_data = []
     
-    for ts, inf, size, slip in zip(timestamps, inflows, order_sizes, slippages):
+    for ts, inf, size, slip, sett_data in zip(timestamps, inflows, order_sizes, slippages, settlement_data):
         if REGRESSION_START_TIMESTAMP is not None and ts < REGRESSION_START_TIMESTAMP:
             continue
         if REGRESSION_END_TIMESTAMP is not None and ts > REGRESSION_END_TIMESTAMP:
@@ -227,8 +222,9 @@ def filter_data_by_timestamp(timestamps: list, inflows: list, order_sizes: list,
         filtered_inf.append(inf)
         filtered_size.append(size)
         filtered_slip.append(slip)
+        filtered_settlement_data.append(sett_data)
     
-    return filtered_ts, filtered_inf, filtered_size, filtered_slip
+    return filtered_ts, filtered_inf, filtered_size, filtered_slip, filtered_settlement_data
 
 def perform_regression(inflows: list, order_sizes: list, slippages: list) -> dict:
     """
@@ -423,6 +419,125 @@ def test_logarithmic_fit(X: np.ndarray, y: np.ndarray, name: str = ""):
         'y': y_clean
     }
 
+def test_power_law_fit(X: np.ndarray, y: np.ndarray, name: str = ""):
+    """Fit a power-law: slippage = C * order_size^alpha by regressing logs.
+    Returns dict with exponent `alpha`, prefactor `C`, R², RMSE, p-value and sample counts.
+    """
+    logger.info(f"\nTESTING POWER-LAW FIT ({name}):")
+
+    # Keep only positive X and positive y
+    mask = (X > 0) & (y > 0)
+    Xp = X[mask]
+    yp = y[mask]
+
+    if len(Xp) < 2:
+        logger.info("  Not enough positive samples for power-law fit")
+        return None
+
+    logX = np.log(Xp)
+    logY = np.log(yp)
+
+    slope, intercept, r_value, p_value, std_err = stats.linregress(logX, logY)
+
+    # Predictions and metrics on original and log scales
+    y_pred_log = slope * logX + intercept
+    y_pred = np.exp(y_pred_log)
+    rmse = np.sqrt(np.mean((yp - y_pred) ** 2))
+    rmse_log = np.sqrt(np.mean((logY - y_pred_log) ** 2))
+
+    alpha = float(slope)
+    prefactor = float(np.exp(intercept))
+
+    n_total = len(X)
+    n_used = len(Xp)
+    n_excluded = n_total - n_used
+
+    logger.info(f"  Samples used (positive X & y): {n_used:,}  Excluded: {n_excluded:,}")
+    logger.info(f"  Power-law exponent (alpha): {alpha:.6f} (std_err={std_err:.6f}, p={p_value:.2e})")
+    logger.info(f"  Prefactor (C): {prefactor:.6e}")
+    logger.info(f"  R² (log-log): {r_value**2:.6f}")
+    logger.info(f"  RMSE (original scale): {rmse:.6e}")
+    logger.info(f"  RMSE (log scale): {rmse_log:.6e}")
+
+    return {
+        'alpha': alpha,
+        'prefactor': prefactor,
+        'r2': r_value**2,
+        'rmse': rmse,
+        'rmse_log': rmse_log,
+        'p_value': p_value,
+        'std_err': std_err,
+        'n_samples': n_used,
+        'n_excluded': n_excluded,
+        'X': Xp,
+        'y': yp,
+        'y_pred': y_pred,
+        'logX': logX,
+        'logY': logY,
+        'y_pred_log': y_pred_log
+    }
+
+def plot_power_law_fit(order_sizes: np.ndarray, slippages: np.ndarray, fit_results: dict, filename: str = 'power_law_fit_ordersize_slippage.png'):
+    """Plot scatter (log-log) and overlay power-law fit line."""
+    if fit_results is None:
+        logger.info("No power-law results to plot")
+        return
+
+    # Prepare arrays and show which points were used in the fit
+    xs_all = np.array(order_sizes)
+    ys_all = np.array(slippages)
+
+    mask_used = (xs_all > 0) & (ys_all > 0)
+    xs_used = xs_all[mask_used]
+    ys_used = ys_all[mask_used]
+
+    # Sample to avoid overplotting for background
+    n_all = len(xs_all)
+    if n_all > 50000:
+        bg_idx = np.random.choice(n_all, 50000, replace=False)
+        xs_bg = xs_all[bg_idx]
+        ys_bg = ys_all[bg_idx]
+    else:
+        xs_bg = xs_all
+        ys_bg = ys_all
+
+    alpha = fit_results['alpha']
+    C = fit_results['prefactor']
+
+    plt.style.use('seaborn-v0_8-whitegrid')
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # Background scatter (all data, faint)
+    ax.scatter(xs_bg, ys_bg, alpha=0.15, s=8, color='lightsteelblue', label='All settlements (background)')
+
+    # Used points (darker)
+    ax.scatter(xs_used, ys_used, alpha=0.35, s=10, color='steelblue', label='Samples used in fit')
+
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+
+    # Fit line over a range covering used X
+    xmin = max(xs_used.min(), 1e-12)
+    xmax = xs_used.max()
+    x_line = np.logspace(np.log10(xmin), np.log10(xmax), 200)
+    y_line = C * (x_line ** alpha)
+    ax.plot(x_line, y_line, color='crimson', linewidth=2.5, label=f'Fit: y = {C:.3e} * x^{alpha:.4f}')
+
+    # Annotate fit stats
+    stat_text = f"alpha={alpha:.4f}, C={C:.3e}, R²={fit_results['r2']:.4f}, n={fit_results['n_samples']:,}"
+    ax.text(0.02, 0.02, stat_text, transform=ax.transAxes, fontsize=10, verticalalignment='bottom', bbox=dict(facecolor='white', alpha=0.6))
+
+    ax.set_xlabel('Order Size (shares)', fontsize=14, fontweight='bold')
+    ax.set_ylabel('Slippage (USDC)', fontsize=14, fontweight='bold')
+    ax.set_title('Power-law fit: Slippage vs Order Size', fontsize=16, fontweight='bold')
+    ax.legend(fontsize=12)
+    ax.grid(True, which='both', alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    logger.info(f"✅ Power-law fit plot saved to {filename}")
+    plt.close()
+
 def plot_slippage_vs_ordersize(order_sizes: np.ndarray, slippages: np.ndarray, results: dict):
     """Plot slippage vs order size with regression line."""
     plt.style.use('seaborn-v0_8-whitegrid')
@@ -593,6 +708,7 @@ async def main():
         all_inflows = []
         all_order_sizes = []
         all_slippages = []
+        all_settlement_data = []
         total_processed = 0
         
         curr_blk = start_blk
@@ -602,12 +718,13 @@ async def main():
             
             settlements = await fetch_batch(conn, curr_blk, next_blk)
             if settlements:
-                timestamps, inflows, order_sizes, slippages, count = await process_batch_for_regression(settlements)
+                timestamps, inflows, order_sizes, slippages, settlement_data, count = await process_batch_for_regression(settlements)
                 
                 all_timestamps.extend(timestamps)
                 all_inflows.extend(inflows)
                 all_order_sizes.extend(order_sizes)
                 all_slippages.extend(slippages)
+                all_settlement_data.extend(settlement_data)
                 total_processed += count
                 
                 logger.info(f"  Blocks {curr_blk:,}-{next_blk:,}: {count} valid settlements")
@@ -618,14 +735,16 @@ async def main():
         
         # Filter by timestamp
         if REGRESSION_START_TIMESTAMP or REGRESSION_END_TIMESTAMP:
-            filtered_ts, filtered_inflows, filtered_sizes, filtered_slippages = filter_data_by_timestamp(
-                all_timestamps, all_inflows, all_order_sizes, all_slippages
+            filtered_ts, filtered_inflows, filtered_sizes, filtered_slippages, filtered_settlement_data = filter_data_by_timestamp(
+                all_timestamps, all_inflows, all_order_sizes, all_slippages, all_settlement_data
             )
             logger.info(f"After timestamp filtering: {len(filtered_inflows)} samples")
         else:
             filtered_inflows = all_inflows
             filtered_sizes = all_order_sizes
             filtered_slippages = all_slippages
+            filtered_settlement_data = all_settlement_data
+            filtered_settlement_data = all_settlement_data
         
         if len(filtered_inflows) < 2:
             logger.error("Not enough samples for regression")
@@ -661,6 +780,43 @@ async def main():
                 logger.info(f"  Max slippage/taker_usdc ratio: {max_ratio:.6f}")
                 logger.info(f"  Corresponding taker USDC amount: ${taker_amount_at_max:.6f}")
                 logger.info(f"  Corresponding slippage: ${slippage_at_max:.6f}")
+                
+                # NEW: Count settlements with ratio >= 1 (impossible case: slippage >= taker amount)
+                invalid_ratio_mask = ratios >= 1.0
+                count_invalid_ratio = int(np.nansum(invalid_ratio_mask))
+                pct_invalid_ratio = (count_invalid_ratio / len(slippages_arr)) * 100 if len(slippages_arr) > 0 else 0.0
+                logger.info(f"\n⚠️  RATIO >= 1.0 DIAGNOSTICS (IMPOSSIBLE: slippage >= taker amount):")
+                logger.info(f"  Count with ratio >= 1.0: {count_invalid_ratio:,} ({pct_invalid_ratio:.6f}%)")
+                
+                if count_invalid_ratio > 0:
+                    # Find top 3 largest ratios
+                    top_n = min(3, count_invalid_ratio)
+                    invalid_indices = np.where(invalid_ratio_mask)[0]
+                    top_indices = invalid_indices[np.argsort(ratios[invalid_indices])[-top_n:][::-1]]
+                    
+                    logger.info(f"\n  Top {top_n} samples with highest ratio >= 1.0:")
+                    for rank, idx in enumerate(top_indices, 1):
+                        logger.info(f"\n  [{rank}] Ratio: {ratios[idx]:.6f}, Taker USDC: ${inflows_arr[idx]:.6f}, Slippage: ${slippages_arr[idx]:.6f}")
+                        
+                        # Print decoded settlement data
+                        if idx < len(filtered_settlement_data):
+                            sett = filtered_settlement_data[idx]
+                            logger.info(f"       TX Hash: {sett['transaction_hash']}")
+                            logger.info(f"       Block: {sett['block_number']}")
+                            
+                            # Decode and print OrderFilled events
+                            trade = sett['trade']
+                            if trade.get('orders_filled'):
+                                logger.info(f"       Decoded OrderFilled Events:")
+                                for fill_idx, fill in enumerate(trade.get('orders_filled', []), 1):
+                                    decoded_fill = decode_order_filled(fill['data'], fill['topics'])
+                                    if decoded_fill:
+                                        logger.info(f"         [{fill_idx}] Maker: {decoded_fill.get('maker')}")
+                                        logger.info(f"             Taker: {decoded_fill.get('taker')}")
+                                        logger.info(f"             Making: {decoded_fill.get('making')}, Taking: {decoded_fill.get('taking')}")
+                                        logger.info(f"             MakerAssetId: {decoded_fill.get('makerAssetId')}, TakerAssetId: {decoded_fill.get('takerAssetId')}")
+                                        logger.info(f"             Fee: {decoded_fill.get('fee')}")
+                        
         else:
             logger.info("No non-zero taker inflows to compute slippage-per-dollar ratio")
         # --- SIMPLE REGRESSIONS ---
@@ -687,6 +843,10 @@ async def main():
         poly_results_size = test_polynomial_fits(order_sizes_arr, slippages_arr, "Order Size vs Slippage")
         
         log_results = test_logarithmic_fit(inflows_arr, slippages_arr, "Inflow vs Slippage")
+        
+        # Power-law fit (order size vs slippage)
+        power_results = test_power_law_fit(order_sizes_arr, slippages_arr, "Order Size vs Slippage")
+        plot_power_law_fit(order_sizes_arr, slippages_arr, power_results)
         
         # --- PLOTS & STRATIFIED ANALYSIS ---
         plot_slippage_vs_ordersize(order_sizes_arr, slippages_arr, results_size)

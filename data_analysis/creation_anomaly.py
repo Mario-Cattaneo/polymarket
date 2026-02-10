@@ -229,7 +229,7 @@ async def analyze_token_matches():
 
 if __name__ == "__main__":
     if not all([PG_HOST, PG_PORT, DB_NAME, DB_USER, DB_PASS]):
-        print("❌ Error: Required database environment variables not fully set.")
+        print("Error: Required database environment variables not fully set.")
         exit(1)
         
     loop = asyncio.new_event_loop()

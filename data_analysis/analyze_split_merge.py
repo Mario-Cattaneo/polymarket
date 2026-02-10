@@ -264,7 +264,7 @@ async def main():
             analyze_settlement(row)
 
     await pool.close()
-    print("\n✅ Analysis complete!")
+    print("\n Analysis complete!")
 
 if __name__ == "__main__":
     asyncio.run(main())

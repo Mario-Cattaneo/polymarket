@@ -78,7 +78,7 @@ async def create_tables(conn):
         CREATE INDEX IF NOT EXISTS idx_cft_type_block ON CFT_no_exchange(type, block_number ASC);
         CREATE INDEX IF NOT EXISTS idx_cft_block ON CFT_no_exchange(block_number);
     """)
-    logger.info("✅ Tables ready")
+    logger.info("Tables ready")
 
 async def get_global_bounds(conn):
     query = """
@@ -106,12 +106,12 @@ async def get_safe_start_block(conn, global_min):
     if current_max == 0: return global_min
     
     safe_start = max(global_min, current_max - BLOCK_BATCH_SIZE)
-    logger.info(f"🔎 Found Max Block: {current_max}. Rewinding to {safe_start}.")
+    logger.info(f"Found Max Block: {current_max}. Rewinding to {safe_start}.")
     return safe_start
 
 async def clean_overlap(conn, start_block):
     """Delete overlapping events from BOTH tables to prevent duplicates on resume."""
-    logger.info(f"🧹 Cleaning overlap from block {start_block}...")
+    logger.info(f"Cleaning overlap from block {start_block}...")
     await conn.execute("DELETE FROM settlements WHERE block_number >= $1", start_block)
     await conn.execute("DELETE FROM CFT_no_exchange WHERE block_number >= $1", start_block)
 
@@ -276,10 +276,10 @@ async def main():
             await clean_overlap(conn, start_blk)
 
             if start_blk > max_blk:
-                logger.info("✅ All blocks already processed.")
+                logger.info("All blocks already processed.")
                 return
 
-            logger.info(f"🚀 Starting processing from Block {start_blk}")
+            logger.info(f"Starting processing from Block {start_blk}")
 
             curr = start_blk
             while curr < max_blk:
