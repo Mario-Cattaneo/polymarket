@@ -18,6 +18,8 @@ from decimal import Decimal, getcontext
 from eth_abi import decode
 from scipy import stats
 import seaborn as sns
+from sklearn.mixture import GaussianMixture
+from sklearn.metrics import silhouette_score
 
 # ----------------------------------------------------------------
 # CONFIGURATION
@@ -41,7 +43,7 @@ SECONDS_PER_BLOCK = 2
 
 # --- Block Range Configuration ---
 START_BLOCK_NR = 79172085
-END_BLOCK_NR = 79172085 + 400_000 #81225971
+END_BLOCK_NR = 79172085 + 100_000 #81225971
 BLOCK_BATCH_SIZE = 50_000
 
 # --- Regression Filter Range ---
@@ -415,8 +417,6 @@ def test_logarithmic_fit(X: np.ndarray, y: np.ndarray, name: str = ""):
         'rmse': rmse,
         'slope': slope,
         'intercept': intercept,
-        'X_log': X_log,
-        'y': y_clean
     }
 
 def test_power_law_fit(X: np.ndarray, y: np.ndarray, name: str = ""):
@@ -487,9 +487,9 @@ def plot_power_law_fit(order_sizes: np.ndarray, slippages: np.ndarray, fit_resul
     xs_all = np.array(order_sizes)
     ys_all = np.array(slippages)
 
-    mask_used = (xs_all > 0) & (ys_all > 0)
-    xs_used = xs_all[mask_used]
-    ys_used = ys_all[mask_used]
+    # Points used in the fit are returned in fit_results as 'X' and 'y'
+    xs_used = np.array(fit_results.get('X', []))
+    ys_used = np.array(fit_results.get('y', []))
 
     # Sample to avoid overplotting for background
     n_all = len(xs_all)
@@ -537,6 +537,223 @@ def plot_power_law_fit(order_sizes: np.ndarray, slippages: np.ndarray, fit_resul
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     logger.info(f"✅ Power-law fit plot saved to {filename}")
     plt.close()
+
+
+def analyze_and_cluster(order_sizes: np.ndarray, slippages: np.ndarray, settlement_data: list, n_clusters: int = 3):
+    """Cluster (log order_size, log slippage) into `n_clusters` groups and produce diagnostic plots.
+
+    Returns a dict with cluster assignments, GMM model, and summary statistics.
+    """
+    logger.info(f"\nCLUSTERING: fitting {n_clusters} components on positive order_size & slippage samples")
+    # === Zorder configuration (modify here for layering) ===
+    zorder_background = 1
+    zorder_points = 50
+    zorder_regression = 300
+    # ======================================================
+    logger.info("Note: `order_size` = max(making,taking)/SHARE_SCALAR (shares); `inflow` = min(making,taking)/USDC_SCALAR (USDC)")
+
+    xs = np.array(order_sizes)
+    ys = np.array(slippages)
+
+    # Mask positive samples (exclude zeros for log clustering)
+    mask_pos = (xs > 0) & (ys > 0)
+    n_total = len(xs)
+    n_pos = int(np.sum(mask_pos))
+    n_zero_or_neg = n_total - n_pos
+    logger.info(f"  Total samples: {n_total:,}, positive (used): {n_pos:,}, excluded (zero/neg): {n_zero_or_neg:,}")
+
+    if n_pos < n_clusters:
+        logger.warning("Not enough positive samples to form requested clusters")
+        return None
+
+    logX = np.log(xs[mask_pos])
+    logY = np.log(ys[mask_pos])
+    feats = np.column_stack([logX, logY])
+
+    # Fit Gaussian Mixture Model
+    gmm = GaussianMixture(n_components=n_clusters, covariance_type='full', random_state=0)
+    gmm.fit(feats)
+    labels = gmm.predict(feats)
+    probs = gmm.predict_proba(feats)
+
+    bic = gmm.bic(feats)
+    aic = gmm.aic(feats)
+
+    sil_score = None
+    try:
+        if n_pos >= 10 and n_clusters > 1:
+            sil_score = silhouette_score(feats, labels)
+    except Exception:
+        sil_score = None
+
+    # Prepare summary per cluster
+    cluster_summary = []
+    for k in range(n_clusters):
+        idx = np.where(labels == k)[0]
+        count = len(idx)
+        median_size = float(np.median(np.exp(logX[idx]))) if count > 0 else 0.0
+        median_slip = float(np.median(np.exp(logY[idx]))) if count > 0 else 0.0
+
+        # Collect top asset ids by frequency for maker fills in this cluster
+        maker_assets = {}
+        taker_assets = {}
+        cluster_settlements = []
+        # Map masked indices back to settlement_data
+        masked_indices = np.nonzero(mask_pos)[0]
+        for local_i in idx:
+            orig_i = masked_indices[local_i]
+            cluster_settlements.append((orig_i, settlement_data[orig_i]))
+            trade = settlement_data[orig_i]['trade']
+            for fill in trade.get('orders_filled', []):
+                decoded = decode_order_filled(fill['data'], fill['topics'])
+                if not decoded:
+                    continue
+                # Count maker/taker asset ids
+                maker_assets[decoded.get('makerAssetId')] = maker_assets.get(decoded.get('makerAssetId'), 0) + 1
+                taker_assets[decoded.get('takerAssetId')] = taker_assets.get(decoded.get('takerAssetId'), 0) + 1
+
+        # Sort top assets
+        top_maker = sorted(maker_assets.items(), key=lambda x: x[1], reverse=True)[:3]
+        top_taker = sorted(taker_assets.items(), key=lambda x: x[1], reverse=True)[:3]
+
+        cluster_summary.append({
+            'cluster': k,
+            'count': count,
+            'median_order_size': median_size,
+            'median_slippage': median_slip,
+            'top_maker_assets': top_maker,
+            'top_taker_assets': top_taker,
+            'example_settlements': cluster_settlements[:3]
+        })
+
+    # --- Plot 1: cluster density visualization (log-log) ---
+    plt.rcParams.update({'font.size': 20})
+    fig, ax = plt.subplots(figsize=(14, 10))
+    colors = sns.color_palette('deep', n_clusters)
+
+    # Plot all points faint as background (including zeros) but don't add legend entry
+    ax.scatter(xs, ys, s=8, alpha=0.03, color='lightgray', zorder=zorder_background)
+
+    # Plot clustered positive points colored
+    masked_orig_idx = np.nonzero(mask_pos)[0]
+    for k in range(n_clusters):
+        sel = (labels == k)
+        ax.scatter(xs[masked_orig_idx[sel]], ys[masked_orig_idx[sel]], s=12, alpha=0.75, color=colors[k], label=f'Cluster {k} (n={cluster_summary[k]["count"]:,})', edgecolors='none', zorder=zorder_points)
+
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.set_xlabel('Order Size (shares)', fontsize=26, fontweight='bold')
+    ax.set_ylabel('Slippage (USDC)', fontsize=26, fontweight='bold')
+    ax.tick_params(axis='both', which='major', labelsize=20)
+    ax.set_title(f'Clustered Slippage / Ordersize (n={n_clusters})', fontsize=28, fontweight='bold')
+
+    # Legend with larger colored texts (no marker/handle on the left)
+    from matplotlib.lines import Line2D
+    labels = [f'Cluster {k} (n={cluster_summary[k]["count"]:,})' for k in range(n_clusters)]
+    proxy_handles = [Line2D([], [], linestyle='', marker='', color='none') for _ in range(n_clusters)]
+    leg = ax.legend(proxy_handles, labels, loc='upper left', bbox_to_anchor=(0.01, 0.99), prop={'size': 20}, handlelength=0, handletextpad=0.4)
+    leg.get_frame().set_alpha(0.92)
+    for i, text in enumerate(leg.get_texts()):
+        text.set_color(colors[i])
+        text.set_fontsize(20)
+
+    plt.tight_layout()
+    cluster_plot_file = 'clusters_density_loglog.png'
+    plt.savefig(cluster_plot_file, dpi=300, bbox_inches='tight')
+    plt.close()
+    logger.info(f"✅ Cluster density plot saved to {cluster_plot_file}")
+
+    # --- Plot 2: classification summary ---
+    fig, ax = plt.subplots(figsize=(10, 6))
+    counts = [c['count'] for c in cluster_summary]
+    ax.bar(range(n_clusters), counts, color=colors)
+    ax.set_xlabel('Cluster', fontsize=18)
+    ax.set_ylabel('Count', fontsize=18)
+    ax.set_title('Cluster counts', fontsize=20)
+    ax.tick_params(axis='both', labelsize=16)
+    for i, v in enumerate(counts):
+        ax.text(i, v + max(counts) * 0.01, f'{v:,}', ha='center', fontsize=14)
+
+    stats_text = f"GMM BIC={bic:.1f}, AIC={aic:.1f}, Silhouette={sil_score if sil_score is not None else 'NA'}"
+    ax.text(0.02, 0.95, stats_text, transform=ax.transAxes, fontsize=12, verticalalignment='top', bbox=dict(facecolor='white', alpha=0.7))
+    class_plot_file = 'cluster_classification_summary.png'
+    plt.tight_layout()
+    plt.savefig(class_plot_file, dpi=300, bbox_inches='tight')
+    plt.close()
+    logger.info(f"✅ Cluster summary plot saved to {class_plot_file}")
+
+    # Save CSV summary
+    import csv
+    csv_file = 'cluster_summary.csv'
+    with open(csv_file, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['cluster', 'count', 'median_order_size', 'median_slippage', 'top_maker_assets', 'top_taker_assets'])
+        for s in cluster_summary:
+            writer.writerow([s['cluster'], s['count'], s['median_order_size'], s['median_slippage'], str(s['top_maker_assets']), str(s['top_taker_assets'])])
+    logger.info(f"✅ Cluster CSV summary saved to {csv_file}")
+
+    # --- Per-cluster power-law fits (for clusters with enough data) ---
+    cluster_fits = {}
+    for s in cluster_summary:
+        k = s['cluster']
+        if s['count'] < 10:
+            logger.info(f"Skipping power-law fit for cluster {k} (too few samples: {s['count']})")
+            continue
+        sel = (labels == k)
+        xs_k = xs[mask_pos][sel]
+        ys_k = ys[mask_pos][sel]
+        fit_k = test_power_law_fit(xs_k, ys_k, f"Cluster {k}")
+        cluster_fits[k] = fit_k
+
+    # Plot per-cluster fits overlay
+    fig, ax = plt.subplots(figsize=(12, 9))
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.scatter(xs, ys, s=8, alpha=0.03, color='lightgray', zorder=zorder_background)
+    for k in range(n_clusters):
+        sel = (labels == k)
+        ax.scatter(xs[masked_orig_idx[sel]], ys[masked_orig_idx[sel]], s=12, alpha=0.75, color=colors[k], label=f'Cluster {k} (n={cluster_summary[k]["count"]:,})', edgecolors='none', zorder=zorder_points)
+        # Only draw regression lines for clusters 0 and 2
+        if k in [0, 2] and k in cluster_fits and cluster_fits[k] is not None:
+            Ck = cluster_fits[k]['prefactor']
+            alphak = cluster_fits[k]['alpha']
+            xmin = max(xs[masked_orig_idx[sel]].min(), 1e-12)
+            xmax = xs[masked_orig_idx[sel]].max()
+            x_line = np.logspace(np.log10(xmin), np.log10(xmax), 200)
+            # Solid black regression lines, drawn on top
+            ax.plot(x_line, Ck * (x_line ** alphak), color='black', linewidth=6.0, linestyle='-', zorder=zorder_regression)
+
+    ax.set_xlabel('Order Size (shares)', fontsize=22, fontweight='bold')
+    ax.set_ylabel('Slippage (USDC)', fontsize=22, fontweight='bold')
+    ax.tick_params(axis='both', which='major', labelsize=18)
+    ax.set_title('Cluster-specific power-law fits (log-log)', fontsize=24, fontweight='bold')
+    # Create legend without marker handles and larger colored labels
+    from matplotlib.lines import Line2D
+    labels2 = [f'Cluster {k} (n={cluster_summary[k]["count"]:,})' for k in range(n_clusters)]
+    proxy2 = [Line2D([], [], linestyle='', marker='', color='none') for _ in range(n_clusters)]
+    leg2 = ax.legend(proxy2, labels2, loc='upper left', bbox_to_anchor=(0.01, 0.99), prop={'size': 18}, handlelength=0, handletextpad=0.4)
+    leg2.get_frame().set_alpha(0.92)
+    for i, text in enumerate(leg2.get_texts()):
+        text.set_color(colors[i])
+        text.set_fontsize(18)
+
+    plt.tight_layout()
+    per_cluster_fit_file = 'cluster_powerlaw_fits.png'
+    plt.savefig(per_cluster_fit_file, dpi=300, bbox_inches='tight')
+    plt.close()
+    logger.info(f"✅ Cluster power-law fits plot saved to {per_cluster_fit_file}")
+
+    return {
+        'gmm': gmm,
+        'labels': labels,
+        'probs': probs,
+        'bic': bic,
+        'aic': aic,
+        'silhouette': sil_score,
+        'summary': cluster_summary,
+        'fits': cluster_fits,
+        'masked_indices': masked_indices
+    }
 
 def plot_slippage_vs_ordersize(order_sizes: np.ndarray, slippages: np.ndarray, results: dict):
     """Plot slippage vs order size with regression line."""
@@ -847,6 +1064,9 @@ async def main():
         # Power-law fit (order size vs slippage)
         power_results = test_power_law_fit(order_sizes_arr, slippages_arr, "Order Size vs Slippage")
         plot_power_law_fit(order_sizes_arr, slippages_arr, power_results)
+        
+        # --- CLUSTERING ANALYSIS ---
+        cluster_results = analyze_and_cluster(order_sizes_arr, slippages_arr, filtered_settlement_data, n_clusters=3)
         
         # --- PLOTS & STRATIFIED ANALYSIS ---
         plot_slippage_vs_ordersize(order_sizes_arr, slippages_arr, results_size)
