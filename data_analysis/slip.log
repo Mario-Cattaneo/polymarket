@@ -1,1 +1,111 @@
-2026-02-10 18:31:14 | Processing settlements from block 79172085 to 79272085
+nohup: ignoring input
+2026-02-11 01:05:32 | Processing settlements from block 79172085 to 81225971
+2026-02-11 01:06:17 |   Blocks 79,172,085-79,222,085: 222797 valid settlements
+2026-02-11 01:07:03 |   Blocks 79,222,085-79,272,085: 182067 valid settlements
+2026-02-11 01:07:53 |   Blocks 79,272,085-79,322,085: 180144 valid settlements
+2026-02-11 01:08:37 |   Blocks 79,322,085-79,372,085: 172349 valid settlements
+2026-02-11 01:09:20 |   Blocks 79,372,085-79,422,085: 166014 valid settlements
+2026-02-11 01:10:06 |   Blocks 79,422,085-79,472,085: 173965 valid settlements
+2026-02-11 01:10:57 |   Blocks 79,472,085-79,522,085: 233696 valid settlements
+2026-02-11 01:11:48 |   Blocks 79,522,085-79,572,085: 183788 valid settlements
+2026-02-11 01:12:47 |   Blocks 79,572,085-79,622,085: 178688 valid settlements
+2026-02-11 01:13:39 |   Blocks 79,622,085-79,672,085: 184408 valid settlements
+2026-02-11 01:14:38 |   Blocks 79,672,085-79,722,085: 181576 valid settlements
+2026-02-11 01:15:31 |   Blocks 79,722,085-79,772,085: 217758 valid settlements
+2026-02-11 01:16:36 |   Blocks 79,772,085-79,822,085: 242327 valid settlements
+2026-02-11 01:17:30 |   Blocks 79,822,085-79,872,085: 231816 valid settlements
+2026-02-11 01:18:47 |   Blocks 79,872,085-79,922,085: 202221 valid settlements
+2026-02-11 01:19:57 |   Blocks 79,922,085-79,972,085: 252279 valid settlements
+2026-02-11 01:21:23 |   Blocks 79,972,085-80,022,085: 241999 valid settlements
+2026-02-11 01:22:26 |   Blocks 80,022,085-80,072,085: 192916 valid settlements
+2026-02-11 01:23:31 |   Blocks 80,072,085-80,122,085: 229301 valid settlements
+2026-02-11 01:25:14 |   Blocks 80,122,085-80,172,085: 264574 valid settlements
+2026-02-11 01:26:07 |   Blocks 80,172,085-80,222,085: 163583 valid settlements
+2026-02-11 01:27:07 |   Blocks 80,222,085-80,272,085: 205712 valid settlements
+2026-02-11 01:28:33 |   Blocks 80,272,085-80,322,085: 210387 valid settlements
+2026-02-11 01:29:45 |   Blocks 80,322,085-80,372,085: 201302 valid settlements
+2026-02-11 01:31:15 |   Blocks 80,372,085-80,422,085: 202210 valid settlements
+2026-02-11 01:32:25 |   Blocks 80,422,085-80,472,085: 175418 valid settlements
+2026-02-11 01:33:46 |   Blocks 80,472,085-80,522,085: 199177 valid settlements
+2026-02-11 01:35:23 |   Blocks 80,522,085-80,572,085: 240801 valid settlements
+2026-02-11 01:36:39 |   Blocks 80,572,085-80,622,085: 182298 valid settlements
+2026-02-11 01:37:59 |   Blocks 80,622,085-80,672,085: 168652 valid settlements
+2026-02-11 01:39:16 |   Blocks 80,672,085-80,722,085: 182982 valid settlements
+2026-02-11 01:40:31 |   Blocks 80,722,085-80,772,085: 161859 valid settlements
+2026-02-11 01:42:49 |   Blocks 80,772,085-80,822,085: 182714 valid settlements
+2026-02-11 01:44:15 |   Blocks 80,822,085-80,872,085: 231926 valid settlements
+2026-02-11 01:45:31 |   Blocks 80,872,085-80,922,085: 186680 valid settlements
+2026-02-11 01:47:21 |   Blocks 80,922,085-80,972,085: 233296 valid settlements
+2026-02-11 01:49:27 |   Blocks 80,972,085-81,022,085: 251632 valid settlements
+2026-02-11 01:51:27 |   Blocks 81,022,085-81,072,085: 185406 valid settlements
+2026-02-11 01:53:11 |   Blocks 81,072,085-81,122,085: 228139 valid settlements
+2026-02-11 01:55:46 |   Blocks 81,122,085-81,172,085: 297000 valid settlements
+2026-02-11 01:57:25 |   Blocks 81,172,085-81,222,085: 274233 valid settlements
+2026-02-11 01:57:34 |   Blocks 81,222,085-81,225,971: 14264 valid settlements
+2026-02-11 01:57:34 | 
+Total settlements: 8514354
+2026-02-11 01:57:37 | 
+ZERO-SLIPPAGE DIAGNOSTICS (including epsilon threshold):
+2026-02-11 01:57:37 |   SLIPPAGE_EPSILON: 0.0001
+2026-02-11 01:57:37 |   Count with slippage < epsilon: 7,950,339 (93.375716%)
+2026-02-11 01:57:37 |   Max taker USDC amount among zero-slip settlements: $1656748.350400
+2026-02-11 01:57:37 | 
+MAX SLIPPAGE-per-TAKER USD DIAGNOSTIC:
+2026-02-11 01:57:37 |   Max slippage/taker_usdc ratio: 0.998402
+2026-02-11 01:57:37 |   Corresponding taker USDC amount: $990.183400
+2026-02-11 01:57:37 |   Corresponding slippage: $988.600880
+2026-02-11 01:57:37 | 
+⚠️  RATIO >= 1.0 DIAGNOSTICS (IMPOSSIBLE: slippage >= taker amount):
+2026-02-11 01:57:37 |   Count with ratio >= 1.0: 0 (0.000000%)
+2026-02-11 01:57:37 | 
+Filtered for analysis (slippage >= 0.0001): 564,015 samples
+2026-02-11 01:57:38 | 
+TESTING POWER-LAW FIT (Overall (epsilon-filtered)):
+2026-02-11 01:57:38 |   Samples used (positive X & y): 564,015  Excluded: 0
+2026-02-11 01:57:38 |   Power-law exponent (alpha): 0.677848 (std_err=0.001269, p=0.00e+00)
+2026-02-11 01:57:38 |   Alpha 95% CI: [0.675362, 0.680335]
+2026-02-11 01:57:38 |   Prefactor (C): 2.570743e-02 (std_err_intercept=0.004936)
+2026-02-11 01:57:38 |   C 95% CI: [2.545991e-02, 2.595737e-02]
+2026-02-11 01:57:38 |   R² (log-log): 0.336061
+2026-02-11 01:57:38 |   RMSE (original scale): 1.062290e+02
+2026-02-11 01:57:38 |   RMSE (log scale): 1.967343e+00
+2026-02-11 01:57:44 | ✅ Power-law plot (epsilon-filtered) saved to slippage_power_law.png
+2026-02-11 01:57:44 | 
+======================================================================
+2026-02-11 01:57:44 | STATISTICAL ANALYSIS (Filtered Time Range)
+2026-02-11 01:57:44 | ======================================================================
+2026-02-11 01:57:44 | 
+1. TAKER USDC AMOUNT:
+2026-02-11 01:57:44 |    Expected Value (Mean):  $126.486788
+2026-02-11 01:57:44 |    Variance:               4820665.0656969417
+2026-02-11 01:57:44 |    Std Deviation:          $2195.601299
+2026-02-11 01:57:44 |    Sample Size:            8,514,354
+2026-02-11 01:57:44 | 
+2. SLIPPAGE:
+2026-02-11 01:57:44 |    Expected Value (Mean):  $0.392631
+2026-02-11 01:57:44 |    Variance:               755.8198435430
+2026-02-11 01:57:44 |    Std Deviation:          $27.492178
+2026-02-11 01:57:44 |    Sample Size:            8,514,354
+2026-02-11 01:57:44 | 
+3. SLIPPAGE / TAKER USDC AMOUNT:
+2026-02-11 01:57:44 |    Expected Value (Mean):  0.003063
+2026-02-11 01:57:44 |    Variance:               0.0008073493
+2026-02-11 01:57:44 |    Std Deviation:          0.028414
+2026-02-11 01:57:44 |    Sample Size:            8,514,354
+2026-02-11 01:57:44 | 
+======================================================================
+
+2026-02-11 01:57:44 | 
+### SUMMARY STATISTICS ###
+
+2026-02-11 01:57:44 | Inflow:      mean=$126.49, median=$10.00, std=$2195.60
+2026-02-11 01:57:44 | Order Size:  mean=356.60 shares, median=25.64, std=4716.18
+2026-02-11 01:57:44 | Slippage:    mean=$0.3926, median=$0.0000, std=$27.4922
+2026-02-11 01:57:44 | 
+2026-02-11 01:57:44 | 
+### FILTERED STATISTICS (slippage >= epsilon) ###
+
+2026-02-11 01:57:44 | Inflow:      mean=$266.97, median=$25.99, std=$4230.67
+2026-02-11 01:57:44 | Order Size:  mean=819.00 shares, median=136.36, std=8332.21
+2026-02-11 01:57:44 | Slippage:    mean=$5.9272, median=$0.2100, std=$106.6632
+2026-02-11 01:57:44 | 
